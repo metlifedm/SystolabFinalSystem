@@ -1,0 +1,26 @@
+{
+  "name": "systolab-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SYSTOLAB Revenue Intelligence Platform - deterministic MERN website diagnostics with no external paid APIs.",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k \"npm run dev -w packages/shared\" \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
+    "build": "npm run build -w packages/shared && npm run build -w apps/api && npm run build -w apps/web",
+    "typecheck": "npm run build -w packages/shared && npm run typecheck -w apps/api && npm run typecheck -w apps/web",
+    "test": "npm run test -w apps/api",
+    "coverage:spec": "node scripts/validate-spec-coverage.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=20.11.0",
+    "npm": ">=10.0.0"
+  }
+}

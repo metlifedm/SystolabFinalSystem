@@ -1,0 +1,201 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [main, staging]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+  REGISTRY: ghcr.io
+  API_IMAGE: ${{ github.repository_owner }}/systolab-api
+  WEB_IMAGE: ${{ github.repository_owner }}/systolab-web
+
+jobs:
+  # ── 1. Typecheck ──────────────────────────────────────────────────────────────
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            packages/shared/package-lock.json
+            apps/api/package-lock.json
+            apps/web/package-lock.json
+
+      - name: Build shared
+        run: |
+          cd packages/shared
+          npm ci
+          npm run build
+
+      - name: Typecheck API
+        run: |
+          cd apps/api
+          npm ci
+          npm run typecheck
+
+      - name: Typecheck web
+        run: |
+          cd apps/web
+          npm ci
+          npm run typecheck
+
+  # ── 2. Tests ──────────────────────────────────────────────────────────────────
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: typecheck
+
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval \"db.adminCommand('ping')\" --quiet"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            packages/shared/package-lock.json
+            apps/api/package-lock.json
+
+      - name: Build shared
+        run: |
+          cd packages/shared
+          npm ci
+          npm run build
+
+      - name: Install API deps
+        run: cd apps/api && npm ci
+
+      - name: Run API tests
+        env:
+          NODE_ENV: test
+          SYSTOLAB_MEMORY_STORE: "true"
+          SYSTOLAB_AUTH_JWT_SECRET: ci-test-jwt-secret-32-chars-min-here
+          SYSTOLAB_ADMIN_JWT_SECRET: ci-test-admin-jwt-secret-32-chars-min
+          SYSTOLAB_INTERNAL_ADMIN_KEY: ci-test-internal-admin-key-32-chars
+          SYSTOLAB_OWNER_ADMIN_KEY: ci-test-owner-admin-key-32-chars-min
+          SYSTOLAB_MANAGER_ADMIN_KEY: ci-test-manager-admin-key-32-chars-m
+          SYSTOLAB_ARTIFACT_SECRET: ci-test-artifact-secret-32-chars-min
+        run: cd apps/api && npm test
+
+  # ── 3. Build Docker images ────────────────────────────────────────────────────
+  build:
+    name: Build & Push Docker
+    runs-on: ubuntu-latest
+    needs: [typecheck, test]
+    # Only push from main/staging branches or version tags, not from PRs.
+    if: >
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' ||
+       github.ref == 'refs/heads/staging' ||
+       startsWith(github.ref, 'refs/tags/v'))
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tags
+        id: meta
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          BRANCH=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="${BRANCH}-${SHORT_SHA}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.API_IMAGE }}:${{ steps.meta.outputs.tag }}
+            ${{ github.ref == 'refs/heads/main' && format('{0}/{1}:latest', env.REGISTRY, env.API_IMAGE) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            SYSTOLAB_BUILD_HASH=${{ steps.meta.outputs.short_sha }}
+
+      - name: Build & push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.WEB_IMAGE }}:${{ steps.meta.outputs.tag }}
+            ${{ github.ref == 'refs/heads/main' && format('{0}/{1}:latest', env.REGISTRY, env.WEB_IMAGE) || '' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VITE_API_URL=${{ vars.VITE_API_URL || '/api' }}
+
+  # ── 4. Deploy gate (staging) ──────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/staging'
+    environment: staging
+    steps:
+      - name: Trigger staging deployment
+        # Replace with your actual deployment mechanism:
+        #   - SSH + docker compose pull && docker compose up -d
+        #   - curl to a deploy webhook
+        #   - kubectl set image
+        run: |
+          echo "Deploy tag ${{ needs.build.outputs.tag }} to staging."
+          echo "Implement: SSH, webhook, or kubectl here."
+
+  # ── 5. Deploy gate (production) ───────────────────────────────────────────────
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: production          # Requires manual approval in GitHub settings.
+    steps:
+      - name: Trigger production deployment
+        run: |
+          echo "Deploy tag ${{ github.ref_name }} to production."
+          echo "Implement: SSH, webhook, or kubectl here."

@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+.npm-cache
+temp
+!.env.example
+apps/web/.vite/
+apps/api/tmp/
+tmp/
+*.log
+# TLS certificates — never commit
+infra/nginx/ssl/*.pem
+infra/nginx/ssl/*.key
+infra/nginx/ssl/*.crt
+!infra/nginx/ssl/.gitkeep

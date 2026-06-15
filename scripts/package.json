@@ -1,0 +1,16 @@
+{
+  "name": "systolab-scripts",
+  "version": "1.0.0",
+  "description": "Standalone operational scripts for Systolab (backup, restore, verify).",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "backup": "node backup.mjs",
+    "restore": "node restore.mjs",
+    "verify": "node verify-backup.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "mongodb": "^6.8.0"
+  }
+}

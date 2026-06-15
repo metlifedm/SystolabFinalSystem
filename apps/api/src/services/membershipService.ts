@@ -1,0 +1,553 @@
+import { createHash, randomBytes } from "node:crypto";
+import type { Types } from "mongoose";
+import { ApiKey, type ApiKeyDocument } from "../models/ApiKey.js";
+import { Invitation, type InvitationDocument } from "../models/Invitation.js";
+import { Tenant, type TenantDocument, tenantToBranding } from "../models/Tenant.js";
+import { TenantMembership, type TenantMembershipDocument, type TenantRole } from "../models/TenantMembership.js";
+import { WebhookRecord, type WebhookRecordDocument, type WebhookEvent } from "../models/WebhookRecord.js";
+import { Workspace, type WorkspaceDocument } from "../models/Workspace.js";
+import { WorkspaceMembership, type WorkspaceMembershipDocument, type WorkspaceRole } from "../models/WorkspaceMembership.js";
+import { makeId, sha256 } from "../utils/crypto.js";
+import { isMongoConnected } from "../db/mongoose.js";
+
+export class MembershipError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number
+  ) {
+    super(message);
+  }
+}
+
+// ── In-memory stores (test / no-DB mode) ──────────────────────────────────────
+export const _memTenants = new Map<string, TenantDocument>();             // key: slug
+export const _memTenantMems = new Map<string, TenantMembershipDocument>(); // key: `${userId}::${tenantId}`
+export const _memWorkspaces = new Map<string, WorkspaceDocument>();       // key: workspaceId
+export const _memWorkspaceMems = new Map<string, WorkspaceMembershipDocument>(); // key: `${userId}::${workspaceId}`
+export const _memWebhooks = new Map<string, WebhookRecordDocument>();     // key: webhookId
+
+/** Test helper: find a tenant membership in memory */
+export function _findTenantMembershipInMemory(userId: string, tenantId: string): TenantMembershipDocument | null {
+  return _memTenantMems.get(`${userId}::${tenantId}`) ?? null;
+}
+
+function oid(id: string): Types.ObjectId {
+  return { toString: () => id, toHexString: () => id } as unknown as Types.ObjectId;
+}
+
+// ── Tenant operations ──────────────────────────────────────────────────────────
+
+export async function createTenant(
+  slug: string,
+  publicName: string,
+  ownerId: string
+): Promise<{ tenant: TenantDocument; membership: TenantMembershipDocument }> {
+  validateSlug(slug);
+  if (!publicName?.trim()) throw new MembershipError("publicName is required.", 400);
+
+  if (!isMongoConnected()) {
+    const normalSlug = slug.toLowerCase().trim();
+    if (_memTenants.has(normalSlug)) throw new MembershipError(`Tenant slug "${slug}" is already taken.`, 409);
+    const tenantId = makeId("ten");
+    const tenant = {
+      _id: oid(tenantId), slug: normalSlug, publicName: publicName.trim(), isActive: true,
+      createdAt: new Date(), updatedAt: new Date(),
+      save: async function () { _memTenants.set(normalSlug, this as unknown as TenantDocument); }
+    } as unknown as TenantDocument;
+    _memTenants.set(normalSlug, tenant);
+
+    const memId = makeId("tmem");
+    const membership = {
+      _id: oid(memId), membershipId: memId, userId: ownerId, tenantId: oid(tenantId),
+      tenantSlug: normalSlug, role: "owner" as TenantRole, isActive: true, joinedAt: new Date(),
+      createdAt: new Date(), updatedAt: new Date(),
+      save: async function () { _memTenantMems.set(`${ownerId}::${tenantId}`, this as unknown as TenantMembershipDocument); }
+    } as unknown as TenantMembershipDocument;
+    _memTenantMems.set(`${ownerId}::${tenantId}`, membership);
+    return { tenant, membership };
+  }
+
+  const existing = await Tenant.findOne({ slug: slug.toLowerCase().trim() });
+  if (existing) throw new MembershipError(`Tenant slug "${slug}" is already taken.`, 409);
+
+  const tenant = await Tenant.create({
+    slug: slug.toLowerCase().trim(),
+    publicName: publicName.trim(),
+    isActive: true
+  });
+
+  const membership = await TenantMembership.create({
+    membershipId: makeId("tmem"),
+    userId: ownerId,
+    tenantId: tenant._id,
+    tenantSlug: tenant.slug,
+    role: "owner",
+    isActive: true,
+    joinedAt: new Date()
+  });
+
+  return { tenant, membership };
+}
+
+export async function getTenantBySlug(slug: string): Promise<TenantDocument | null> {
+  if (!isMongoConnected()) return _memTenants.get(slug.toLowerCase().trim()) ?? null;
+  return Tenant.findOne({ slug: slug.toLowerCase().trim(), isActive: true });
+}
+
+export async function updateTenant(
+  tenantId: string,
+  updates: Partial<Pick<TenantDocument, "publicName" | "logoUrl" | "primaryColor" | "accentColor" | "reportTitle" | "poweredByLabel" | "footerLabel" | "customDomain">>
+): Promise<TenantDocument> {
+  const tenant = await Tenant.findById(tenantId);
+  if (!tenant) throw new MembershipError("Tenant not found.", 404);
+  Object.assign(tenant, updates);
+  await tenant.save();
+  return tenant;
+}
+
+// ── Tenant membership ──────────────────────────────────────────────────────────
+
+export async function getTenantMembershipBySlug(
+  userId: string,
+  tenantSlug: string
+): Promise<TenantMembershipDocument | null> {
+  return TenantMembership.findOne({ userId, tenantSlug, isActive: true });
+}
+
+export async function listUserTenants(userId: string): Promise<TenantMembershipDocument[]> {
+  return TenantMembership.find({ userId, isActive: true }).sort({ joinedAt: 1 });
+}
+
+export async function listTenantMembers(tenantId: string): Promise<TenantMembershipDocument[]> {
+  if (!isMongoConnected()) {
+    return [..._memTenantMems.values()].filter(
+      (m) => m.tenantId?.toString() === tenantId && m.isActive
+    );
+  }
+  return TenantMembership.find({ tenantId, isActive: true }).sort({ joinedAt: 1 });
+}
+
+export async function addTenantMember(
+  tenantId: string | Types.ObjectId,
+  tenantSlug: string,
+  userId: string,
+  role: TenantRole,
+  invitedBy?: string
+): Promise<TenantMembershipDocument> {
+  const tenantIdStr = tenantId.toString();
+
+  if (!isMongoConnected()) {
+    const key = `${userId}::${tenantIdStr}`;
+    const existing = _memTenantMems.get(key);
+    if (existing) {
+      if (existing.isActive) throw new MembershipError("User is already a member of this tenant.", 409);
+      (existing as unknown as Record<string, unknown>)["isActive"] = true;
+      (existing as unknown as Record<string, unknown>)["role"] = role;
+      return existing;
+    }
+    const memId = makeId("tmem");
+    const membership = {
+      _id: oid(memId), membershipId: memId, userId, tenantId: oid(tenantIdStr),
+      tenantSlug, role, isActive: true, joinedAt: new Date(),
+      createdAt: new Date(), updatedAt: new Date(),
+      save: async function () { _memTenantMems.set(key, this as unknown as TenantMembershipDocument); }
+    } as unknown as TenantMembershipDocument;
+    _memTenantMems.set(key, membership);
+    return membership;
+  }
+
+  const existing = await TenantMembership.findOne({ userId, tenantId });
+  if (existing) {
+    if (existing.isActive) throw new MembershipError("User is already a member of this tenant.", 409);
+    existing.isActive = true;
+    existing.role = role;
+    if (invitedBy) existing.invitedBy = invitedBy as unknown as Types.ObjectId;
+    await existing.save();
+    return existing;
+  }
+  return TenantMembership.create({
+    membershipId: makeId("tmem"),
+    userId,
+    tenantId,
+    tenantSlug,
+    role,
+    isActive: true,
+    invitedBy: invitedBy ?? undefined,
+    joinedAt: new Date()
+  });
+}
+
+export async function removeTenantMember(tenantId: string, userId: string, actorId: string): Promise<void> {
+  if (userId === actorId) throw new MembershipError("Cannot remove yourself from a tenant.", 400);
+  const membership = await TenantMembership.findOne({ userId, tenantId });
+  if (!membership) throw new MembershipError("Membership not found.", 404);
+  membership.isActive = false;
+  await membership.save();
+  await WorkspaceMembership.updateMany({ userId, tenantId }, { $set: { isActive: false } });
+}
+
+export async function updateTenantMemberRole(tenantId: string, userId: string, role: TenantRole): Promise<TenantMembershipDocument> {
+  const membership = await TenantMembership.findOne({ userId, tenantId, isActive: true });
+  if (!membership) throw new MembershipError("Membership not found.", 404);
+  membership.role = role;
+  await membership.save();
+  return membership;
+}
+
+// ── Workspace operations ───────────────────────────────────────────────────────
+
+export async function createWorkspace(
+  tenantId: string | Types.ObjectId,
+  tenantSlug: string,
+  ownerId: string,
+  targetUrl: string,
+  industry?: string
+): Promise<{ workspace: WorkspaceDocument; membership: WorkspaceMembershipDocument }> {
+  if (!targetUrl?.trim()) throw new MembershipError("targetUrl is required.", 400);
+  const workspaceId = derivedWorkspaceId(tenantSlug, targetUrl);
+
+  if (!isMongoConnected()) {
+    let workspace = _memWorkspaces.get(workspaceId);
+    if (!workspace) {
+      workspace = {
+        _id: oid(makeId("ws")), workspaceId, tenantSlug, ownerUserId: ownerId,
+        targetUrl: targetUrl.trim(), industry: industry?.trim(),
+        createdAt: new Date(), updatedAt: new Date(),
+        save: async function () { _memWorkspaces.set(workspaceId, this as unknown as WorkspaceDocument); }
+      } as unknown as WorkspaceDocument;
+      _memWorkspaces.set(workspaceId, workspace);
+    }
+    const membership = await ensureWorkspaceMembership(ownerId, workspaceId, tenantId, tenantSlug, "owner");
+    return { workspace, membership };
+  }
+
+  let workspace = await Workspace.findOne({ workspaceId });
+  if (!workspace) {
+    workspace = await Workspace.create({
+      workspaceId,
+      tenantSlug,
+      ownerUserId: ownerId,
+      targetUrl: targetUrl.trim(),
+      industry: industry?.trim()
+    });
+  }
+  const membership = await ensureWorkspaceMembership(ownerId, workspaceId, tenantId, tenantSlug, "owner");
+  return { workspace, membership };
+}
+
+export async function getWorkspace(workspaceId: string): Promise<WorkspaceDocument | null> {
+  if (!isMongoConnected()) return _memWorkspaces.get(workspaceId) ?? null;
+  return Workspace.findOne({ workspaceId });
+}
+
+export async function updateWorkspace(
+  workspaceId: string,
+  updates: Partial<Pick<WorkspaceDocument, "industry" | "businessContext" | "preferences">>
+): Promise<WorkspaceDocument> {
+  const workspace = await Workspace.findOne({ workspaceId });
+  if (!workspace) throw new MembershipError("Workspace not found.", 404);
+  Object.assign(workspace, updates);
+  await workspace.save();
+  return workspace;
+}
+
+// ── Workspace membership ───────────────────────────────────────────────────────
+
+export async function getWorkspaceMembership(
+  userId: string,
+  workspaceId: string
+): Promise<WorkspaceMembershipDocument | null> {
+  if (!isMongoConnected()) return _memWorkspaceMems.get(`${userId}::${workspaceId}`) ?? null;
+  return WorkspaceMembership.findOne({ userId, workspaceId, isActive: true });
+}
+
+export async function listUserWorkspaces(userId: string, tenantSlug?: string): Promise<WorkspaceMembershipDocument[]> {
+  const filter: Record<string, unknown> = { userId, isActive: true };
+  if (tenantSlug) filter["tenantSlug"] = tenantSlug;
+  return WorkspaceMembership.find(filter).sort({ createdAt: -1 });
+}
+
+export async function listWorkspaceMembers(workspaceId: string): Promise<WorkspaceMembershipDocument[]> {
+  if (!isMongoConnected()) {
+    return [..._memWorkspaceMems.values()].filter(
+      (m) => (m as unknown as Record<string, unknown>)["workspaceId"] === workspaceId && m.isActive
+    );
+  }
+  return WorkspaceMembership.find({ workspaceId, isActive: true }).sort({ createdAt: 1 });
+}
+
+export async function addWorkspaceMember(
+  workspaceId: string,
+  tenantId: string | Types.ObjectId,
+  tenantSlug: string,
+  userId: string,
+  role: WorkspaceRole
+): Promise<WorkspaceMembershipDocument> {
+  const existing = await WorkspaceMembership.findOne({ userId, workspaceId });
+  if (existing) {
+    if (existing.isActive) throw new MembershipError("User is already a member of this workspace.", 409);
+    existing.isActive = true;
+    existing.role = role;
+    await existing.save();
+    return existing;
+  }
+  return WorkspaceMembership.create({
+    membershipId: makeId("wmem"),
+    userId,
+    workspaceId,
+    tenantId,
+    tenantSlug,
+    role,
+    isActive: true
+  });
+}
+
+export async function removeWorkspaceMember(workspaceId: string, userId: string, actorId: string): Promise<void> {
+  if (userId === actorId) throw new MembershipError("Cannot remove yourself from a workspace.", 400);
+  const membership = await WorkspaceMembership.findOne({ userId, workspaceId });
+  if (!membership) throw new MembershipError("Workspace membership not found.", 404);
+  membership.isActive = false;
+  await membership.save();
+}
+
+export async function updateWorkspaceMemberRole(workspaceId: string, userId: string, role: WorkspaceRole): Promise<WorkspaceMembershipDocument> {
+  const membership = await WorkspaceMembership.findOne({ userId, workspaceId, isActive: true });
+  if (!membership) throw new MembershipError("Workspace membership not found.", 404);
+  membership.role = role;
+  await membership.save();
+  return membership;
+}
+
+export async function ensureWorkspaceMembership(
+  userId: string,
+  workspaceId: string,
+  tenantId: string | Types.ObjectId,
+  tenantSlug: string,
+  role: WorkspaceRole
+): Promise<WorkspaceMembershipDocument> {
+  if (!isMongoConnected()) {
+    const key = `${userId}::${workspaceId}`;
+    const existing = _memWorkspaceMems.get(key);
+    if (existing) {
+      if (!(existing as unknown as Record<string, unknown>)["isActive"]) {
+        (existing as unknown as Record<string, unknown>)["isActive"] = true;
+      }
+      return existing;
+    }
+    const memId = makeId("wmem");
+    const membership = {
+      _id: oid(memId), membershipId: memId, userId, workspaceId,
+      tenantId: oid(tenantId.toString()), tenantSlug, role, isActive: true,
+      createdAt: new Date(), updatedAt: new Date(),
+      save: async function () { _memWorkspaceMems.set(key, this as unknown as WorkspaceMembershipDocument); }
+    } as unknown as WorkspaceMembershipDocument;
+    _memWorkspaceMems.set(key, membership);
+    return membership;
+  }
+
+  const existing = await WorkspaceMembership.findOne({ userId, workspaceId });
+  if (existing) {
+    if (!existing.isActive) { existing.isActive = true; await existing.save(); }
+    return existing;
+  }
+  return WorkspaceMembership.create({
+    membershipId: makeId("wmem"),
+    userId,
+    workspaceId,
+    tenantId,
+    tenantSlug,
+    role,
+    isActive: true
+  });
+}
+
+// ── Invitations ────────────────────────────────────────────────────────────────
+
+export async function createInvitation(
+  tenantId: string | Types.ObjectId,
+  tenantSlug: string,
+  email: string,
+  tenantRole: TenantRole,
+  invitedBy: string,
+  workspaceId?: string,
+  workspaceRole?: WorkspaceRole
+): Promise<{ invitation: InvitationDocument; rawToken: string }> {
+  const normalizedEmail = email.toLowerCase().trim();
+  if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    throw new MembershipError("A valid email is required.", 400);
+  }
+  const existing = await Invitation.findOne({ email: normalizedEmail, tenantId, acceptedAt: { $exists: false }, expiresAt: { $gt: new Date() } });
+  if (existing) throw new MembershipError("A pending invitation for this email already exists.", 409);
+
+  const rawToken = randomBytes(32).toString("hex");
+  const tokenHash = sha256(rawToken);
+  const invitation = await Invitation.create({
+    invitationId: makeId("inv"),
+    email: normalizedEmail,
+    tenantId,
+    tenantSlug,
+    workspaceId,
+    tenantRole,
+    workspaceRole,
+    tokenHash,
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    invitedBy
+  });
+  return { invitation, rawToken };
+}
+
+export async function acceptInvitation(
+  rawToken: string,
+  acceptorUserId: string,
+  acceptorEmail: string
+): Promise<{ tenantSlug: string; workspaceId?: string }> {
+  const tokenHash = sha256(rawToken);
+  const invitation = await Invitation.findOne({ tokenHash, acceptedAt: { $exists: false }, expiresAt: { $gt: new Date() } });
+  if (!invitation) throw new MembershipError("Invitation not found, expired, or already used.", 404);
+
+  if (invitation.email !== acceptorEmail.toLowerCase().trim()) {
+    throw new MembershipError("This invitation was sent to a different email address.", 403);
+  }
+
+  await addTenantMember(invitation.tenantId, invitation.tenantSlug, acceptorUserId, invitation.tenantRole, invitation.invitedBy.toString());
+  if (invitation.workspaceId && invitation.workspaceRole) {
+    await addWorkspaceMember(invitation.workspaceId, invitation.tenantId, invitation.tenantSlug, acceptorUserId, invitation.workspaceRole);
+  }
+
+  invitation.acceptedAt = new Date();
+  invitation.acceptedBy = acceptorUserId as unknown as Types.ObjectId;
+  await invitation.save();
+
+  return { tenantSlug: invitation.tenantSlug, workspaceId: invitation.workspaceId };
+}
+
+export async function listPendingInvitations(tenantId: string): Promise<InvitationDocument[]> {
+  return Invitation.find({ tenantId, acceptedAt: { $exists: false }, expiresAt: { $gt: new Date() } }).sort({ createdAt: -1 });
+}
+
+export async function revokeInvitation(invitationId: string, tenantId: string): Promise<void> {
+  const invitation = await Invitation.findOne({ invitationId, tenantId });
+  if (!invitation) throw new MembershipError("Invitation not found.", 404);
+  if (invitation.acceptedAt) throw new MembershipError("Cannot revoke an already-accepted invitation.", 400);
+  await invitation.deleteOne();
+}
+
+// ── API key management ─────────────────────────────────────────────────────────
+
+export async function createApiKey(
+  tenantId: string | Types.ObjectId,
+  label: string,
+  scopes: string[]
+): Promise<{ apiKey: ApiKeyDocument; rawKey: string }> {
+  if (!label?.trim()) throw new MembershipError("label is required.", 400);
+  const rawKey = `sk_${randomBytes(32).toString("hex")}`;
+  const keyHash = sha256(rawKey);
+  const apiKey = await ApiKey.create({
+    tenantId,
+    label: label.trim(),
+    keyHash,
+    scopes: scopes.length ? scopes : ["scans:create", "snapshots:read"],
+    isActive: true
+  });
+  return { apiKey, rawKey };
+}
+
+export async function listApiKeys(tenantId: string | Types.ObjectId): Promise<ApiKeyDocument[]> {
+  return ApiKey.find({ tenantId, isActive: true }).sort({ createdAt: -1 });
+}
+
+export async function revokeApiKey(keyId: string, tenantId: string | Types.ObjectId): Promise<void> {
+  const key = await ApiKey.findOne({ _id: keyId, tenantId });
+  if (!key) throw new MembershipError("API key not found.", 404);
+  key.isActive = false;
+  await key.save();
+}
+
+// ── Webhook management ─────────────────────────────────────────────────────────
+
+export async function createWebhook(
+  tenantId: string | Types.ObjectId,
+  tenantSlug: string,
+  url: string,
+  events: WebhookEvent[],
+  createdBy: string,
+  workspaceId?: string
+): Promise<{ webhook: WebhookRecordDocument; rawSecret: string }> {
+  validateHttpUrl(url);
+  const rawSecret = randomBytes(32).toString("hex");
+  const secretHash = sha256(rawSecret);
+
+  if (!isMongoConnected()) {
+    const tenantIdStr = tenantId.toString();
+    const webhookId = makeId("wh");
+    const webhook = {
+      _id: oid(webhookId), webhookId, tenantId: oid(tenantIdStr), tenantSlug, workspaceId,
+      url: url.trim(), events: events.length ? events : ["scan.completed"],
+      secretHash, signingSecret: rawSecret, isActive: true, failureCount: 0, createdBy,
+      createdAt: new Date(), updatedAt: new Date(),
+      save: async function () { _memWebhooks.set(webhookId, this as unknown as WebhookRecordDocument); }
+    } as unknown as WebhookRecordDocument;
+    _memWebhooks.set(webhookId, webhook);
+    return { webhook, rawSecret };
+  }
+
+  const webhook = await WebhookRecord.create({
+    webhookId: makeId("wh"),
+    tenantId,
+    tenantSlug,
+    workspaceId,
+    url: url.trim(),
+    events: events.length ? events : ["scan.completed"],
+    secretHash,
+    signingSecret: rawSecret,
+    isActive: true,
+    failureCount: 0,
+    createdBy
+  });
+  return { webhook, rawSecret };
+}
+
+export async function listWebhooks(tenantId: string | Types.ObjectId): Promise<WebhookRecordDocument[]> {
+  const tenantIdStr = tenantId.toString();
+  if (!isMongoConnected()) {
+    return [..._memWebhooks.values()].filter(
+      (wh) => wh.tenantId?.toString() === tenantIdStr && wh.isActive
+    );
+  }
+  return WebhookRecord.find({ tenantId, isActive: true }).sort({ createdAt: -1 });
+}
+
+export async function revokeWebhook(webhookId: string, tenantId: string | Types.ObjectId): Promise<void> {
+  const webhook = await WebhookRecord.findOne({ webhookId, tenantId });
+  if (!webhook) throw new MembershipError("Webhook not found.", 404);
+  webhook.isActive = false;
+  await webhook.save();
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+export function derivedWorkspaceId(tenantSlug: string, targetUrl: string): string {
+  return `ws_${sha256(`${tenantSlug}:${targetUrl.toLowerCase()}`).slice(0, 20)}`;
+}
+
+function validateSlug(slug: string): void {
+  if (!slug || !/^[a-z0-9-]{2,40}$/.test(slug.toLowerCase().trim())) {
+    throw new MembershipError("Slug must be 2-40 lowercase alphanumeric characters or hyphens.", 400);
+  }
+}
+
+function validateHttpUrl(url: string): void {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error();
+  } catch {
+    throw new MembershipError("Webhook URL must be a valid HTTP/HTTPS URL.", 400);
+  }
+}
+
+export function hashSecret(input: string): string {
+  return createHash("sha256").update(input).digest("hex");
+}
+
+export type { TenantRole, WorkspaceRole, TenantMembershipDocument, WorkspaceMembershipDocument, InvitationDocument, WebhookRecordDocument, ApiKeyDocument };
+export { tenantToBranding };
