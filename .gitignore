@@ -6,6 +6,9 @@ coverage/
 .npm-cache
 temp
 !.env.example
+.env.example
+.env.example.*
+*.env.example
 apps/web/.vite/
 apps/api/tmp/
 tmp/
