@@ -132,7 +132,7 @@ function InternalReportPage() {
     <div className="app-shell">
       <header className="topbar">
         <div className="brand">
-          <img src="/systolab-mark.svg" alt="" />
+          <img src="/systolab-icon.png" alt="SYSTOLAB" />
           <div>
             <strong>SYSTOLAB Internal Full Report</strong>
             <span>{report ? `${safeHostLabel(report.targetUrl)} - ${report.snapshotId}` : "Admin-only full intelligence plane"}</span>
@@ -205,7 +205,7 @@ function Header({ report }: { report: ReportSnapshot | null }) {
   return (
     <header className="topbar">
       <div className="brand">
-        <img src="/systolab-mark.svg" alt="" />
+        <img src="/systolab-icon.png" alt="SYSTOLAB" />
         <div>
           <strong>{title}</strong>
           <span>{report?.tenantBranding?.poweredByLabel ?? "Powered by SYSTOLAB Revenue Intelligence Engine"}</span>
@@ -375,7 +375,7 @@ function AuthConsole() {
     <div className="auth-overlay" role="dialog" aria-modal="true" aria-label="SYSTOLAB Secure Access">
       <div className="auth-page-card">
         <div className="auth-logo-row">
-          <img src="/systolab-mark.svg" alt="SYSTOLAB" className="auth-logo-img" />
+          <img src="/systolab-icon.png" alt="SYSTOLAB" className="auth-logo-img" />
           <span className="auth-product-line">Operational Intelligence Platform</span>
         </div>
         <h1 className="auth-page-heading">SYSTOLAB Secure Access</h1>
