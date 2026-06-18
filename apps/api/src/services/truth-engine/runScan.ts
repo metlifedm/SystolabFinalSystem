@@ -68,6 +68,7 @@ import { assertPublicHttpUrl, fetchText } from "./network.js";
 import { discoverInternalLinks } from "./pageDiscovery.js";
 import { checkRobots } from "./robots.js";
 import { buildDimensionScores, calculateOss, classifyScore } from "./scoring.js";
+import { buildCompetitorContentGapEvidence, extractSystolabIntelligenceEvidence } from "./systolabIntelligence.js";
 
 interface CollectedPage {
   requestedUrl: string;
@@ -159,35 +160,41 @@ export async function runSystolabScan(
   const competitorResults = await analyzeCompetitors(request, snapshotId);
 
   const contentUnavailable = primary.pages.length === 0;
-  const oss = contentUnavailable ? null : primary.oss;
-  const scoreForDerivedInternalSections = primary.oss;
+  const competitorContentGapEvidence = buildCompetitorContentGapEvidence(primary.normalizedUrl, primary.evidenceObjects, competitorResults, new EvidenceBuilder(`${snapshotId}-competitor-content-gap`));
+  const primaryEvidenceObjects = [...primary.evidenceObjects, ...competitorContentGapEvidence];
+  const primaryEvidenceClusters = buildEvidenceClusters(primaryEvidenceObjects);
+  const primaryValidationTrace = buildValidationTrace(primaryEvidenceObjects);
+  const primaryDimensions = contentUnavailable ? primary.dimensions : buildDimensionScores(primaryEvidenceObjects);
+  const primaryOss = contentUnavailable ? primary.oss : calculateOss(primaryDimensions);
+  const oss = contentUnavailable ? null : primaryOss;
+  const scoreForDerivedInternalSections = primaryOss;
   const status = contentUnavailable ? "content_unavailable" : primary.coverage.robotsTxtStatus === "blocked" ? "analysis_limited" : "completed";
   const visualState = contentUnavailable ? NOT_SCORED_VISUAL_STATE : visualStateForScore(scoreForDerivedInternalSections);
   const confidenceLayer = contentUnavailable ? buildContentUnavailableConfidenceLayer() : buildConfidenceLayer(primary);
-  const decisions = contentUnavailable ? [] : buildDecisions(primary.dimensions, primary.evidenceObjects);
-  const executiveClarity = contentUnavailable ? buildContentUnavailableExecutiveClarity() : buildExecutiveClarity(primary.dimensions, scoreForDerivedInternalSections, decisions);
+  const decisions = contentUnavailable ? [] : buildDecisions(primaryDimensions, primaryEvidenceObjects);
+  const executiveClarity = contentUnavailable ? buildContentUnavailableExecutiveClarity() : buildExecutiveClarity(primaryDimensions, scoreForDerivedInternalSections, decisions);
   const verdictCard = contentUnavailable ? buildContentUnavailableVerdictCard() : buildVerdictCard(scoreForDerivedInternalSections, decisions, request.monthlyLeadVolume);
-  const businessRiskStatus = contentUnavailable ? buildContentUnavailableBusinessRiskStatus() : buildBusinessRiskStatus(scoreForDerivedInternalSections, primary.dimensions, decisions);
-  const actionFirstPanel = buildActionFirstPanel(status, primary.dimensions, primary.evidenceObjects, primary.evidenceClusters);
-  const systemVerdict = contentUnavailable ? buildContentUnavailableSystemVerdict() : buildSystemVerdict(scoreForDerivedInternalSections, primary.dimensions, actionFirstPanel, businessRiskStatus);
-  const ossInterpretation = contentUnavailable ? buildContentUnavailableOssInterpretation() : buildOssInterpretation(scoreForDerivedInternalSections, visualState, primary.dimensions, actionFirstPanel);
-  const businessOutcomeBridge = buildBusinessOutcomeBridge(primary.dimensions, decisions);
-  const transformationIntelligence = buildTransformationProjection(scoreForDerivedInternalSections, primary.dimensions, decisions);
-  const closedLoopProofSystem = buildClosedLoopProof(snapshotId, scoreForDerivedInternalSections, primary.dimensions);
+  const businessRiskStatus = contentUnavailable ? buildContentUnavailableBusinessRiskStatus() : buildBusinessRiskStatus(scoreForDerivedInternalSections, primaryDimensions, decisions);
+  const actionFirstPanel = buildActionFirstPanel(status, primaryDimensions, primaryEvidenceObjects, primaryEvidenceClusters);
+  const systemVerdict = contentUnavailable ? buildContentUnavailableSystemVerdict() : buildSystemVerdict(scoreForDerivedInternalSections, primaryDimensions, actionFirstPanel, businessRiskStatus);
+  const ossInterpretation = contentUnavailable ? buildContentUnavailableOssInterpretation() : buildOssInterpretation(scoreForDerivedInternalSections, visualState, primaryDimensions, actionFirstPanel);
+  const businessOutcomeBridge = buildBusinessOutcomeBridge(primaryDimensions, decisions);
+  const transformationIntelligence = buildTransformationProjection(scoreForDerivedInternalSections, primaryDimensions, decisions);
+  const closedLoopProofSystem = buildClosedLoopProof(snapshotId, scoreForDerivedInternalSections, primaryDimensions);
   const priorityTimeline = buildPriorityTimeline(decisions);
   const reportCreatedAt = new Date().toISOString();
   const industryType = request.industryType ?? inferIndustryType(primary);
-  const industryBenchmarkEngine = buildIndustryBenchmarkEngine(primary.dimensions, industryType);
-  const benchmarkContext = buildBenchmarkContext(primary.dimensions, industryBenchmarkEngine);
-  const marketReadinessPosition = buildMarketReadinessPosition(primary.dimensions, benchmarkContext);
+  const industryBenchmarkEngine = buildIndustryBenchmarkEngine(primaryDimensions, industryType);
+  const benchmarkContext = buildBenchmarkContext(primaryDimensions, industryBenchmarkEngine);
+  const marketReadinessPosition = buildMarketReadinessPosition(primaryDimensions, benchmarkContext);
   const competitorComparison = buildCompetitorComparison(primary, competitorResults);
-  const revenueIntelligence = buildRevenueIntelligence(scoreForDerivedInternalSections, primary.dimensions, decisions, competitorComparison, request.monthlyLeadVolume);
-  const recommendationEngine = buildRecommendationEngine(primary.dimensions, decisions, revenueIntelligence);
-  const lightweightChangeDetection = buildLightweightChangeDetection(previousSnapshot, scoreForDerivedInternalSections, primary.dimensions, recommendationEngine);
+  const revenueIntelligence = buildRevenueIntelligence(scoreForDerivedInternalSections, primaryDimensions, decisions, competitorComparison, request.monthlyLeadVolume);
+  const recommendationEngine = buildRecommendationEngine(primaryDimensions, decisions, revenueIntelligence);
+  const lightweightChangeDetection = buildLightweightChangeDetection(previousSnapshot, scoreForDerivedInternalSections, primaryDimensions, recommendationEngine);
   const architectureState = buildArchitectureState();
-  const allEvidenceObjects = [...primary.evidenceObjects, ...gbpResult.evidenceObjects];
-  const allEvidenceClusters = [...primary.evidenceClusters, ...gbpResult.evidenceClusters];
-  const allValidationTrace = [...primary.validationTrace, ...gbpResult.validationTrace];
+  const allEvidenceObjects = [...primaryEvidenceObjects, ...gbpResult.evidenceObjects];
+  const allEvidenceClusters = [...primaryEvidenceClusters, ...gbpResult.evidenceClusters];
+  const allValidationTrace = [...primaryValidationTrace, ...gbpResult.validationTrace];
   const allTelemetry = [
     ...primary.rawSignalTelemetry,
     ...gbpResult.rawSignalTelemetry,
@@ -196,20 +203,20 @@ export async function runSystolabScan(
   const groundTruthValidationLog = buildGroundTruthValidationLog(allEvidenceObjects, allValidationTrace, gbpResult.gbpIdentity);
   const evidenceCoverageSummary = buildEvidenceCoverageSummary(primary.pages, allEvidenceObjects);
   const evidenceDatabase = buildEvidenceDatabase(snapshotId, reportCreatedAt, previousSnapshot, decisions, allEvidenceObjects, allValidationTrace, lightweightChangeDetection);
-  const recommendationOutcomeLoop = buildOutcomeValidationEngine(previousSnapshot, reportCreatedAt, scoreForDerivedInternalSections, primary.dimensions, recommendationEngine, revenueIntelligence);
+  const recommendationOutcomeLoop = buildOutcomeValidationEngine(previousSnapshot, reportCreatedAt, scoreForDerivedInternalSections, primaryDimensions, recommendationEngine, revenueIntelligence);
   const confidenceEngine = buildConfidenceEngine(confidenceLayer, evidenceCoverageSummary, revenueIntelligence, recommendationEngine, industryBenchmarkEngine, competitorComparison, recommendationOutcomeLoop);
   const competitorIntelligenceEngine = buildCompetitorIntelligenceEngine(competitorComparison, snapshotHistory, snapshotId, reportCreatedAt);
   const monitoringScheduler = buildMonitoringScheduler(request, primary.normalizedUrl.toString(), reportCreatedAt);
   const alertEngine = buildAlertEngine(scoreForDerivedInternalSections, previousSnapshot, lightweightChangeDetection, competitorIntelligenceEngine, recommendationOutcomeLoop, revenueIntelligence, reportCreatedAt);
-  const businessEvolutionEngine = buildBusinessEvolutionEngine(snapshotHistory, snapshotId, reportCreatedAt, scoreForDerivedInternalSections, primary.dimensions, decisions);
+  const businessEvolutionEngine = buildBusinessEvolutionEngine(snapshotHistory, snapshotId, reportCreatedAt, scoreForDerivedInternalSections, primaryDimensions, decisions);
   const competitiveThreatRadar = buildCompetitiveThreatRadar(competitorIntelligenceEngine, competitorComparison, lightweightChangeDetection);
-  const businessDnaEngine = buildBusinessDnaEngine(snapshotHistory, primary.dimensions, scoreForDerivedInternalSections);
+  const businessDnaEngine = buildBusinessDnaEngine(snapshotHistory, primaryDimensions, scoreForDerivedInternalSections);
   const editIntelligenceSystem = buildEditIntelligenceSystem(snapshotId, reportCreatedAt);
   const operationalMemoryGraph = buildOperationalMemoryGraph(snapshotId, primary.normalizedUrl.toString(), decisions, recommendationEngine, recommendationOutcomeLoop, revenueIntelligence, competitorComparison);
   const decisionIntelligenceBrief = buildDecisionIntelligenceBrief({
     contentUnavailable,
     oss,
-    dimensions: primary.dimensions,
+    dimensions: primaryDimensions,
     evidenceObjects: allEvidenceObjects,
     evidenceCoverageSummary,
     scanCoverage: primary.coverage,
@@ -257,11 +264,11 @@ export async function runSystolabScan(
       explanation:
         "OSS measures observable website structure, trust signals, usability, and conversion readiness. OSS does not measure actual revenue, financial performance, sales activity, or business profitability."
     },
-    businessVitalSigns: buildVitalSigns(primary.dimensions),
-    executiveSummaryTable: buildExecutiveSummary(primary.dimensions, request, competitorComparison, gbpResult.gbpIdentity),
+    businessVitalSigns: buildVitalSigns(primaryDimensions),
+    executiveSummaryTable: buildExecutiveSummary(primaryDimensions, request, competitorComparison, gbpResult.gbpIdentity),
     confidenceLayer,
     evidenceCoverageSummary,
-    dimensions: primary.dimensions,
+    dimensions: primaryDimensions,
     evidenceObjects: allEvidenceObjects,
     evidenceClusters: allEvidenceClusters,
     rawSignalTelemetry: allTelemetry,
@@ -829,6 +836,7 @@ function extractEvidence(
   }
 
   evidence.push(
+    ...extractSystolabIntelligenceEvidence(pages, normalizedUrl, builder),
     builder.add({
       sourceType: "system",
       url: normalizedUrl.toString(),

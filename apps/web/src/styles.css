@@ -1412,6 +1412,27 @@ main {
   gap: 10px;
 }
 
+.customer-category-header {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--brand);
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.customer-category-header span {
+  display: block;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.customer-category-header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
 .revenue-leak-grid,
 .psychology-grid {
   display: grid;
@@ -1528,6 +1549,52 @@ main {
 }
 
 .visual-marker-card em {
+  display: block;
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 0.78rem;
+  font-style: normal;
+}
+
+.customer-intelligence-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.customer-intelligence-card {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.customer-intelligence-card span {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.customer-intelligence-card strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink);
+  line-height: 1.35;
+}
+
+.customer-intelligence-card p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.customer-intelligence-card small {
+  display: block;
+  color: #334155;
+  line-height: 1.45;
+}
+
+.customer-intelligence-card em {
   display: block;
   margin-top: 8px;
   color: #64748b;
@@ -2690,7 +2757,8 @@ pre {
 
   .revenue-leak-grid,
   .psychology-grid,
-  .visual-intelligence-grid {
+  .visual-intelligence-grid,
+  .customer-intelligence-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -2762,6 +2830,7 @@ pre {
   .revenue-leak-grid,
   .psychology-grid,
   .visual-intelligence-grid,
+  .customer-intelligence-grid,
   .freshness-strip {
     grid-template-columns: 1fr;
   }

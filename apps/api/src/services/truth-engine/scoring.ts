@@ -26,7 +26,14 @@ const DIMENSION_FACTORS: Record<DimensionKey, FactorDefinition[]> = {
     { factorId: "trust_terms", key: "terms_link_present", label: "Terms or policy visibility", weight: 8 },
     { factorId: "trust_about", key: "about_link_present", label: "About or company context", weight: 10 },
     { factorId: "trust_reviews", key: "review_signal_present", label: "Review or testimonial signals", weight: 12 },
-    { factorId: "trust_social", key: "social_link_present", label: "External identity/social references", weight: 10 }
+    { factorId: "trust_social", key: "social_link_present", label: "External identity/social references", weight: 10 },
+    { factorId: "trust_native_proof", key: "native_trust_proof_coverage_score", label: "Native trust proof coverage", weight: 10 },
+    { factorId: "trust_decision_confidence", key: "native_decision_confidence_score", label: "Decision confidence support", weight: 8 },
+    { factorId: "trust_schema_entities", key: "native_schema_coverage_score", label: "Schema-backed entity clarity", weight: 6 },
+    { factorId: "trust_entity_clarity", key: "native_entity_clarity_score", label: "Entity clarity", weight: 8 },
+    { factorId: "trust_citation_credibility", key: "native_citation_credibility_score", label: "Citation and credibility reinforcement", weight: 8 },
+    { factorId: "trust_content_freshness", key: "native_content_freshness_score", label: "Content freshness trust support", weight: 5 },
+    { factorId: "trust_competitor_gap", key: "native_competitor_content_gap_score", label: "Competitor content gap pressure", weight: 6 }
   ],
   accessibility: [
     { factorId: "a11y_lang", key: "lang_present", label: "HTML language attribute", weight: 18 },
@@ -51,7 +58,8 @@ const DIMENSION_FACTORS: Record<DimensionKey, FactorDefinition[]> = {
     { factorId: "mobile_viewport", key: "viewport_present", label: "Mobile viewport declaration", weight: 32 },
     { factorId: "mobile_resource", key: "resource_weight_score", label: "Mobile resource weight", weight: 24 },
     { factorId: "mobile_cta", key: "cta_present", label: "Mobile-action CTA availability", weight: 24 },
-    { factorId: "mobile_forms", key: "form_or_contact_present", label: "Mobile contact path availability", weight: 20 }
+    { factorId: "mobile_forms", key: "form_or_contact_present", label: "Mobile contact path availability", weight: 20 },
+    { factorId: "mobile_journey", key: "native_customer_journey_continuity_score", label: "Mobile journey continuity", weight: 10 }
   ],
   websiteHealth: [
     { factorId: "health_status", key: "http_status_success", label: "HTTP health", weight: 24 },
@@ -59,7 +67,10 @@ const DIMENSION_FACTORS: Record<DimensionKey, FactorDefinition[]> = {
     { factorId: "health_nav", key: "navigation_depth_score", label: "Internal navigation availability", weight: 18 },
     { factorId: "health_index", key: "indexability_present", label: "Indexability signals", weight: 16 },
     { factorId: "health_security", key: "security_headers_score", label: "Security hygiene", weight: 14 },
-    { factorId: "health_resource", key: "resource_weight_score", label: "Resource efficiency", weight: 10 }
+    { factorId: "health_resource", key: "resource_weight_score", label: "Resource efficiency", weight: 10 },
+    { factorId: "health_native_seo", key: "native_seo_technical_foundation_score", label: "Native SEO technical foundation", weight: 10 },
+    { factorId: "health_schema", key: "native_schema_coverage_score", label: "Structured entity readiness", weight: 6 },
+    { factorId: "health_content_freshness", key: "native_content_freshness_score", label: "Content freshness", weight: 8 }
   ],
   visibilityStructure: [
     { factorId: "visibility_title", key: "title_present", label: "Title element", weight: 20 },
@@ -67,14 +78,28 @@ const DIMENSION_FACTORS: Record<DimensionKey, FactorDefinition[]> = {
     { factorId: "visibility_h1", key: "h1_present", label: "Primary heading", weight: 20 },
     { factorId: "visibility_canonical", key: "canonical_present", label: "Canonical signal", weight: 12 },
     { factorId: "visibility_links", key: "internal_link_score", label: "Internal link structure", weight: 20 },
-    { factorId: "visibility_robots", key: "indexability_present", label: "Robots indexability", weight: 10 }
+    { factorId: "visibility_robots", key: "indexability_present", label: "Robots indexability", weight: 10 },
+    { factorId: "visibility_native_seo", key: "native_seo_technical_foundation_score", label: "Native SEO foundation", weight: 8 },
+    { factorId: "visibility_geo", key: "native_geo_ai_readiness_score", label: "AI-search answer readiness", weight: 8 },
+    { factorId: "visibility_search_to_sale", key: "native_search_to_sale_support_score", label: "Search-to-sale content support", weight: 8 },
+    { factorId: "visibility_topic_authority", key: "native_topic_authority_coverage_score", label: "Topic authority coverage", weight: 10 },
+    { factorId: "visibility_entity_clarity", key: "native_entity_clarity_score", label: "Entity clarity", weight: 8 },
+    { factorId: "visibility_citation_credibility", key: "native_citation_credibility_score", label: "Citation and credibility coverage", weight: 5 },
+    { factorId: "visibility_competitor_gap", key: "native_competitor_content_gap_score", label: "Competitor content gap", weight: 6 }
   ],
   conversionReadiness: [
     { factorId: "conversion_cta", key: "cta_present", label: "Primary CTA presence", weight: 30 },
     { factorId: "conversion_contact", key: "contact_signal_present", label: "Contact path visibility", weight: 24 },
     { factorId: "conversion_form", key: "form_or_contact_present", label: "Form or contact mechanism", weight: 18 },
     { factorId: "conversion_trust", key: "review_signal_present", label: "Decision-point trust support", weight: 12 },
-    { factorId: "conversion_clarity", key: "information_clarity_score", label: "Offer clarity", weight: 16 }
+    { factorId: "conversion_clarity", key: "information_clarity_score", label: "Offer clarity", weight: 16 },
+    { factorId: "conversion_questions", key: "native_customer_question_coverage_score", label: "Customer question coverage", weight: 10 },
+    { factorId: "conversion_decision_confidence", key: "native_decision_confidence_score", label: "Decision confidence coverage", weight: 10 },
+    { factorId: "conversion_journey", key: "native_customer_journey_continuity_score", label: "Customer journey continuity", weight: 8 },
+    { factorId: "conversion_ecommerce", key: "native_ecommerce_purchase_confidence_score", label: "E-commerce purchase confidence", weight: 6 },
+    { factorId: "conversion_local", key: "native_local_business_readiness_score", label: "Local business readiness", weight: 6 },
+    { factorId: "conversion_topic_authority", key: "native_topic_authority_coverage_score", label: "Educational decision support", weight: 6 },
+    { factorId: "conversion_competitor_gap", key: "native_competitor_content_gap_score", label: "Competitor decision-support gap", weight: 6 }
   ],
   informationClarity: [
     { factorId: "clarity_title", key: "title_present", label: "Page purpose in title", weight: 18 },
@@ -82,7 +107,15 @@ const DIMENSION_FACTORS: Record<DimensionKey, FactorDefinition[]> = {
     { factorId: "clarity_heading", key: "h1_present", label: "Primary message heading", weight: 22 },
     { factorId: "clarity_text_density", key: "text_density_score", label: "Readable text density", weight: 18 },
     { factorId: "clarity_navigation", key: "navigation_depth_score", label: "Navigation clarity", weight: 14 },
-    { factorId: "clarity_cta", key: "cta_present", label: "Action clarity", weight: 10 }
+    { factorId: "clarity_cta", key: "cta_present", label: "Action clarity", weight: 10 },
+    { factorId: "clarity_questions", key: "native_customer_question_coverage_score", label: "Customer question coverage", weight: 12 },
+    { factorId: "clarity_geo", key: "native_geo_ai_readiness_score", label: "AI-search answer structure", weight: 8 },
+    { factorId: "clarity_search_to_sale", key: "native_search_to_sale_support_score", label: "Search-to-sale clarity", weight: 8 },
+    { factorId: "clarity_business_type", key: "native_business_type_detection", label: "Business type clarity", weight: 4 },
+    { factorId: "clarity_topic_authority", key: "native_topic_authority_coverage_score", label: "Topic authority clarity", weight: 10 },
+    { factorId: "clarity_entity", key: "native_entity_clarity_score", label: "Entity relationship clarity", weight: 8 },
+    { factorId: "clarity_freshness", key: "native_content_freshness_score", label: "Content freshness clarity", weight: 5 },
+    { factorId: "clarity_competitor_gap", key: "native_competitor_content_gap_score", label: "Competitor content gap", weight: 5 }
   ]
 };
 

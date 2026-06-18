@@ -880,6 +880,21 @@ interface CustomerBusinessReport {
     action: string;
     confidence: string;
   }>;
+  businessRisks: Array<{
+    title: string;
+    risk: string;
+    customerImpact: string;
+    action: string;
+    confidence: string;
+  }>;
+  intelligenceSummaries: Array<{
+    section: "search" | "questions" | "confidence" | "trustProof" | "journey";
+    title: string;
+    status: string;
+    meaning: string;
+    action: string;
+    confidence: string;
+  }>;
   psychology: Array<{
     label: string;
     reading: string;
@@ -965,6 +980,11 @@ function CustomerBusinessReportView({ report, coverage, style }: { report: Repor
         </div>
       </section>
 
+      <CustomerCategoryHeader
+        title="Website Intelligence"
+        description="Customer trust, conversion readiness, decision confidence, usability, and revenue-impacting website factors."
+      />
+
       <section className="report-section">
         <div className="section-title">
           <DollarSign size={18} />
@@ -983,6 +1003,57 @@ function CustomerBusinessReportView({ report, coverage, style }: { report: Repor
           ))}
         </div>
       </section>
+
+      <section className="report-section">
+        <div className="section-title">
+          <AlertTriangle size={18} />
+          <h2>Top Three Business Risks</h2>
+        </div>
+        <div className="revenue-leak-grid">
+          {customer.businessRisks.map((risk, index) => (
+            <div className="revenue-leak-card" key={risk.title}>
+              <span>Risk {index + 1}</span>
+              <h3>{risk.title}</h3>
+              <p>{risk.risk}</p>
+              <small>{risk.customerImpact}</small>
+              <strong>{risk.action}</strong>
+              <em>{risk.confidence}</em>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <CustomerIntelligenceSummary
+        title="Decision Confidence Summary"
+        icon={<ShieldCheck size={18} />}
+        items={customer.intelligenceSummaries.filter((item) => item.section === "confidence")}
+      />
+      <CustomerIntelligenceSummary
+        title="Trust Proof Coverage Summary"
+        icon={<CheckCircle2 size={18} />}
+        items={customer.intelligenceSummaries.filter((item) => item.section === "trustProof")}
+      />
+      <CustomerIntelligenceSummary
+        title="Customer Journey Breakpoint Summary"
+        icon={<MapPinned size={18} />}
+        items={customer.intelligenceSummaries.filter((item) => item.section === "journey")}
+      />
+
+      <CustomerCategoryHeader
+        title="SEO Intelligence"
+        description="Search visibility readiness, topical coverage, discoverability, entity clarity, local visibility, freshness, and organic growth opportunities."
+      />
+
+      <CustomerIntelligenceSummary
+        title="SEO Opportunity Summary"
+        icon={<Search size={18} />}
+        items={customer.intelligenceSummaries.filter((item) => item.section === "search")}
+      />
+      <CustomerIntelligenceSummary
+        title="Customer Question Coverage Summary"
+        icon={<Info size={18} />}
+        items={customer.intelligenceSummaries.filter((item) => item.section === "questions")}
+      />
 
       <section className="report-section">
         <div className="section-title">
@@ -1110,6 +1181,53 @@ function CustomerBusinessReportView({ report, coverage, style }: { report: Repor
   );
 }
 
+function CustomerCategoryHeader({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="customer-category-header">
+      <span>{title}</span>
+      <p>{description}</p>
+    </div>
+  );
+}
+
+function CustomerIntelligenceSummary({
+  title,
+  icon,
+  items
+}: {
+  title: string;
+  icon: JSX.Element;
+  items: CustomerBusinessReport["intelligenceSummaries"];
+}) {
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        {icon}
+        <h2>{title}</h2>
+      </div>
+      <div className="customer-intelligence-grid">
+        {items.length > 0 ? items.map((item) => (
+          <div className="customer-intelligence-card" key={`${title}-${item.title}`}>
+            <span>{item.title}</span>
+            <strong>{item.status}</strong>
+            <p>{item.meaning}</p>
+            <small>{item.action}</small>
+            <em>{item.confidence}</em>
+          </div>
+        )) : (
+          <div className="customer-intelligence-card">
+            <span>{title}</span>
+            <strong>Not enough evidence</strong>
+            <p>This scan did not collect enough validated evidence for a separate summary in this area.</p>
+            <small>Run a fuller scan or add more relevant website content before making conclusions.</small>
+            <em>Limited confidence</em>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessReport {
   const dimensions = report.dimensions ?? [];
   const score = typeof report.oss?.score === "number" && report.oss.scoringStatus !== "not_scored" ? report.oss.score : null;
@@ -1142,6 +1260,8 @@ function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessRe
       window: priorityToBusinessWindow(highest?.priority ?? report.priorityTimeline?.thisMonth?.[0]?.category ?? "THIS MONTH")
     },
     revenueLeaks,
+    businessRisks: buildCustomerBusinessRisks(report, recommendations),
+    intelligenceSummaries: buildCustomerIntelligenceSummaries(report),
     psychology: buildCustomerPsychology(report),
     impactSummary: buildBusinessImpactSummary(report, revenueLeaks, competitorGaps),
     recommendedActions: recommendations.slice(0, 6).map((item, index) => ({
@@ -1286,6 +1406,131 @@ function buildRevenueLeaks(
     : [];
 
   return [...dimensionLeaks, ...competitorLeak].slice(0, 3);
+}
+
+function buildCustomerBusinessRisks(
+  report: ReportSnapshot,
+  actions: Array<{ action: string; reason: string; score: number; priority?: string }>
+): CustomerBusinessReport["businessRisks"] {
+  const action = actions[0]?.action ?? "Improve the weakest customer decision area first.";
+  const dimensionRisks = (report.dimensions ?? [])
+    .filter((dimension) => dimension.score < 76)
+    .sort((a, b) => a.score - b.score)
+    .map((dimension) => {
+      const label = businessDimensionLabel(dimension.label);
+      return {
+        title: `${label} Risk`,
+        risk: `${label} is currently ${dimension.classification.toLowerCase()} at ${dimension.score}/100.`,
+        customerImpact: customerImpactForDimension(dimension.key),
+        action,
+        confidence: `${dimension.confidenceScore ?? 70}% confidence`
+      };
+    });
+
+  const nativeRisks = nativeEvidence(report)
+    .filter((evidence) => evidenceScore(evidence) < 60)
+    .map((evidence) => ({
+      title: customerSafeText(String(evidence.normalizedInput?.label ?? "Business Decision Gap")),
+      risk: customerSafeText(evidence.rawValue),
+      customerImpact: intelligenceMeaningForSignal(String(evidence.normalizedInput?.signalKey ?? "")),
+      action: actionForNativeSignal(String(evidence.normalizedInput?.signalKey ?? "")),
+      confidence: `${Math.round(evidence.groundTruthConfidence ?? 60)}% confidence`
+    }));
+
+  return dedupeBy([...dimensionRisks, ...nativeRisks], (item) => `${item.title}-${item.action}`).slice(0, 3);
+}
+
+function buildCustomerIntelligenceSummaries(report: ReportSnapshot): CustomerBusinessReport["intelligenceSummaries"] {
+  const signals = nativeEvidence(report);
+  const summaries = [
+    ...summaryForSignals(
+      signals,
+      "search",
+      [
+        "native_search_to_sale_support_score",
+        "native_geo_ai_readiness_score",
+        "native_seo_technical_foundation_score",
+        "native_schema_coverage_score",
+        "native_topic_authority_coverage_score",
+        "native_entity_clarity_score",
+        "native_citation_credibility_score",
+        "native_content_freshness_score",
+        "native_competitor_content_gap_score"
+      ]
+    ),
+    ...summaryForSignals(signals, "questions", ["native_customer_question_coverage_score"]),
+    ...summaryForSignals(signals, "confidence", ["native_decision_confidence_score"]),
+    ...summaryForSignals(signals, "trustProof", ["native_trust_proof_coverage_score"]),
+    ...summaryForSignals(signals, "journey", ["native_customer_journey_continuity_score"])
+  ];
+  return dedupeBy(summaries, (item) => `${item.section}-${item.title}`).slice(0, 15);
+}
+
+function summaryForSignals(
+  evidenceObjects: ReportSnapshot["evidenceObjects"],
+  section: CustomerBusinessReport["intelligenceSummaries"][number]["section"],
+  signalKeys: string[]
+): CustomerBusinessReport["intelligenceSummaries"] {
+  return evidenceObjects
+    .filter((evidence) => signalKeys.includes(String(evidence.normalizedInput?.signalKey ?? "")))
+    .slice(0, 3)
+    .map((evidence) => {
+      const signalKey = String(evidence.normalizedInput?.signalKey ?? "");
+      const score = evidenceScore(evidence);
+      return {
+        section,
+        title: customerSafeText(String(evidence.normalizedInput?.label ?? evidence.sourceType)),
+        status: score >= 75 ? "Strong support" : score >= 55 ? "Needs improvement" : "Coverage gap detected",
+        meaning: intelligenceMeaningForSignal(signalKey),
+        action: actionForNativeSignal(signalKey),
+        confidence: `${Math.round(evidence.groundTruthConfidence ?? 60)}% evidence confidence`
+      };
+    });
+}
+
+function nativeEvidence(report: ReportSnapshot): ReportSnapshot["evidenceObjects"] {
+  return (report.evidenceObjects ?? []).filter((evidence) => String(evidence.normalizedInput?.sourceModule ?? "").startsWith("systolab_"));
+}
+
+function evidenceScore(evidence: ReportSnapshot["evidenceObjects"][number]): number {
+  const value = evidence.normalizedInput?.value;
+  if (typeof value === "number") return value;
+  if (typeof value === "boolean") return value ? 100 : 0;
+  return 0;
+}
+
+function intelligenceMeaningForSignal(signalKey: string): string {
+  if (signalKey.includes("question_coverage")) return "Customers may still have unanswered questions before they feel ready to contact, book, or buy.";
+  if (signalKey.includes("decision_confidence")) return "Visitors may understand the offer but hesitate because proof, clarity, reassurance, or transparency is incomplete.";
+  if (signalKey.includes("trust_proof")) return "Weak proof can make customers delay decisions or compare competitors with stronger credibility signals.";
+  if (signalKey.includes("journey")) return "The path from discovery to action may contain friction that interrupts confidence before conversion.";
+  if (signalKey.includes("topic_authority")) return "Customers may be unable to find enough helpful service information to build confidence before contacting the business.";
+  if (signalKey.includes("entity_clarity")) return "Customers and search systems may need clearer signals about the business, services, locations, people, and expertise.";
+  if (signalKey.includes("citation")) return "Discoverability and credibility may be stronger when the business has clearer reputation, association, listing, and authority signals.";
+  if (signalKey.includes("freshness")) return "Older or stale content can make customers question whether the offer, service, or information is still current.";
+  if (signalKey.includes("competitor_content_gap")) return "A competitor appears to give customers stronger supporting information in an area that affects comparison decisions.";
+  if (signalKey.includes("geo") || signalKey.includes("search_to_sale") || signalKey.includes("seo") || signalKey.includes("schema")) return "Search demand may not be fully connected to clear answers, entity clarity, and conversion support.";
+  if (signalKey.includes("local")) return "Local customers may need stronger location, availability, service-area, and contact reassurance.";
+  if (signalKey.includes("ecommerce")) return "Purchase decisions may need stronger product, shipping, return, payment, review, and support confidence.";
+  return "This evidence affects customer confidence, clarity, trust, or action readiness.";
+}
+
+function actionForNativeSignal(signalKey: string): string {
+  if (signalKey.includes("question_coverage")) return "Add direct answers for pricing, process, comparison, objection, trust, and decision-stage questions.";
+  if (signalKey.includes("decision_confidence")) return "Add clearer proof, policies, pricing cues, process steps, reassurance, and next-step guidance.";
+  if (signalKey.includes("trust_proof")) return "Add testimonials, reviews, certifications, portfolio proof, case studies, awards, or client credibility signals.";
+  if (signalKey.includes("journey")) return "Reduce navigation friction and make trust cues, key content, and CTAs visible along the path to action.";
+  if (signalKey.includes("topic_authority")) return "Build stronger educational pages, service guides, supporting resources, and answers around the topics customers need before deciding.";
+  if (signalKey.includes("entity_clarity")) return "Clarify business identity, service names, product/service relationships, team expertise, locations, and structured entity signals.";
+  if (signalKey.includes("citation")) return "Strengthen reputation, association, directory, listing, partner, and authority references where they support business credibility.";
+  if (signalKey.includes("freshness")) return "Update outdated pages, refresh service information, remove expired offers, and add current dates or reviewed content where useful.";
+  if (signalKey.includes("competitor_content_gap")) return "Close the competitor information gap by adding stronger educational, proof, transparency, or decision-support content.";
+  if (signalKey.includes("geo")) return "Create self-contained answer blocks, clear entities, topical sections, and citation-friendly explanations.";
+  if (signalKey.includes("search_to_sale")) return "Connect search-intent content to proof, offer clarity, and a visible conversion path.";
+  if (signalKey.includes("seo") || signalKey.includes("schema")) return "Improve metadata, headings, canonical/indexability signals, internal links, schema, and foundational page structure.";
+  if (signalKey.includes("local")) return "Clarify phone, address, opening hours, service area, appointments, directions, and local credibility.";
+  if (signalKey.includes("ecommerce")) return "Strengthen product proof, reviews, checkout clarity, shipping, returns, secure payment, and support reassurance.";
+  return "Improve the supporting content and proof around this customer decision area.";
 }
 
 function buildCustomerPsychology(report: ReportSnapshot): CustomerBusinessReport["psychology"] {
