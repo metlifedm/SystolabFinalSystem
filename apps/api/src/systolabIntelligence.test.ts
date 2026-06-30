@@ -12,6 +12,9 @@ describe("native SYSTOLAB intelligence evidence contributors", () => {
     expect(keys).toContain("native_schema_coverage_score");
     expect(keys).toContain("native_geo_ai_readiness_score");
     expect(keys).toContain("native_topic_authority_coverage_score");
+    expect(keys).toContain("native_search_demand_coverage_score");
+    expect(keys).toContain("native_serp_opportunity_readiness_score");
+    expect(keys).toContain("native_ranking_opportunity_priority_score");
     expect(keys).toContain("native_customer_question_coverage_score");
     expect(keys).toContain("native_decision_confidence_score");
     expect(keys).toContain("native_trust_proof_coverage_score");
@@ -20,12 +23,15 @@ describe("native SYSTOLAB intelligence evidence contributors", () => {
     expect(keys).toContain("native_content_freshness_score");
     expect(keys).toContain("native_customer_journey_continuity_score");
     expect(keys).toContain("native_search_to_sale_support_score");
+    expect(keys).toContain("native_local_visibility_opportunity_score");
     expect(keys).toContain("native_business_type_detection");
     expect(keys).toContain("native_local_business_readiness_score");
 
     const schema = evidence.find((item) => item.normalizedInput.signalKey === "native_schema_coverage_score");
     expect(schema?.rawValue).toMatch(/Dentist|LocalBusiness|FAQPage/);
-    expect(JSON.stringify(evidence)).not.toMatch(/Claude|third-party repository|command workflow/i);
+    expect(JSON.stringify(evidence)).not.toMatch(/Claude|third-party repository|command workflow|ranking guarantee|external api|paid api/i);
+    expect(evidence.every((item) => item.freshness?.freshnessStatus === "fresh")).toBe(true);
+    expect(evidence.every((item) => item.freshness?.sourceRecency === "current_scan")).toBe(true);
   });
 
   it("routes native evidence through existing SYSTOLAB dimension scoring", () => {
@@ -37,8 +43,10 @@ describe("native SYSTOLAB intelligence evidence contributors", () => {
 
     expect(conversion?.trace.some((factor) => factor.factorId === "conversion_questions")).toBe(true);
     expect(conversion?.trace.some((factor) => factor.factorId === "conversion_decision_confidence")).toBe(true);
+    expect(conversion?.trace.some((factor) => factor.factorId === "conversion_search_demand")).toBe(true);
     expect(trust?.trace.some((factor) => factor.factorId === "trust_native_proof")).toBe(true);
     expect(clarity?.trace.some((factor) => factor.factorId === "clarity_questions")).toBe(true);
+    expect(clarity?.trace.some((factor) => factor.factorId === "clarity_serp_opportunity")).toBe(true);
   });
 
   it("detects e-commerce purchase confidence as a native contributor without external APIs", () => {

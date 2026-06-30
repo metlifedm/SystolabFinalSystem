@@ -107,6 +107,20 @@ export const specCoverage: SpecCoverageItem[] = [
     implementation: "AuthUser stores email, phone, Google ID, password hash, providers, verification flags, lifecycle state, retry counters, and lock metadata; linkOrCreateUser merges matching identities."
   },
   {
+    id: "SYSTOLAB-OUTCOME-ATTRIBUTION-001",
+    requirement: "Provide internal business outcome attribution, dependency intelligence, recommendation sequencing, evidence freshness governance, closed-loop outcome verification, learning records, and objective alignment validation for recommendation effectiveness.",
+    sourceParagraphs: "Business Outcome Attribution Layer request",
+    status: "Implemented",
+    implementation: "runScan.ts builds backend-only businessOutcomeAttributionLayer, dependencyIntelligenceLayer, recommendationSequencingEngine, evidenceFreshnessGovernanceLayer, closedLoopOutcomeVerificationLayer, and businessObjectiveAlignmentValidation. customerReportService.ts keeps raw internal layers hidden while exposing customer-safe summaries for outcome attribution, dependency intelligence, and recommendation sequencing."
+  },
+  {
+    id: "SYSTOLAB-CANONICAL-ISSUE-001",
+    requirement: "Classify each signal once, assign one owning intelligence layer, map findings into canonical issues, collapse duplicates, unify actions, and emit a fixed non-redundant output contract.",
+    sourceParagraphs: "Deterministic self-improving Business Decision Intelligence request",
+    status: "Implemented",
+    implementation: "runScan.ts builds preSignalClassification, unifiedIssueCanvas, duplicateCollapseEngine, actionUnificationLayer, postGenerationNormalization, and globalOutputContract. customerReportService.ts, App.tsx, and pdfService.ts expose the customer-safe output contract without crawler/parser internals."
+  },
+  {
     id: "SYSTOLAB-WL-001",
     requirement: "Support white labeling through tenant branding, report titles, colors, footer, and domain-ready settings.",
     sourceParagraphs: "275",
@@ -255,7 +269,7 @@ export const specCoverage: SpecCoverageItem[] = [
   },
   {
     id: "SYSTOLAB-OUTCOME-LOOP-001",
-    requirement: "Map Recommendation → Action → Implemented/Detected → Improvement → Revenue Impact.",
+    requirement: "Map Recommendation â†’ Action â†’ Implemented/Detected â†’ Improvement â†’ Revenue Impact.",
     sourceParagraphs: "User missing systems request",
     status: "Implemented",
     implementation: "recommendationOutcomeLoop compares current and previous snapshots, validates recommendation-mapped dimension movement, computes OSS delta and structural value-unit impact, renders in UI/PDF, and persists OutcomeValidationRecord."

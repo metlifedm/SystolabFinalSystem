@@ -50,6 +50,13 @@ describe("SYSTOLAB Phase 1 security hardening", () => {
     await expect(assertPublicHttpUrl("file:///etc/passwd")).rejects.toThrow("Only HTTP and HTTPS");
   });
 
+  it("converts DNS lookup failures into controlled validation errors", async () => {
+    await expect(assertPublicHttpUrl("https://definitely-not-real-systolab-host.invalid")).rejects.toMatchObject({
+      message: "Unable to resolve hostname: definitely-not-real-systolab-host.invalid",
+      status: 400
+    });
+  });
+
   it("allows public literal IP scan targets without DNS lookup", async () => {
     const resolution = await resolvePublicHttpUrl("https://93.184.216.34/test#ignored");
 

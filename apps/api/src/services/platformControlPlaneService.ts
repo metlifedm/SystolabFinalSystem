@@ -108,12 +108,39 @@ interface OperationalControlView {
     | "cost_intelligence"
     | "sandbox"
     | "ai_analyst_context"
-    | "realtime_refresh";
+    | "realtime_refresh"
+    | "managed_white_label";
   status: "passing" | "warning" | "failing" | "informational";
   scope: string;
   score?: number;
   payload: PlainRecord;
   createdAt?: Date;
+}
+
+type ManagedWhiteLabelRole = "super_admin" | "partner" | "team_member" | "client";
+type ManagedWorkspaceStatus = "draft" | "active" | "suspended" | "archived";
+
+interface ManagedWhiteLabelWorkspaceView {
+  workspaceId: string;
+  tenantSlug: string;
+  workspaceName: string;
+  partnerType: string;
+  status: ManagedWorkspaceStatus;
+  branding: PlainRecord;
+  domains: PlainRecord[];
+  enabledFeatures: string[];
+  allowedReports: string[];
+  allowedExports: string[];
+  allowedApis: string[];
+  reportSections: string[];
+  advancedEvidenceEnabled: boolean;
+  permissions: PlainRecord;
+  securityPolicy: PlainRecord;
+  subscriptionPlan: PlainRecord;
+  approval: PlainRecord;
+  auditHistory: PlainRecord[];
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 const memoryModules = new Map<string, ModuleRegistryView>();
@@ -128,6 +155,7 @@ const memoryFeatureFlags = new Map<string, PlainRecord>();
 const memoryLineage: PlainRecord[] = [];
 const memoryReports: Array<{ workspaceId: string; report: ReportSnapshot }> = [];
 const memoryUserSearchActivities: PlainRecord[] = [];
+const memoryManagedWhiteLabelWorkspaces = new Map<string, ManagedWhiteLabelWorkspaceView>();
 
 const DEFAULT_MODULES: ModuleRegistryView[] = [
   module("module-registry", "Module Registry System", [], ["platform:modules:manage"]),
@@ -153,7 +181,8 @@ const DEFAULT_MODULES: ModuleRegistryView[] = [
   module("event-bus", "Centralized Event Bus", ["module-registry"], ["event:publish", "event:replay"]),
   module("multi-tenant-isolation", "Multi-Tenant Isolation", ["workspace-intelligence", "api-governance"], ["tenant:isolate"]),
   module("feature-flags", "Feature Flag Framework", ["module-registry"], ["feature:manage"]),
-  module("intelligence-sandbox", "Intelligence Sandbox Environment", ["feature-flags", "intelligence-validation"], ["sandbox:run"])
+  module("intelligence-sandbox", "Intelligence Sandbox Environment", ["feature-flags", "intelligence-validation"], ["sandbox:run"]),
+  module("managed-white-label-control", "Managed White-Label Control Center", ["workspace-intelligence", "feature-flags", "api-governance", "governance-contract"], ["white_label:govern"])
 ];
 
 const DEFAULT_FLAGS: PlainRecord[] = [
@@ -161,7 +190,10 @@ const DEFAULT_FLAGS: PlainRecord[] = [
   flag("competitor_relationship_graph.enabled", "Competitor Relationship Graph output inside IIRE.", "enabled", 100),
   flag("knowledge_growth_score.enabled", "Knowledge Growth Score inside IAL.", "enabled", 100),
   flag("distributed_jobs.enabled", "Self-owned distributed job metadata and worker framework.", "enabled", 100),
-  flag("intelligence_sandbox.enabled", "Internal sandbox experiments for scoring and benchmark methods.", "enabled", 100)
+  flag("intelligence_sandbox.enabled", "Internal sandbox experiments for scoring and benchmark methods.", "enabled", 100),
+  flag("managed_white_label.enabled", "SYSTOLAB-owned managed white-label workspace governance.", "enabled", 100),
+  flag("managed_white_label.advanced_evidence", "Owner-approved advanced evidence visibility per workspace.", "gradual", 0),
+  flag("managed_white_label.custom_domains", "Owner-approved custom domain configuration per workspace.", "enabled", 100)
 ];
 
 export async function listPlatformModules(): Promise<ModuleRegistryView[]> {
@@ -762,6 +794,7 @@ export async function getPlatformOverview(): Promise<PlainRecord> {
   const controls = await listControls(200);
   const warehouse = await listWarehouseRecords(5);
   const flags = await listFeatureFlags();
+  const managedWhiteLabel = await getManagedWhiteLabelGovernance();
   return {
     generatedAt: new Date().toISOString(),
     modules: {
@@ -779,6 +812,13 @@ export async function getPlatformOverview(): Promise<PlainRecord> {
     multiTenantIsolation: {
       status: "enforced",
       boundary: "workspaceId + tenantSlug scoped records with internal-only aggregation"
+    },
+    managedWhiteLabel: {
+      ownershipModel: managedWhiteLabel.ownershipModel,
+      platformOwner: managedWhiteLabel.platformOwner,
+      workspaceCount: managedWhiteLabel.workspaceCount,
+      activeWorkspaceCount: managedWhiteLabel.activeWorkspaceCount,
+      advancedEvidenceWorkspaceCount: managedWhiteLabel.advancedEvidenceWorkspaceCount
     }
   };
 }
@@ -1366,6 +1406,328 @@ export async function evaluateFeatureFlag(flagKey: string, input: { workspaceId?
     confidenceScore: 100
   });
   return { flagKey, enabled, state: item.state, rolloutPercentage: rollout, workspaceId: input.workspaceId, bucket };
+}
+
+const DEFAULT_MANAGED_AUTH_METHODS = ["email", "password", "google", "microsoft", "apple", "two_factor"];
+const DEFAULT_MANAGED_FEATURES = [
+  "business_decision_reports",
+  "revenue_opportunity_intelligence",
+  "customer_journey_intelligence",
+  "competitor_intelligence",
+  "trust_intelligence",
+  "local_visibility_intelligence",
+  "growth_roadmaps"
+];
+const DEFAULT_MANAGED_REPORTS = ["decision_intelligence_brief", "full_business_report", "executive_summary", "managed_customer_pdf"];
+const DEFAULT_MANAGED_EXPORTS = ["pdf", "csv", "json", "spreadsheet"];
+const DEFAULT_MANAGED_APIS = ["scan:create", "report:read", "report:export", "workspace:read"];
+const DEFAULT_MANAGED_REPORT_SECTIONS = [
+  "executive_verdict",
+  "business_risk_status",
+  "evidence_summary",
+  "competitor_comparison",
+  "recommendations",
+  "revenue_opportunity",
+  "priority_timeline",
+  "historical_progress"
+];
+const MANAGED_DENIED_CAPABILITIES = [
+  "platform_admin",
+  "modify_engine",
+  "alter_scoring",
+  "modify_ai_models",
+  "change_report_logic",
+  "override_permissions",
+  "create_platform_features",
+  "change_system_settings",
+  "bypass_audit",
+  "change_security_policy"
+];
+
+export async function listManagedWhiteLabelWorkspaces(): Promise<ManagedWhiteLabelWorkspaceView[]> {
+  if (!isMongoConnected()) {
+    return [...memoryManagedWhiteLabelWorkspaces.values()].sort((a, b) => a.tenantSlug.localeCompare(b.tenantSlug));
+  }
+  const rows = await OperationalControlRecord.find({ controlType: "managed_white_label", "payload.recordKind": "managed_workspace" }).sort({ createdAt: -1 }).lean();
+  return rows
+    .map((row) => (row.payload as PlainRecord | undefined)?.workspace as ManagedWhiteLabelWorkspaceView | undefined)
+    .filter((workspace): workspace is ManagedWhiteLabelWorkspaceView => Boolean(workspace?.workspaceId));
+}
+
+export async function getManagedWhiteLabelGovernance(): Promise<PlainRecord> {
+  const workspaces = await listManagedWhiteLabelWorkspaces();
+  const activeWorkspaceCount = workspaces.filter((workspace) => workspace.status === "active").length;
+  return {
+    generatedAt: new Date().toISOString(),
+    platformOwner: "SYSTOLAB",
+    ownershipModel: "managed_white_label",
+    principle: "Client owns brand. SYSTOLAB owns platform.",
+    workspaceCount: workspaces.length,
+    activeWorkspaceCount,
+    advancedEvidenceWorkspaceCount: workspaces.filter((workspace) => workspace.advancedEvidenceEnabled).length,
+    nonNegotiableRules: [
+      "Only SYSTOLAB Super Admin can modify engine, scoring, AI models, report logic, global permissions, subscriptions, security policy, platform features, integrations, APIs, domains, and deployment controls.",
+      "Partners, agencies, team members, and end clients only receive explicitly granted managed workspace permissions.",
+      "Branding is configurable only after SYSTOLAB approval and never transfers ownership of the platform.",
+      "Customer reports remain business-decision focused; advanced evidence is hidden unless SYSTOLAB enables it per workspace.",
+      "Every managed white-label change is routed through the Platform Control Center and audit trail."
+    ],
+    roleHierarchy: [
+      {
+        role: "SYSTOLAB Super Admin",
+        platformOwner: true,
+        unrestrictedControl: true,
+        capabilities: ["all_workspaces", "all_clients", "all_reports", "all_subscriptions", "all_permissions", "all_features", "all_security", "all_audit_logs"]
+      },
+      {
+        role: "Managed Partner",
+        platformOwner: false,
+        unrestrictedControl: false,
+        capabilities: ["assigned_clients", "approved_branding", "approved_reports", "approved_exports", "assigned_team_members"]
+      },
+      {
+        role: "Partner Team Member",
+        platformOwner: false,
+        unrestrictedControl: false,
+        capabilities: ["inherited_workspace_permissions", "assigned_reports", "assigned_customers"]
+      },
+      {
+        role: "End Client",
+        platformOwner: false,
+        unrestrictedControl: false,
+        capabilities: ["own_reports", "own_websites", "own_history", "approved_downloads"]
+      }
+    ],
+    centralizedControls: {
+      branding: ["company_name", "logo", "colors", "custom_domain", "email_sender", "pdf_branding", "dashboard_branding"],
+      features: ["modules", "reports", "ai_features", "integrations", "apis", "plans", "limits", "exports", "report_sections"],
+      permissions: ["roles", "workspace_access", "client_access", "advanced_evidence", "api_access", "export_access"],
+      platformRules: ["engine_logic", "scoring_models", "report_logic", "security_policy", "audit_policy", "deployment_controls"]
+    },
+    defaultAllowedAuthMethods: DEFAULT_MANAGED_AUTH_METHODS,
+    deniedToPartnersAndClients: MANAGED_DENIED_CAPABILITIES,
+    clientExperienceBoundaries: {
+      decisionFocusedReports: true,
+      technicalDetailsHiddenByDefault: true,
+      advancedEvidenceRequiresSystolabApproval: true,
+      rawCrawlerTelemetryVisibleToCustomers: false
+    },
+    managedWorkspaces: workspaces
+  };
+}
+
+export async function upsertManagedWhiteLabelWorkspace(
+  input: Partial<ManagedWhiteLabelWorkspaceView> & { tenantSlug: string; workspaceName: string },
+  actorAdminId = "systolab_super_admin"
+): Promise<ManagedWhiteLabelWorkspaceView> {
+  const tenantSlug = normalizeTenantSlug(input.tenantSlug);
+  const workspaceName = String(input.workspaceName ?? "").trim();
+  if (!tenantSlug || !workspaceName) throw new Error("tenantSlug and workspaceName are required.");
+  const existing = await findManagedWhiteLabelWorkspace(input.workspaceId, tenantSlug);
+  const now = new Date();
+  const workspaceId = input.workspaceId ?? existing?.workspaceId ?? "mwl_" + sha256(tenantSlug).slice(0, 18);
+  const workspace: ManagedWhiteLabelWorkspaceView = {
+    workspaceId,
+    tenantSlug,
+    workspaceName,
+    partnerType: input.partnerType ?? existing?.partnerType ?? "managed_partner",
+    status: input.status ?? existing?.status ?? "active",
+    branding: {
+      status: "approved_by_systolab",
+      companyName: workspaceName,
+      logoUrl: null,
+      primaryColor: "#17201d",
+      accentColor: "#d6a84f",
+      emailSender: "SYSTOLAB Managed Workspace",
+      dashboardBranding: "workspace_brand_on_systolab_platform",
+      pdfBranding: "workspace_brand_on_systolab_report_template",
+      ...((existing?.branding as PlainRecord | undefined) ?? {}),
+      ...((input.branding as PlainRecord | undefined) ?? {})
+    },
+    domains: input.domains ?? existing?.domains ?? [],
+    enabledFeatures: uniqueStrings(input.enabledFeatures ?? existing?.enabledFeatures ?? DEFAULT_MANAGED_FEATURES),
+    allowedReports: uniqueStrings(input.allowedReports ?? existing?.allowedReports ?? DEFAULT_MANAGED_REPORTS),
+    allowedExports: uniqueStrings(input.allowedExports ?? existing?.allowedExports ?? DEFAULT_MANAGED_EXPORTS),
+    allowedApis: uniqueStrings(input.allowedApis ?? existing?.allowedApis ?? DEFAULT_MANAGED_APIS),
+    reportSections: uniqueStrings(input.reportSections ?? existing?.reportSections ?? DEFAULT_MANAGED_REPORT_SECTIONS),
+    advancedEvidenceEnabled: Boolean(input.advancedEvidenceEnabled ?? existing?.advancedEvidenceEnabled ?? false),
+    permissions: {
+      ...defaultManagedPermissions(),
+      ...((existing?.permissions as PlainRecord | undefined) ?? {}),
+      ...((input.permissions as PlainRecord | undefined) ?? {})
+    },
+    securityPolicy: {
+      authControlledBy: "SYSTOLAB",
+      allowedAuthMethods: DEFAULT_MANAGED_AUTH_METHODS,
+      twoFactorAvailable: true,
+      workspaceIsolation: "tenant_workspace_scoped",
+      auditRequired: true,
+      ownerApprovalRequiredForSecurityChanges: true,
+      ...((existing?.securityPolicy as PlainRecord | undefined) ?? {}),
+      ...((input.securityPolicy as PlainRecord | undefined) ?? {})
+    },
+    subscriptionPlan: {
+      planOwner: "SYSTOLAB",
+      billingControlledBy: "SYSTOLAB",
+      planKey: "managed_standard",
+      limitsControlledCentrally: true,
+      ...((existing?.subscriptionPlan as PlainRecord | undefined) ?? {}),
+      ...((input.subscriptionPlan as PlainRecord | undefined) ?? {})
+    },
+    approval: {
+      configuredBy: actorAdminId,
+      configuredAt: now.toISOString(),
+      platformOwner: "SYSTOLAB",
+      brandingApproval: "approved_by_systolab",
+      featureApproval: "approved_by_systolab",
+      permissionApproval: "approved_by_systolab",
+      reportTemplateApproval: "approved_by_systolab"
+    },
+    auditHistory: [
+      ...(existing?.auditHistory ?? []),
+      {
+        action: existing ? "managed_workspace_updated" : "managed_workspace_created",
+        actor: actorAdminId,
+        at: now.toISOString(),
+        owner: "SYSTOLAB",
+        tenantSlug
+      }
+    ],
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now
+  };
+  await saveManagedWhiteLabelWorkspace(workspace);
+  await saveControl({
+    recordId: makeId("ctrl"),
+    controlType: "managed_white_label",
+    status: "passing",
+    scope: workspace.workspaceId,
+    score: 100,
+    payload: {
+      recordKind: "workspace_governance_change",
+      workspaceId: workspace.workspaceId,
+      tenantSlug: workspace.tenantSlug,
+      platformOwner: "SYSTOLAB",
+      action: existing ? "updated" : "created"
+    },
+    createdAt: now
+  });
+  await publishIntelligenceEvent({
+    eventType: "governance.checked",
+    layer: "automation",
+    workspaceId: workspace.workspaceId,
+    payload: { governanceArea: "managed_white_label", tenantSlug, platformOwner: "SYSTOLAB", status: workspace.status },
+    source: "platform-control-center",
+    confidenceScore: 100
+  });
+  return workspace;
+}
+
+export async function evaluateManagedWhiteLabelAccess(input: {
+  workspaceId?: string;
+  tenantSlug?: string;
+  role: ManagedWhiteLabelRole;
+  requestedFeature?: string;
+  requestedPermission?: string;
+  requestedReportSection?: string;
+}): Promise<PlainRecord> {
+  const workspace = await findManagedWhiteLabelWorkspace(input.workspaceId, input.tenantSlug ? normalizeTenantSlug(input.tenantSlug) : undefined);
+  if (input.role === "super_admin") {
+    return {
+      role: input.role,
+      workspaceId: workspace?.workspaceId ?? input.workspaceId,
+      platformOwner: true,
+      unrestrictedControl: true,
+      allowed: true,
+      reason: "SYSTOLAB Super Admin has full platform control."
+    };
+  }
+  const permissions = (workspace?.permissions as PlainRecord | undefined) ?? defaultManagedPermissions();
+  const rolePermissions = uniqueStrings((permissions[input.role] as string[] | undefined) ?? []);
+  const requestedPermission = input.requestedPermission;
+  const requestedFeature = input.requestedFeature;
+  const requestedReportSection = input.requestedReportSection;
+  const deniedByCapability = requestedPermission ? MANAGED_DENIED_CAPABILITIES.includes(requestedPermission) : false;
+  const permissionAllowed = requestedPermission ? rolePermissions.includes(requestedPermission) && !deniedByCapability : true;
+  const featureAllowed = requestedFeature ? Boolean(workspace?.enabledFeatures.includes(requestedFeature)) : true;
+  const sectionAllowed = requestedReportSection
+    ? Boolean(workspace?.reportSections.includes(requestedReportSection) || (requestedReportSection === "advanced_evidence" && workspace?.advancedEvidenceEnabled))
+    : true;
+  const workspaceAvailable = Boolean(workspace);
+  const allowed = workspaceAvailable && permissionAllowed && featureAllowed && sectionAllowed;
+  return {
+    role: input.role,
+    workspaceId: workspace?.workspaceId ?? input.workspaceId,
+    tenantSlug: workspace?.tenantSlug ?? input.tenantSlug,
+    platformOwner: false,
+    unrestrictedControl: false,
+    allowed,
+    workspaceAvailable,
+    permissionAllowed,
+    featureAllowed,
+    sectionAllowed,
+    deniedCapabilities: MANAGED_DENIED_CAPABILITIES,
+    grantedPermissions: rolePermissions,
+    reason: allowed
+      ? "Access allowed inside SYSTOLAB-managed workspace permissions."
+      : "Access denied because this role is not the platform owner or the requested capability is not granted."
+  };
+}
+
+function defaultManagedPermissions(): PlainRecord {
+  return {
+    partner: ["view_assigned_clients", "manage_own_customers", "invite_team_members", "generate_reports", "download_reports", "view_analytics"],
+    team_member: ["inherited_permissions_only", "generate_reports", "download_reports", "view_assigned_customers"],
+    client: ["view_reports", "generate_reports", "download_reports", "manage_own_websites", "view_history"],
+    deniedForNonOwners: MANAGED_DENIED_CAPABILITIES
+  };
+}
+
+function uniqueStrings(values: unknown): string[] {
+  if (!Array.isArray(values)) return [];
+  return [...new Set(values.map((item) => String(item).trim()).filter(Boolean))];
+}
+
+function normalizeTenantSlug(value?: string): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+async function findManagedWhiteLabelWorkspace(workspaceId?: string, tenantSlug?: string): Promise<ManagedWhiteLabelWorkspaceView | null> {
+  const normalizedTenantSlug = tenantSlug ? normalizeTenantSlug(tenantSlug) : undefined;
+  if (!isMongoConnected()) {
+    if (workspaceId && memoryManagedWhiteLabelWorkspaces.has(workspaceId)) return memoryManagedWhiteLabelWorkspaces.get(workspaceId) ?? null;
+    if (normalizedTenantSlug) return [...memoryManagedWhiteLabelWorkspaces.values()].find((workspace) => workspace.tenantSlug === normalizedTenantSlug) ?? null;
+    return null;
+  }
+  const query: PlainRecord = { controlType: "managed_white_label", "payload.recordKind": "managed_workspace" };
+  if (workspaceId) query.scope = workspaceId;
+  if (normalizedTenantSlug) query["payload.workspace.tenantSlug"] = normalizedTenantSlug;
+  const row = await OperationalControlRecord.findOne(query).sort({ createdAt: -1 }).lean();
+  return ((row?.payload as PlainRecord | undefined)?.workspace as ManagedWhiteLabelWorkspaceView | undefined) ?? null;
+}
+
+async function saveManagedWhiteLabelWorkspace(workspace: ManagedWhiteLabelWorkspaceView): Promise<void> {
+  if (!isMongoConnected()) {
+    memoryManagedWhiteLabelWorkspaces.set(workspace.workspaceId, workspace);
+    return;
+  }
+  await OperationalControlRecord.findOneAndUpdate(
+    { recordId: "mwl_" + workspace.workspaceId },
+    {
+      recordId: "mwl_" + workspace.workspaceId,
+      controlType: "managed_white_label",
+      status: workspace.status === "active" ? "passing" : "warning",
+      scope: workspace.workspaceId,
+      score: workspace.status === "active" ? 100 : 70,
+      payload: { recordKind: "managed_workspace", workspace },
+      createdAt: workspace.createdAt ?? new Date()
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 }
 
 export async function runSandboxExperiment(input: { experimentName: string; scoringMethod?: string; benchmarkModel?: string; sampleSize?: number; workspaceId?: string }): Promise<OperationalControlView> {

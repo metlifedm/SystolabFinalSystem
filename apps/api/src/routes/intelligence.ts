@@ -1,5 +1,6 @@
-import { Router } from "express";
+﻿import { Router } from "express";
 import { isMongoConnected } from "../db/mongoose.js";
+import { asyncHandler } from "../middleware/asyncHandler.js";
 import { authOptional } from "../middleware/authOptional.js";
 import { authRequired } from "../middleware/authRequired.js";
 import { AlertRecord } from "../models/AlertRecord.js";
@@ -21,7 +22,7 @@ import { makeId, sha256 } from "../utils/crypto.js";
 
 export const intelligenceRouter = Router();
 
-intelligenceRouter.get("/evidence/:snapshotId", async (req, res) => {
+intelligenceRouter.get("/evidence/:snapshotId", asyncHandler(async (req, res) => {
   const snapshotId = req.params.snapshotId;
   if (!snapshotId) {
     res.status(400).json({ error: { message: "snapshotId is required." } });
@@ -35,9 +36,9 @@ intelligenceRouter.get("/evidence/:snapshotId", async (req, res) => {
 
   const items = await EvidenceRecord.find({ snapshotId }).sort({ createdAt: 1 }).lean();
   res.json({ items });
-});
+}));
 
-intelligenceRouter.get("/outcomes/:snapshotId", async (req, res) => {
+intelligenceRouter.get("/outcomes/:snapshotId", asyncHandler(async (req, res) => {
   const snapshotId = req.params.snapshotId;
   if (!snapshotId) {
     res.status(400).json({ error: { message: "snapshotId is required." } });
@@ -51,9 +52,9 @@ intelligenceRouter.get("/outcomes/:snapshotId", async (req, res) => {
 
   const items = await OutcomeValidationRecord.find({ snapshotId }).sort({ createdAt: 1 }).lean();
   res.json({ items });
-});
+}));
 
-intelligenceRouter.get("/alerts", authOptional, async (req, res) => {
+intelligenceRouter.get("/alerts", authOptional, asyncHandler(async (req, res) => {
   const targetUrl = typeof req.query.targetUrl === "string" ? req.query.targetUrl : undefined;
   const workspaceId = typeof req.query.workspaceId === "string" ? req.query.workspaceId : undefined;
 
@@ -78,13 +79,13 @@ intelligenceRouter.get("/alerts", authOptional, async (req, res) => {
   }
   const items = await AlertRecord.find(query).sort({ createdAt: -1 }).limit(100).lean();
   res.json({ items });
-});
+}));
 
-intelligenceRouter.get("/notifications", async (_req, res) => {
+intelligenceRouter.get("/notifications", asyncHandler(async (_req, res) => {
   res.json({ items: await listNotificationOutbox() });
-});
+}));
 
-intelligenceRouter.get("/monitoring/schedules", authOptional, async (req, res) => {
+intelligenceRouter.get("/monitoring/schedules", authOptional, asyncHandler(async (req, res) => {
   let workspaceIds: string[] | undefined;
   if (req.auth?.user) {
     const memberships = await listUserWorkspaces(req.auth.user.userId);
@@ -92,9 +93,9 @@ intelligenceRouter.get("/monitoring/schedules", authOptional, async (req, res) =
   }
   const items = await listMonitoringSchedules(workspaceIds);
   res.json({ items });
-});
+}));
 
-intelligenceRouter.post("/monitoring/schedules", authRequired, async (req, res) => {
+intelligenceRouter.post("/monitoring/schedules", authRequired, asyncHandler(async (req, res) => {
   const input = req.body as {
     targetUrl?: string;
     tenantSlug?: string;
@@ -133,13 +134,13 @@ intelligenceRouter.post("/monitoring/schedules", authRequired, async (req, res) 
     confidenceScore: 100
   });
   res.status(201).json({ item });
-});
+}));
 
-intelligenceRouter.post("/monitoring/run-due", async (_req, res) => {
+intelligenceRouter.post("/monitoring/run-due", asyncHandler(async (_req, res) => {
   res.json(await runMonitoringCycle());
-});
+}));
 
-intelligenceRouter.post("/edit/events", async (req, res) => {
+intelligenceRouter.post("/edit/events", asyncHandler(async (req, res) => {
   const input = req.body as {
     workspaceId?: string;
     snapshotId?: string;
@@ -174,4 +175,4 @@ intelligenceRouter.post("/edit/events", async (req, res) => {
   });
 
   res.status(201).json({ eventId, sessionFingerprint, eventType, occurredAt: occurredAt.toISOString() });
-});
+}));

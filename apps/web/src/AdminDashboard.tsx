@@ -139,6 +139,7 @@ interface AdminBundle {
   cost: ControlRow[];
   graph: AnyRecord[];
   featureFlags: FeatureFlagRow[];
+  managedWhiteLabel: AnyRecord;
   sandbox: ControlRow[];
   userJourney: AnyRecord;
   security: AnyRecord;
@@ -168,6 +169,7 @@ const EMPTY_BUNDLE: AdminBundle = {
   cost: [],
   graph: [],
   featureFlags: [],
+  managedWhiteLabel: {},
   sandbox: [],
   userJourney: {},
   security: {},
@@ -182,6 +184,7 @@ const navItems = [
   { id: "decision", label: "Decision ROI", icon: BriefcaseBusiness },
   { id: "quality", label: "Quality", icon: ClipboardCheck },
   { id: "security", label: "Security", icon: ShieldCheck },
+  { id: "whiteLabel", label: "White Label", icon: BriefcaseBusiness },
   { id: "infrastructure", label: "Infrastructure", icon: Server },
   { id: "graph", label: "Graph", icon: Network }
 ] as const;
@@ -381,6 +384,7 @@ export function AdminDashboard() {
         {activeTab === "decision" && <DecisionSection bundle={bundle} />}
         {activeTab === "quality" && <QualitySection bundle={bundle} />}
         {activeTab === "security" && <SecuritySection bundle={bundle} />}
+        {activeTab === "whiteLabel" && session && <WhiteLabelSection bundle={bundle} owner={owner} runAction={ownerAction} session={session} />}
         {activeTab === "infrastructure" && session && <InfrastructureSection bundle={bundle} owner={owner} runAction={ownerAction} session={session} />}
         {activeTab === "graph" && <GraphSection bundle={bundle} />}
       </main>
@@ -704,6 +708,118 @@ function InfrastructureSection({ bundle, owner, runAction, session }: { bundle: 
       <div className="admin-panel">
         <SectionHead icon={Flag} title="Feature Flags" subtitle="Controlled rollout and workspace activation." />
         <DataTable columns={["Flag", "State", "Rollout"]} rows={bundle.featureFlags.map((flag) => [flag.flagKey, flag.state, `${flag.rolloutPercentage}%`])} />
+      </div>
+    </section>
+  );
+}
+
+function WhiteLabelSection({ bundle, owner, runAction, session }: { bundle: AdminBundle; owner: boolean; runAction: (label: string, action: () => Promise<unknown>) => Promise<void>; session: AdminSession }) {
+  const governance = bundle.managedWhiteLabel ?? {};
+  const workspaces = arr(governance.managedWorkspaces);
+  const roles = arr(governance.roleHierarchy);
+  const controls = ((governance.centralizedControls as AnyRecord | undefined) ?? {});
+  const [workspaceName, setWorkspaceName] = useState("");
+  const [tenantSlug, setTenantSlug] = useState("");
+  const [primaryColor, setPrimaryColor] = useState("#17201d");
+  const [accentColor, setAccentColor] = useState("#d6a84f");
+  const [advancedEvidenceEnabled, setAdvancedEvidenceEnabled] = useState(false);
+
+  async function saveWorkspace() {
+    if (!workspaceName || !tenantSlug) return;
+    await runAction("Managed white-label workspace", () => internalPlatformPost("/white-label/workspaces", {
+      workspaceName,
+      tenantSlug,
+      advancedEvidenceEnabled,
+      branding: { companyName: workspaceName, primaryColor, accentColor }
+    }, session));
+    setWorkspaceName("");
+    setTenantSlug("");
+    setAdvancedEvidenceEnabled(false);
+  }
+
+  return (
+    <section className="admin-grid">
+      <div className="admin-panel admin-panel--wide">
+        <SectionHead icon={BriefcaseBusiness} title="Managed White-Label Control Center" subtitle="SYSTOLAB-owned platform governance with approved workspace branding and permissions." />
+        <div className="admin-kpi-grid compact">
+          <Metric label="Platform owner" value={String(governance.platformOwner ?? "SYSTOLAB")} />
+          <Metric label="Workspaces" value={num(governance.workspaceCount)} />
+          <Metric label="Active" value={num(governance.activeWorkspaceCount)} />
+          <Metric label="Advanced evidence" value={num(governance.advancedEvidenceWorkspaceCount)} />
+        </div>
+        <p className="admin-note">{String(governance.principle ?? "Client owns brand. SYSTOLAB owns platform.")}</p>
+        <div className="admin-inline-form">
+          <label className="field">
+            <span>Workspace name</span>
+            <input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="Agency or client brand" disabled={!owner} />
+          </label>
+          <label className="field">
+            <span>Tenant slug</span>
+            <input value={tenantSlug} onChange={(event) => setTenantSlug(event.target.value)} placeholder="brand-slug" disabled={!owner} />
+          </label>
+          <label className="field color-field">
+            <span>Primary</span>
+            <input type="color" value={primaryColor} onChange={(event) => setPrimaryColor(event.target.value)} disabled={!owner} />
+          </label>
+          <label className="field color-field">
+            <span>Accent</span>
+            <input type="color" value={accentColor} onChange={(event) => setAccentColor(event.target.value)} disabled={!owner} />
+          </label>
+          <label className="field checkbox-field">
+            <input type="checkbox" checked={advancedEvidenceEnabled} onChange={(event) => setAdvancedEvidenceEnabled(event.target.checked)} disabled={!owner} />
+            <span>Advanced evidence</span>
+          </label>
+          <button className="primary-button" type="button" disabled={!owner || !workspaceName || !tenantSlug} title={owner ? "Save managed workspace" : "Owner access required"} onClick={() => void saveWorkspace()}>
+            <CheckCircle2 size={16} />
+            Save Workspace
+          </button>
+        </div>
+      </div>
+
+      <div className="admin-panel admin-panel--wide">
+        <SectionHead icon={Users} title="Managed Workspaces" subtitle="Branding belongs to the workspace; platform rules stay under SYSTOLAB control." />
+        <DataTable
+          columns={["Workspace", "Tenant", "Status", "Brand", "Features", "Exports", "Advanced Evidence"]}
+          rows={workspaces.map((workspace) => {
+            const branding = (workspace.branding as AnyRecord | undefined) ?? {};
+            return [
+              String(workspace.workspaceName ?? workspace.workspaceId ?? ""),
+              String(workspace.tenantSlug ?? ""),
+              String(workspace.status ?? ""),
+              String(branding.companyName ?? workspace.workspaceName ?? ""),
+              String((workspace.enabledFeatures as unknown[] | undefined)?.length ?? 0),
+              strArr(workspace.allowedExports).join(", "),
+              String(Boolean(workspace.advancedEvidenceEnabled))
+            ];
+          })}
+        />
+      </div>
+
+      <div className="admin-panel">
+        <SectionHead icon={ShieldCheck} title="Role Boundary" subtitle="Only SYSTOLAB Super Admin receives unrestricted platform control." />
+        <DataTable
+          columns={["Role", "Owner", "Unrestricted", "Capabilities"]}
+          rows={roles.map((role) => [
+            String(role.role ?? ""),
+            String(Boolean(role.platformOwner)),
+            String(Boolean(role.unrestrictedControl)),
+            strArr(role.capabilities).join(", ")
+          ])}
+        />
+      </div>
+
+      <div className="admin-panel">
+        <SectionHead icon={Lock} title="Centralized Controls" subtitle="All critical settings remain governed through SYSTOLAB Platform Control Center." />
+        <DataTable
+          columns={["Control", "Managed Items"]}
+          rows={Object.entries(controls).map(([key, value]) => [key, strArr(value).join(", ")])}
+        />
+      </div>
+
+      <div className="admin-panel admin-panel--wide">
+        <SectionHead icon={ClipboardCheck} title="Non-Negotiable Rules" subtitle="Rules applied to partners, agencies, teams, clients, reports, and custom domains." />
+        <SignalList title="Governance" items={strArr(governance.nonNegotiableRules)} />
+        <SignalList title="Denied to non-owners" items={strArr(governance.deniedToPartnersAndClients)} />
       </div>
     </section>
   );

@@ -1,5 +1,6 @@
-import type { Request, Response } from "express";
+﻿import type { Request, Response } from "express";
 import { Router } from "express";
+import { asyncHandler } from "../middleware/asyncHandler.js";
 import { authOptional } from "../middleware/authOptional.js";
 import { scanRateLimit, scanStatusRateLimit } from "../middleware/rateLimits.js";
 import { getPlatformJob, getScanQueueMetrics, listScanJobs } from "../services/platformControlPlaneService.js";
@@ -10,25 +11,25 @@ export const scansRouter = Router();
 
 scansRouter.use(authOptional);
 
-// ── POST / — enqueue scan (async, returns 202 + jobId) ────────────────────────
-scansRouter.post("/", scanRateLimit, createScan);
+// POST / - enqueue scan (async, returns 202 + jobId)
+scansRouter.post("/", scanRateLimit, asyncHandler(createScan));
 
-// ── GET /queue/metrics — queue depth and worker health ────────────────────────
-scansRouter.get("/queue/metrics", scanStatusRateLimit, async (_req: Request, res: Response) => {
+// GET /queue/metrics - queue depth and worker health
+scansRouter.get("/queue/metrics", scanStatusRateLimit, asyncHandler(async (_req: Request, res: Response) => {
   const metrics = await getScanQueueMetrics();
   res.json({ ...metrics, workerRunning: isScanWorkerRunning(), polledAt: new Date().toISOString() });
-});
+}));
 
-// ── GET /queue/jobs — recent scan jobs list ───────────────────────────────────
-scansRouter.get("/queue/jobs", scanStatusRateLimit, async (req: Request, res: Response) => {
+// GET /queue/jobs - recent scan jobs list
+scansRouter.get("/queue/jobs", scanStatusRateLimit, asyncHandler(async (req: Request, res: Response) => {
   const rawLimit = Number(req.query["limit"] ?? 50);
   const limit = Number.isFinite(rawLimit) ? Math.min(rawLimit, 200) : 50;
   const jobs = await listScanJobs(limit);
   res.json({ items: jobs });
-});
+}));
 
-// ── GET /:jobId — job status, progress, result ────────────────────────────────
-scansRouter.get("/:jobId", scanStatusRateLimit, async (req: Request, res: Response) => {
+// GET /:jobId - job status, progress, result
+scansRouter.get("/:jobId", scanStatusRateLimit, asyncHandler(async (req: Request, res: Response) => {
   const jobId = req.params["jobId"];
   if (!jobId) {
     res.status(400).json({ error: { message: "jobId is required." } });
@@ -65,4 +66,4 @@ scansRouter.get("/:jobId", scanStatusRateLimit, async (req: Request, res: Respon
   }
 
   res.json(response);
-});
+}));

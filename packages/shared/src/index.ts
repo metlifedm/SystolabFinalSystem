@@ -200,6 +200,15 @@ export interface DataInputStatus {
   reason?: string;
 }
 
+export interface EvidenceFreshnessMetadata {
+  acquiredAt: string;
+  validatedAt: string;
+  sourceRecency: "current_scan" | "recent" | "aging" | "stale" | "unknown";
+  updateFrequencyExpectation: "per_scan" | "daily" | "weekly" | "monthly" | "quarterly" | "unknown";
+  freshnessStatus: "fresh" | "current" | "aging" | "stale" | "expired" | "incomplete";
+  confidenceAdjustment: number;
+}
+
 export interface EvidenceObject {
   evidenceId: string;
   sourceType: EvidenceSourceType;
@@ -214,6 +223,7 @@ export interface EvidenceObject {
   groundTruthConfidence: number;
   groundTruthMeaning?: string;
   rawDomSnapshot?: string;
+  freshness: EvidenceFreshnessMetadata;
   renderState?: RenderState;
   renderVisibility?: EvidenceVisibilityState;
   renderVerification?: string;
@@ -222,7 +232,6 @@ export interface EvidenceObject {
   dimensionRefs: DimensionKey[];
   hash: string;
 }
-
 export interface EvidenceCluster {
   clusterId: string;
   label: string;
@@ -728,6 +737,11 @@ export interface RevenueIntelligenceLayer {
 export interface RecommendationOutput {
   recommendationId: string;
   sourceDecisionId?: string;
+  canonicalIssueId?: string;
+  attributionProfileId?: string;
+  dependencyChain?: string[];
+  lifecycleState?: RecommendationLifecycleState;
+  sequencePosition?: number;
   issue: string;
   action: string;
   priority: "FIX NOW" | "THIS MONTH" | "MONITOR";
@@ -748,6 +762,114 @@ export interface RecommendationEngineOutput {
   };
 }
 
+export type CanonicalSignalCategory =
+  | "conversion_blocker"
+  | "trust_failure"
+  | "technical_access"
+  | "content_intent_gap"
+  | "visibility_gap"
+  | "evidence_limited";
+
+export type CanonicalIssueDomain =
+  | "Conversion Intelligence"
+  | "Trust Intelligence"
+  | "Website Health Intelligence"
+  | "Customer Intent Intelligence"
+  | "Content Gap Intelligence"
+  | "SERP Intelligence"
+  | "Local Visibility Intelligence"
+  | "Entity Intelligence"
+  | "Competitor Intelligence";
+
+export interface CanonicalSignalClassification {
+  signalId: string;
+  evidenceId: string;
+  signalKey: string;
+  primaryCategory: CanonicalSignalCategory;
+  owningLayer: CanonicalIssueDomain;
+  canonicalIssueType: string;
+  classificationBasis: string;
+}
+
+export interface CanonicalIssue {
+  canonicalIssueId: string;
+  issueType: string;
+  primaryCategory: CanonicalSignalCategory;
+  owningLayer: CanonicalIssueDomain;
+  systemDomain: CanonicalIssueDomain;
+  primaryCausalDriver: string;
+  rootCauseStatement: string;
+  customerDecisionProblem: string;
+  priorityRank: number;
+  priorityTier: "FIX NOW" | "THIS MONTH" | "MONITOR";
+  priorityReason: string;
+  mappedDimensions: DimensionKey[];
+  contributingSignalKeys: string[];
+  evidenceIds: string[];
+  confidenceScore: number;
+  confidenceLevel: ReturnType<typeof confidenceLevelForScore>;
+  authoritativeAction: string;
+  duplicateCollapseKey: string;
+  referencedInSections: Array<"keyDecisionSummary" | "rootCauseClusters" | "revenueImpactAreas" | "evidenceBreakdown" | "actionPlanMapping">;
+}
+
+export interface UnifiedIssueCanvas {
+  status: "active" | "limited_evidence";
+  preSignalClassification: CanonicalSignalClassification[];
+  canonicalIssues: CanonicalIssue[];
+  duplicateCollapseEngine: {
+    rule: "semantic_causal_equivalence";
+    rawIssueCount: number;
+    canonicalIssueCount: number;
+    collapsedDuplicateCount: number;
+  };
+  actionUnificationLayer: {
+    rule: "one_issue_one_authoritative_action";
+    authoritativeActionCount: number;
+    removedDuplicateActionCount: number;
+  };
+  postGenerationNormalization: {
+    rule: "one_meaning_one_representation";
+    normalized: boolean;
+    removedResidualDuplicateCount: number;
+  };
+  priorityHierarchy: string[];
+}
+
+export interface GlobalOutputContract {
+  schemaVersion: "systolab.output_contract.v1";
+  status: "active" | "content_unavailable";
+  keyDecisionSummary: Array<{
+    canonicalIssueId: string;
+    summary: string;
+    priorityTier: "FIX NOW" | "THIS MONTH" | "MONITOR";
+  }>;
+  rootCauseClusters: Array<{
+    canonicalIssueId: string;
+    primaryCausalDriver: string;
+    rootCauseStatement: string;
+  }>;
+  revenueImpactAreas: Array<{
+    canonicalIssueId: string;
+    impactArea: string;
+    businessImpact: string;
+    confidenceScore: number;
+  }>;
+  confidenceScore: number;
+  evidenceBreakdown: Array<{
+    canonicalIssueId: string;
+    validatedFindingCount: number;
+    evidenceCoverage: "full" | "partial" | "limited" | "blocked";
+  }>;
+  actionPlanMapping: Array<{
+    canonicalIssueId: string;
+    actionReference: string;
+    authoritativeAction: string;
+    priorityTier: "FIX NOW" | "THIS MONTH" | "MONITOR";
+  }>;
+  nonRedundancyRules: string[];
+  limitations: string[];
+}
 export interface LightweightChangeDetection {
   status: "baseline_only" | "changes_detected" | "no_material_change" | "not_available";
   comparedSnapshotId?: string;
@@ -809,6 +931,159 @@ export interface OutcomeValidationEngine {
   summary: string;
 }
 
+export type BusinessOutcomeGap =
+  | "customer_acquisition_loss"
+  | "trust_loss"
+  | "conversion_loss"
+  | "lead_generation_loss"
+  | "customer_confidence_loss"
+  | "visibility_loss"
+  | "retention_risk"
+  | "revenue_leakage";
+
+export type AttributionStrength = "high" | "moderate" | "low" | "limited";
+export type RelativeBusinessInfluence = "primary" | "strong" | "moderate" | "supporting" | "unverified";
+export type DependencyRole = "Root Cause Issue" | "Dependent Issue" | "Contributing Issue" | "Downstream Effect";
+export type RecommendationLifecycleState =
+  | "Recommended"
+  | "Accepted"
+  | "In Progress"
+  | "Implemented"
+  | "Partially Implemented"
+  | "Not Implemented"
+  | "Verified Effective"
+  | "Verified Ineffective"
+  | "Outcome Inconclusive";
+
+export interface OutcomeAttributionProfile {
+  attributionProfileId: string;
+  canonicalIssueId: string;
+  impactAreas: BusinessOutcomeGap[];
+  attributionStrength: AttributionStrength;
+  confidenceScore: number;
+  confidenceLevel: ReturnType<typeof confidenceLevelForScore>;
+  supportingEvidenceObjectIds: string[];
+  relativeBusinessInfluence: RelativeBusinessInfluence;
+  comparativeRank: number;
+  customerBehaviorExplanation: string;
+  nonPredictiveBoundary: string;
+}
+
+export interface BusinessOutcomeAttributionLayer {
+  status: "active" | "limited_evidence";
+  profiles: OutcomeAttributionProfile[];
+  rankingMethod: "relative_influence_not_prediction";
+  summary: string;
+}
+
+export interface DependencyIntelligenceLayer {
+  status: "active" | "limited_evidence";
+  issueRoles: Array<{
+    canonicalIssueId: string;
+    role: DependencyRole;
+    rationale: string;
+  }>;
+  dependencyMap: Array<{
+    parentCanonicalIssueId: string;
+    childCanonicalIssueId: string;
+    relationship: "prerequisite_for" | "reinforces" | "can_reduce" | "downstream_of";
+    confidenceScore: number;
+    explanation: string;
+  }>;
+  prerequisiteWarnings: string[];
+  summary: string;
+}
+
+export interface RecommendationSequenceItem {
+  sequenceId: string;
+  recommendationId: string;
+  canonicalIssueId?: string;
+  action: string;
+  sequencePosition: number;
+  bucket: "Immediate Actions" | "Near-Term Actions" | "Medium-Term Actions" | "Strategic Actions";
+  rationale: string;
+  dependencyChain: string[];
+  attributionProfileId?: string;
+  confidenceScore: number;
+  lifecycleState: RecommendationLifecycleState;
+}
+
+export interface RecommendationSequencingEngine {
+  status: "sequenced" | "limited";
+  immediateActions: RecommendationSequenceItem[];
+  nearTermActions: RecommendationSequenceItem[];
+  mediumTermActions: RecommendationSequenceItem[];
+  strategicActions: RecommendationSequenceItem[];
+  orderingRules: string[];
+  summary: string;
+}
+
+export interface EvidenceFreshnessGovernanceLayer {
+  status: "active" | "limited_evidence";
+  evaluatedAt: string;
+  evidenceFreshness: Array<{
+    evidenceId: string;
+    category: string;
+    acquiredAt: string;
+    validatedAt: string;
+    ageHours: number;
+    sourceRecency: EvidenceFreshnessMetadata["sourceRecency"];
+    expectedUpdateFrequency: EvidenceFreshnessMetadata["updateFrequencyExpectation"];
+    freshnessStatus: EvidenceFreshnessMetadata["freshnessStatus"];
+    confidenceAdjustment: number;
+  }>;
+  staleEvidenceIds: string[];
+  confidenceAdjustmentSummary: string;
+}
+
+export interface OutcomeVerificationRecord {
+  outcomeVerificationId: string;
+  recommendationId: string;
+  canonicalIssueId?: string;
+  implementationStatus: RecommendationLifecycleState;
+  verificationStatus: "verified" | "pending" | "inconclusive";
+  preImplementationState: string;
+  postImplementationState: string;
+  observedChange: string;
+  confidenceOfVerification: number;
+  supportingEvidenceObjectIds: string[];
+  outcomeClassification:
+    | "Strong Positive Outcome"
+    | "Moderate Positive Outcome"
+    | "Weak Positive Outcome"
+    | "No Observable Change"
+    | "Mixed Outcome"
+    | "Negative Outcome"
+    | "Insufficient Evidence";
+  attributionUncertainty: string;
+}
+
+export interface ClosedLoopOutcomeVerificationLayer {
+  status: "baseline_pending" | "verification_active" | "learning_active" | "insufficient_evidence";
+  records: OutcomeVerificationRecord[];
+  recommendationEffectivenessScores: Array<{
+    issueType: string;
+    recommendationPattern: string;
+    verifiedOutcomeCount: number;
+    effectivenessScore: number;
+    confidenceScore: number;
+  }>;
+  outcomeIntelligenceRepository: {
+    repositoryStatus: "baseline_only" | "accumulating" | "learning_ready";
+    anonymizedOutcomeCount: number;
+    issueResolutionPatterns: string[];
+    confidenceCalibrationNotes: string[];
+  };
+  summary: string;
+}
+
+export interface BusinessObjectiveAlignmentValidation {
+  status: "aligned" | "partially_aligned" | "not_assessed";
+  primaryBusinessObjective: string;
+  alignedRecommendationIds: string[];
+  misalignedRecommendationIds: string[];
+  validationNotes: string[];
+}
 export type AiceRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | "UNKNOWN";
 export type AiceRecommendedActionWindow = "FIX NOW" | "THIS MONTH" | "MONITOR";
 
@@ -1099,12 +1374,20 @@ export interface ReportSnapshot {
   groundTruthValidationLog: GroundTruthValidationLogEntry[];
   decisions: DecisionOutput[];
   decisionSummary: string;
+  unifiedIssueCanvas: UnifiedIssueCanvas;
+  globalOutputContract: GlobalOutputContract;
   businessOutcomeBridge: BusinessOutcomeBridgeItem[];
   revenueIntelligence: RevenueIntelligenceLayer;
   recommendationEngine: RecommendationEngineOutput;
   lightweightChangeDetection: LightweightChangeDetection;
   evidenceDatabase: EvidenceDatabaseEntry[];
   recommendationOutcomeLoop: OutcomeValidationEngine;
+  businessOutcomeAttributionLayer: BusinessOutcomeAttributionLayer;
+  dependencyIntelligenceLayer: DependencyIntelligenceLayer;
+  recommendationSequencingEngine: RecommendationSequencingEngine;
+  evidenceFreshnessGovernanceLayer: EvidenceFreshnessGovernanceLayer;
+  closedLoopOutcomeVerificationLayer: ClosedLoopOutcomeVerificationLayer;
+  businessObjectiveAlignmentValidation: BusinessObjectiveAlignmentValidation;
   confidenceEngine: ConfidenceEngineOutput;
   industryBenchmarkEngine: IndustryBenchmarkEngine;
   competitorIntelligenceEngine: CompetitorIntelligenceEngine;
@@ -1147,6 +1430,78 @@ export interface SpecCoverageItem {
   sourceParagraphs: string;
   status: CoverageStatus;
   implementation: string;
+}
+
+export type ReportLifecycleState = "draft" | "processing" | "available" | "reviewed" | "shared" | "archived" | "limited";
+
+export interface DecisionTimelinePoint {
+  snapshotId: string;
+  capturedAt: string;
+  scanDate: string;
+  reportLifecycle: ReportLifecycleState;
+  status: SnapshotStatus;
+  oss: number | null;
+  visualStateLabel: string;
+  businessRiskStatus: string;
+  confidenceScore: number;
+  evidenceCoveragePercent: number;
+  totalPagesSampled: number;
+  totalEvidenceObjects: number;
+  strongestSignal: string;
+  weakestSignal: string;
+  topDecision: string;
+  topRecommendedAction: string;
+  engineVersion: string;
+  intelligenceModelVersion: string;
+  decisionFrameworkVersion: string;
+  reportTemplateVersion: string;
+}
+
+export interface DecisionTimelineEvent {
+  eventId: string;
+  eventType:
+    | "baseline_created"
+    | "score_improved"
+    | "score_declined"
+    | "risk_changed"
+    | "recommendation_validated"
+    | "recommendation_regressed"
+    | "competitor_threat_detected"
+    | "content_unavailable"
+    | "review_recommended";
+  capturedAt: string;
+  snapshotId: string;
+  title: string;
+  summary: string;
+  businessMeaning: string;
+  confidenceScore: number;
+  evidenceCoveragePercent: number;
+  relatedRecommendationIds: string[];
+}
+
+export interface DecisionTimelineOutput {
+  status: "baseline_only" | "active" | "content_unavailable" | "insufficient_history";
+  targetUrl: string;
+  tenantSlug: string;
+  generatedAt: string;
+  currentSnapshotId: string;
+  currentLifecycle: ReportLifecycleState;
+  summary: string;
+  platformGovernance: {
+    sourceOfTruth: "SYSTOLAB Intelligence Engine";
+    mutationPolicy: "immutable_snapshot_history";
+    ethicsPolicy: string;
+  };
+  versionLedger: {
+    engineVersion: string;
+    intelligenceModelVersion: string;
+    decisionFrameworkVersion: string;
+    reportTemplateVersion: string;
+    currentScanDate: string;
+  };
+  points: DecisionTimelinePoint[];
+  events: DecisionTimelineEvent[];
+  limitations: string[];
 }
 
 export type InternalReportCadence = "daily" | "weekly" | "monthly" | "quarterly" | "annual" | "custom" | "event_triggered";

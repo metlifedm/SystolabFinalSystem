@@ -105,6 +105,8 @@ export function extractSystolabIntelligenceEvidence(
     const citationSignals = extractCitationSignals(text, body);
     const entitySignals = extractEntitySignals(text, title, description, headingText, schemaTypes, businessType, localSignals, ecommerceSignals);
     const contentFreshness = evaluateContentFreshness(text, page.headers ?? {});
+    const searchDemandSignals = extractSearchDemandSignals(text, businessType, expectedQuestions);
+    const serpOpportunitySignals = extractSerpOpportunitySignals($, text, schemaTypes, proofSignals, localSignals, imageCount, imagesWithAlt);
     const ctaText = $("a,button,input[type='submit']").text();
     const hasCta = /contact|call|book|quote|start|schedule|buy|demo|appointment|get started|checkout|cart/i.test(`${ctaText} ${body}`);
     const hasPricing = /price|pricing|cost|rates|fees?|quote|estimate/i.test(text);
@@ -138,6 +140,32 @@ export function extractSystolabIntelligenceEvidence(
       [viewport, internalLinks >= 5, hasCta, hasContact, proofSignals.length > 0, page.visual?.ctaAboveFold ?? hasCta].filter(Boolean).length,
       6
     );
+    const searchDemandScore = ratioScore(searchDemandSignals.covered.length, searchDemandSignals.expected.length);
+    const serpOpportunityScore = ratioScore(serpOpportunitySignals.length, 8);
+    const localVisibilityScore = ratioScore(
+      [
+        localSignals.includes("phone"),
+        localSignals.includes("address"),
+        localSignals.includes("hours"),
+        localSignals.includes("service_area"),
+        localSignals.includes("map"),
+        localSignals.includes("local_schema"),
+        proofSignals.length > 0,
+        coveredQuestions.some((family) => family.key === "contact_confidence" || family.key === "service_area")
+      ].filter(Boolean).length,
+      8
+    );
+    const rankingOpportunityScore = averageScore([
+      searchDemandScore,
+      questionCoverageScore,
+      topicAuthorityScore,
+      trustProofScore,
+      entityClarityScore,
+      citationOpportunityScore,
+      contentFreshness.score,
+      searchToSaleScore,
+      serpOpportunityScore
+    ]);
     const technicalSeoScore = averageScore([
       titleQuality(title),
       descriptionQuality(description),
@@ -208,6 +236,48 @@ export function extractSystolabIntelligenceEvidence(
           educationalSignalCount: educationalSignals.filter(Boolean).length,
           expectedEducationalSignals: educationalSignals.length
         }
+      }),
+      scoreSignal(builder, {
+        sourceModule: "systolab_search_demand_intelligence",
+        signalKey: "native_search_demand_coverage_score",
+        label: "Search Demand Coverage",
+        score: searchDemandScore,
+        url: page.finalUrl,
+        pageRole: page.role,
+        selectorPath: "title,meta[name='description'],h1,h2,h3,body",
+        rawValue: `Search demand support score ${searchDemandScore}; covered demand categories: ${searchDemandSignals.covered.join(", ") || "none"}; missing demand categories: ${searchDemandSignals.missing.join(", ") || "none"}.`,
+        confidenceBasis: "Native SYSTOLAB search-demand inference from business category, services, questions, comparison, pricing, local, trust, and decision-support content. No ranking estimate is generated.",
+        dimensionRefs: ["visibilityStructure", "informationClarity", "conversionReadiness"],
+        rawDomSnapshot: bodySnapshot,
+        details: searchDemandSignals
+      }),
+      scoreSignal(builder, {
+        sourceModule: "systolab_serp_intelligence",
+        signalKey: "native_serp_opportunity_readiness_score",
+        label: "SERP Opportunity Readiness",
+        score: serpOpportunityScore,
+        url: page.finalUrl,
+        pageRole: page.role,
+        selectorPath: "title,meta[name='description'],h1,h2,h3,script[type='application/ld+json'],img,video,body",
+        rawValue: `SERP opportunity readiness score ${serpOpportunityScore}; detected presentation supports: ${serpOpportunitySignals.join(", ") || "none"}.`,
+        confidenceBasis: "Native SYSTOLAB SERP presentation opportunity evidence for answer formats, FAQ structures, local visibility, visual assets, reviews, comparisons, video, schema, and AI-summary readiness. No visibility guarantee is made.",
+        dimensionRefs: ["visibilityStructure", "informationClarity", "trust"],
+        rawDomSnapshot: bodySnapshot,
+        details: { serpOpportunitySignals }
+      }),
+      scoreSignal(builder, {
+        sourceModule: "systolab_ranking_opportunity_intelligence",
+        signalKey: "native_ranking_opportunity_priority_score",
+        label: "Ranking Opportunity Prioritization",
+        score: rankingOpportunityScore,
+        url: page.finalUrl,
+        pageRole: page.role,
+        selectorPath: "body",
+        rawValue: `Ranking opportunity prioritization score ${rankingOpportunityScore}; priority is based on search demand, topic gaps, question gaps, authority, trust, entity, citation, freshness, competitor and business relevance evidence, not ranking prediction.`,
+        confidenceBasis: "Native SYSTOLAB prioritisation layer that groups visibility opportunities by evidence strength and business relevance without promising rankings.",
+        dimensionRefs: ["visibilityStructure", "conversionReadiness", "informationClarity"],
+        rawDomSnapshot: bodySnapshot,
+        details: { searchDemandScore, serpOpportunityScore, questionCoverageScore, topicAuthorityScore, trustProofScore, entityClarityScore, citationOpportunityScore, contentFreshnessScore: contentFreshness.score }
       }),
       scoreSignal(builder, {
         sourceModule: "systolab_customer_question_coverage_intelligence",
@@ -340,6 +410,21 @@ export function extractSystolabIntelligenceEvidence(
 
     if (localSignals.length > 0 || businessType === "local_service" || businessType === "healthcare" || businessType === "law_firm") {
       evidence.push(scoreSignal(builder, {
+        sourceModule: "systolab_local_visibility_intelligence",
+        signalKey: "native_local_visibility_opportunity_score",
+        label: "Local Visibility Opportunity",
+        score: localVisibilityScore,
+        url: page.finalUrl,
+        pageRole: page.role,
+        selectorPath: "body,script[type='application/ld+json'],a[href]",
+        rawValue: localSignals.length ? `Local visibility opportunity score ${localVisibilityScore}; local trust and discoverability signals detected: ${localSignals.join(", ")}.` : "Local visibility signals are limited",
+        confidenceBasis: "Native SYSTOLAB local visibility evidence for business profile readiness, location clarity, service-area communication, local proof, contact paths, and local credibility signals.",
+        dimensionRefs: ["visibilityStructure", "trust", "conversionReadiness"],
+        rawDomSnapshot: bodySnapshot,
+        details: { localSignals, businessType, localVisibilityScore }
+      }));
+
+      evidence.push(scoreSignal(builder, {
         sourceModule: "systolab_local_business_intelligence",
         signalKey: "native_local_business_readiness_score",
         label: "Local Business Readiness",
@@ -385,11 +470,15 @@ export function buildCompetitorContentGapEvidence(
   const signalKeys = [
     "native_topic_authority_coverage_score",
     "native_customer_question_coverage_score",
+    "native_search_demand_coverage_score",
+    "native_serp_opportunity_readiness_score",
+    "native_ranking_opportunity_priority_score",
     "native_trust_proof_coverage_score",
     "native_decision_confidence_score",
     "native_search_to_sale_support_score",
     "native_entity_clarity_score",
     "native_citation_credibility_score",
+    "native_local_visibility_opportunity_score",
     "native_content_freshness_score"
   ];
   const evidence: EvidenceObject[] = [];
@@ -560,6 +649,60 @@ function expectedQuestionFamilies(businessType: string): QuestionFamily[] {
   return [...CORE_QUESTION_FAMILIES, ...(extras ?? [])];
 }
 
+function extractSearchDemandSignals(text: string, businessType: string, expectedQuestions: QuestionFamily[]): { expected: string[]; covered: string[]; missing: string[] } {
+  const demandFamilies: QuestionFamily[] = [
+    ...expectedQuestions,
+    { key: "service_or_product_demand", label: "Service Or Product Demand", patterns: [/services?|products?|solutions?|treatments?|practice areas?|repairs?|consulting|appointments?|menu|catalog/i] },
+    { key: "local_demand", label: "Local Demand", patterns: [/near me|local|service area|city|address|directions|hours|appointment/i] },
+    { key: "educational_demand", label: "Educational Demand", patterns: [/guide|learn|resources|blog|insights|tips|what to expect|how it works/i] },
+    { key: "seasonal_or_timing_demand", label: "Seasonal Or Timing Demand", patterns: [/seasonal|holiday|summer|winter|emergency|same day|today|limited time|new year|annual/i] },
+    { key: "reputation_demand", label: "Reputation Demand", patterns: [/reviews?|testimonials?|case stud|before and after|portfolio|results/i] },
+    { key: "authority_demand", label: "Authority Demand", patterns: [/certified|licensed|award|association|member|expert|specialist|doctor|attorney|consultant/i] }
+  ];
+  if (businessType === "ecommerce") {
+    demandFamilies.push(
+      { key: "shipping_demand", label: "Shipping Demand", patterns: [/shipping|delivery|tracking|dispatch/i] },
+      { key: "return_policy_demand", label: "Return Policy Demand", patterns: [/return|refund|exchange|warranty/i] }
+    );
+  }
+
+  const unique = dedupeQuestionFamilies(demandFamilies);
+  const covered = unique.filter((family) => family.patterns.some((pattern) => pattern.test(text))).map((family) => family.key);
+  const expected = unique.map((family) => family.key);
+  return { expected, covered, missing: expected.filter((key) => !covered.includes(key)) };
+}
+
+function extractSerpOpportunitySignals(
+  $: cheerio.CheerioAPI,
+  text: string,
+  schemaTypes: string[],
+  proofSignals: string[],
+  localSignals: string[],
+  imageCount: number,
+  imagesWithAlt: number
+): string[] {
+  const checks: Array<[string, boolean]> = [
+    ["featured_answer_format", $("h1,h2,h3").filter((_, heading) => /\?|\bhow\b|\bwhat\b|\bwhy\b|\bwhen\b|\bwhere\b/i.test($(heading).text())).length > 0],
+    ["people_also_ask_support", /faq|questions|answer|what to expect|how it works/i.test(text) || schemaTypes.some((type) => /FAQPage/i.test(type))],
+    ["local_result_support", localSignals.length >= 3 || schemaTypes.some((type) => /LocalBusiness|Dentist|MedicalBusiness|LegalService/i.test(type))],
+    ["review_result_support", proofSignals.includes("reviews") || /ratings?|stars?|testimonials?/i.test(text)],
+    ["image_result_support", imageCount > 0 && imagesWithAlt / Math.max(imageCount, 1) >= 0.5],
+    ["video_result_support", /youtube|vimeo|video|watch|embed/i.test(text)],
+    ["comparison_result_support", /compare|vs\.?|versus|alternative|why choose|best/i.test(text)],
+    ["ai_summary_support", schemaTypes.length > 0 && /guide|learn|process|services?|about|expert|certified|reviews?/i.test(text)]
+  ];
+  return checks.filter(([, present]) => present).map(([key]) => key);
+}
+
+function dedupeQuestionFamilies(families: QuestionFamily[]): QuestionFamily[] {
+  const seen = new Set<string>();
+  return families.filter((family) => {
+    if (seen.has(family.key)) return false;
+    seen.add(family.key);
+    return true;
+  });
+}
+
 function extractTrustProofSignals(text: string, html: string): string[] {
   const checks: Array<[string, RegExp]> = [
     ["reviews", /reviews?|ratings?|stars?/i],
@@ -708,6 +851,10 @@ function safeCompetitorLabel(url: string): string {
 }
 
 function signalBusinessLabel(signalKey: string): string {
+  if (signalKey.includes("search_demand")) return "search demand coverage";
+  if (signalKey.includes("serp")) return "search-result presentation support";
+  if (signalKey.includes("ranking_opportunity")) return "visibility opportunity prioritization";
+  if (signalKey.includes("local_visibility")) return "local visibility support";
   if (signalKey.includes("topic_authority")) return "topical coverage";
   if (signalKey.includes("question")) return "customer question coverage";
   if (signalKey.includes("trust_proof")) return "trust-building proof";

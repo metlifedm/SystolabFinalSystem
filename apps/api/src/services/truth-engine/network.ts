@@ -6,7 +6,7 @@ import zlib from "node:zlib";
 import { env } from "../../config/env.js";
 import { recordCrawlOutcome } from "../crawlerHealthService.js";
 
-// ── User-agent pool ────────────────────────────────────────────────────────────
+// â”€â”€ User-agent pool â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const UA_POOL = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 SYSTOLABDiagnostic/1.0",
@@ -23,7 +23,7 @@ function selectUserAgent(): string {
   return ua;
 }
 
-// ── Soft-block detection patterns ─────────────────────────────────────────────
+// â”€â”€ Soft-block detection patterns â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const SOFT_BLOCK_PATTERNS = [
   /access\s+denied/i,
@@ -50,9 +50,16 @@ function detectSoftBlock(body: string, status: number): boolean {
   return SOFT_BLOCK_PATTERNS.some((pattern) => pattern.test(body));
 }
 
-// ── Error categorisation ───────────────────────────────────────────────────────
+// â”€â”€ Error categorisation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type ErrorCategory = "dns" | "tls" | "timeout" | "tcp" | "redirect" | "content" | "blocked" | "soft_block" | "unknown";
+
+export class NetworkValidationError extends Error {
+  constructor(message: string, public readonly status = 400) {
+    super(message);
+    this.name = "NetworkValidationError";
+  }
+}
 
 function categorizeError(err: unknown): ErrorCategory {
   if (!(err instanceof Error)) return "unknown";
@@ -75,6 +82,11 @@ function categorizeError(err: unknown): ErrorCategory {
   return "unknown";
 }
 
+function isDnsLookupFailure(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const code = (err as NodeJS.ErrnoException).code;
+  return code === "ENOTFOUND" || code === "EAI_AGAIN" || code === "EAI_NONAME" || code === "ENODATA";
+}
 function isRetryableError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
   const code = (err as NodeJS.ErrnoException).code;
@@ -83,7 +95,7 @@ function isRetryableError(err: unknown): boolean {
   return false;
 }
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface PublicAddress {
   address: string;
@@ -109,7 +121,7 @@ export interface FetchResult {
   errorCategory?: ErrorCategory;
 }
 
-// ── URL normalisation & validation ─────────────────────────────────────────────
+// â”€â”€ URL normalisation & validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function normalizeUrl(input: string | URL): URL {
   const trimmed = String(input).trim();
@@ -162,9 +174,17 @@ export async function resolvePublicHttpUrl(input: string | URL): Promise<PublicU
     return { url, addresses: [{ address: hostname, family: net.isIP(hostname) as 4 | 6 }] };
   }
 
-  const records = await dns.lookup(hostname, { all: true, verbatim: true });
+  let records: Array<{ address: string; family: number }>;
+  try {
+    records = await dns.lookup(hostname, { all: true, verbatim: true });
+  } catch (error) {
+    if (isDnsLookupFailure(error)) {
+      throw new NetworkValidationError(`Unable to resolve hostname: ${hostname}`);
+    }
+    throw error;
+  }
   if (records.length === 0) {
-    throw new Error(`Unable to resolve hostname: ${hostname}`);
+    throw new NetworkValidationError(`Unable to resolve hostname: ${hostname}`);
   }
   const addresses: PublicAddress[] = [];
   for (const record of records) {
@@ -188,7 +208,7 @@ export async function resolvePublicHttpUrl(input: string | URL): Promise<PublicU
   return { url, addresses };
 }
 
-// ── Core fetch with retry + telemetry ─────────────────────────────────────────
+// â”€â”€ Core fetch with retry + telemetry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function fetchText(
   url: URL,
@@ -252,7 +272,7 @@ export async function fetchText(
     }
   }
 
-  // All attempts exhausted — record failure and rethrow
+  // All attempts exhausted â€” record failure and rethrow
   const errorCategory = categorizeError(lastError);
   const durationMs = Date.now() - startedAt;
   recordCrawlOutcome({
@@ -266,7 +286,7 @@ export async function fetchText(
   throw lastError;
 }
 
-// ── Network address guards ─────────────────────────────────────────────────────
+// â”€â”€ Network address guards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export function isBlockedNetworkAddress(address: string): boolean {
   const version = net.isIP(address);
@@ -275,7 +295,7 @@ export function isBlockedNetworkAddress(address: string): boolean {
   return true;
 }
 
-// ── Internal helpers ───────────────────────────────────────────────────────────
+// â”€â”€ Internal helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function fetchOnce(
   resolution: PublicUrlResolution,

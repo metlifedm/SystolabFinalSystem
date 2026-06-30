@@ -33,6 +33,7 @@ const DIMENSION_FACTORS: Record<DimensionKey, FactorDefinition[]> = {
     { factorId: "trust_entity_clarity", key: "native_entity_clarity_score", label: "Entity clarity", weight: 8 },
     { factorId: "trust_citation_credibility", key: "native_citation_credibility_score", label: "Citation and credibility reinforcement", weight: 8 },
     { factorId: "trust_content_freshness", key: "native_content_freshness_score", label: "Content freshness trust support", weight: 5 },
+    { factorId: "trust_local_visibility", key: "native_local_visibility_opportunity_score", label: "Local visibility trust support", weight: 5 },
     { factorId: "trust_competitor_gap", key: "native_competitor_content_gap_score", label: "Competitor content gap pressure", weight: 6 }
   ],
   accessibility: [
@@ -70,6 +71,7 @@ const DIMENSION_FACTORS: Record<DimensionKey, FactorDefinition[]> = {
     { factorId: "health_resource", key: "resource_weight_score", label: "Resource efficiency", weight: 10 },
     { factorId: "health_native_seo", key: "native_seo_technical_foundation_score", label: "Native SEO technical foundation", weight: 10 },
     { factorId: "health_schema", key: "native_schema_coverage_score", label: "Structured entity readiness", weight: 6 },
+    { factorId: "health_serp_opportunity", key: "native_serp_opportunity_readiness_score", label: "Search-result presentation support", weight: 5 },
     { factorId: "health_content_freshness", key: "native_content_freshness_score", label: "Content freshness", weight: 8 }
   ],
   visibilityStructure: [
@@ -83,8 +85,12 @@ const DIMENSION_FACTORS: Record<DimensionKey, FactorDefinition[]> = {
     { factorId: "visibility_geo", key: "native_geo_ai_readiness_score", label: "AI-search answer readiness", weight: 8 },
     { factorId: "visibility_search_to_sale", key: "native_search_to_sale_support_score", label: "Search-to-sale content support", weight: 8 },
     { factorId: "visibility_topic_authority", key: "native_topic_authority_coverage_score", label: "Topic authority coverage", weight: 10 },
+    { factorId: "visibility_search_demand", key: "native_search_demand_coverage_score", label: "Search demand coverage", weight: 9 },
+    { factorId: "visibility_serp_opportunity", key: "native_serp_opportunity_readiness_score", label: "Search-result presentation support", weight: 7 },
+    { factorId: "visibility_ranking_opportunity", key: "native_ranking_opportunity_priority_score", label: "Visibility opportunity prioritization", weight: 7 },
     { factorId: "visibility_entity_clarity", key: "native_entity_clarity_score", label: "Entity clarity", weight: 8 },
     { factorId: "visibility_citation_credibility", key: "native_citation_credibility_score", label: "Citation and credibility coverage", weight: 5 },
+    { factorId: "visibility_local_visibility", key: "native_local_visibility_opportunity_score", label: "Local visibility support", weight: 6 },
     { factorId: "visibility_competitor_gap", key: "native_competitor_content_gap_score", label: "Competitor content gap", weight: 6 }
   ],
   conversionReadiness: [
@@ -99,6 +105,9 @@ const DIMENSION_FACTORS: Record<DimensionKey, FactorDefinition[]> = {
     { factorId: "conversion_ecommerce", key: "native_ecommerce_purchase_confidence_score", label: "E-commerce purchase confidence", weight: 6 },
     { factorId: "conversion_local", key: "native_local_business_readiness_score", label: "Local business readiness", weight: 6 },
     { factorId: "conversion_topic_authority", key: "native_topic_authority_coverage_score", label: "Educational decision support", weight: 6 },
+    { factorId: "conversion_search_demand", key: "native_search_demand_coverage_score", label: "Search demand decision coverage", weight: 5 },
+    { factorId: "conversion_ranking_opportunity", key: "native_ranking_opportunity_priority_score", label: "Prioritized growth opportunity", weight: 4 },
+    { factorId: "conversion_local_visibility", key: "native_local_visibility_opportunity_score", label: "Local decision support", weight: 5 },
     { factorId: "conversion_competitor_gap", key: "native_competitor_content_gap_score", label: "Competitor decision-support gap", weight: 6 }
   ],
   informationClarity: [
@@ -113,6 +122,9 @@ const DIMENSION_FACTORS: Record<DimensionKey, FactorDefinition[]> = {
     { factorId: "clarity_search_to_sale", key: "native_search_to_sale_support_score", label: "Search-to-sale clarity", weight: 8 },
     { factorId: "clarity_business_type", key: "native_business_type_detection", label: "Business type clarity", weight: 4 },
     { factorId: "clarity_topic_authority", key: "native_topic_authority_coverage_score", label: "Topic authority clarity", weight: 10 },
+    { factorId: "clarity_search_demand", key: "native_search_demand_coverage_score", label: "Search demand clarity", weight: 7 },
+    { factorId: "clarity_serp_opportunity", key: "native_serp_opportunity_readiness_score", label: "Search-result presentation clarity", weight: 5 },
+    { factorId: "clarity_ranking_opportunity", key: "native_ranking_opportunity_priority_score", label: "Visibility opportunity clarity", weight: 5 },
     { factorId: "clarity_entity", key: "native_entity_clarity_score", label: "Entity relationship clarity", weight: 8 },
     { factorId: "clarity_freshness", key: "native_content_freshness_score", label: "Content freshness clarity", weight: 5 },
     { factorId: "clarity_competitor_gap", key: "native_competitor_content_gap_score", label: "Competitor content gap", weight: 5 }

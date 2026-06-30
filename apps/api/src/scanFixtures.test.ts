@@ -11,7 +11,7 @@ import {
 import { isScanWorkerRunning, runScanWorkerCycle, startScanWorker, stopScanWorker } from "./services/scanWorker.js";
 import { assertPublicHttpUrl, isBlockedNetworkAddress, normalizeUrl } from "./services/truth-engine/network.js";
 
-describe("scan job — enqueue and retrieve", () => {
+describe("scan job â€” enqueue and retrieve", () => {
   it("enqueuePlatformJob creates a scan job in queued status", async () => {
     const job = await enqueuePlatformJob({
       jobType: "scan.execution",
@@ -98,9 +98,34 @@ describe("scan job — enqueue and retrieve", () => {
       await closeServer(server);
     }
   });
+
+  it("returns 400 for unresolvable scan targets without crashing the API", async () => {
+    const app = createApp();
+    const server = await listenOnRandomPort(app);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${baseUrl}/api/scans`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ targetUrl: "https://definitely-not-real-systolab-host.invalid", mode: "fast_scan" })
+      });
+      const payload = await response.json() as { error?: { message?: string; status?: number } };
+
+      expect(response.status).toBe(400);
+      expect(payload.error?.message).toBe("Unable to resolve hostname: definitely-not-real-systolab-host.invalid");
+      expect(payload.error?.status).toBe(400);
+
+      const health = await fetch(`${baseUrl}/`);
+      expect(health.status).toBe(200);
+    } finally {
+      await closeServer(server);
+    }
+  });
 });
 
-describe("scan worker — lifecycle", () => {
+describe("scan worker â€” lifecycle", () => {
   it("startScanWorker sets isRunning to true, stopScanWorker sets it back to false", () => {
     expect(isScanWorkerRunning()).toBe(false);
     startScanWorker();
@@ -109,7 +134,7 @@ describe("scan worker — lifecycle", () => {
     expect(isScanWorkerRunning()).toBe(false);
   });
 
-  it("startScanWorker is idempotent — calling twice does not double-register the timer", () => {
+  it("startScanWorker is idempotent â€” calling twice does not double-register the timer", () => {
     startScanWorker();
     startScanWorker(); // Second call should be a no-op
     expect(isScanWorkerRunning()).toBe(true);
@@ -125,7 +150,7 @@ describe("scan worker — lifecycle", () => {
   });
 });
 
-describe("scan security — SSRF prevention", () => {
+describe("scan security â€” SSRF prevention", () => {
   it("rejects private IPv4 scan targets", async () => {
     await expect(assertPublicHttpUrl("http://192.168.1.1")).rejects.toThrow();
     await expect(assertPublicHttpUrl("http://10.0.0.1")).rejects.toThrow();

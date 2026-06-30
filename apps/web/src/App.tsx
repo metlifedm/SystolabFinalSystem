@@ -8,6 +8,7 @@ import type {
   AuthIdentifierType,
   OtpChallengeResponse,
   PasswordResetChallengeResponse,
+  DecisionTimelineOutput,
   ReportSnapshot,
   ScanMode,
   ScanRequest,
@@ -30,6 +31,7 @@ import {
   Info,
   KeyRound,
   Layers,
+  ListChecks,
   Lock,
   LogOut,
   Mail,
@@ -336,7 +338,7 @@ function AuthConsole() {
         <div className="auth-profile-bar">
           <div className="auth-profile-identity">
             <span className="auth-profile-name">{user.displayName || user.email || user.phone || "Verified user"}</span>
-            <span className="auth-profile-sub">{user.email ?? user.phone} · {user.providers.join(", ")}</span>
+            <span className="auth-profile-sub">{user.email ?? user.phone} Â· {user.providers.join(", ")}</span>
           </div>
           <div className="auth-profile-actions">
             {tokens && (
@@ -403,7 +405,7 @@ function AuthConsole() {
               <GoogleIcon />
               Continue with Google
             </button>
-            <button className="auth-back-link" onClick={goBack}>← Back to sign-in options</button>
+            <button className="auth-back-link" onClick={goBack}>Back to sign-in options</button>
           </div>
         ) : (
           <button className="auth-google-btn" onClick={handleGoogleSignIn}>
@@ -457,7 +459,7 @@ function AuthConsole() {
                 Use password instead
               </button>
             </div>
-            <button className="auth-back-link" onClick={goBack}>← Back</button>
+            <button className="auth-back-link" onClick={goBack}>Back</button>
           </div>
         )}
 
@@ -465,7 +467,7 @@ function AuthConsole() {
           <div className="auth-expandable-form">
             <p className="auth-otp-hint">
               Code sent to <strong>{otpChallenge?.maskedDestination}</strong>
-              {otpChallenge?.simulatedDelivery.code && <span className="auth-dev-code"> · dev: {otpChallenge.simulatedDelivery.code}</span>}
+              {otpChallenge?.simulatedDelivery.code && <span className="auth-dev-code"> Â· dev: {otpChallenge.simulatedDelivery.code}</span>}
             </p>
             <label className="auth-form-field">
               <span className="auth-field-label">One-Time Code</span>
@@ -492,7 +494,7 @@ function AuthConsole() {
               <KeyRound size={16} />
               Verify & Sign In
             </button>
-            <button className="auth-back-link" onClick={() => { setAuthStep("email-otp"); setOtpChallenge(null); }}>← Back</button>
+            <button className="auth-back-link" onClick={() => { setAuthStep("email-otp"); setOtpChallenge(null); }}>Back</button>
           </div>
         )}
 
@@ -520,7 +522,7 @@ function AuthConsole() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 type="password"
-                placeholder="••••••••"
+                placeholder="********"
               />
             </label>
             <button
@@ -553,7 +555,7 @@ function AuthConsole() {
                 Forgot password?
               </button>
             </div>
-            <button className="auth-back-link" onClick={() => setAuthStep("email-otp")}>← Back to OTP login</button>
+            <button className="auth-back-link" onClick={() => setAuthStep("email-otp")}>Back to OTP login</button>
           </div>
         )}
 
@@ -587,7 +589,7 @@ function AuthConsole() {
             >
               Send Reset Link
             </button>
-            <button className="auth-back-link" onClick={() => setAuthStep("password")}>← Back</button>
+            <button className="auth-back-link" onClick={() => setAuthStep("password")}>Back</button>
           </div>
         )}
 
@@ -595,7 +597,7 @@ function AuthConsole() {
           <div className="auth-expandable-form">
             <p className="auth-otp-hint">
               Reset link sent to <strong>{resetChallenge?.maskedDestination}</strong>
-              {resetChallenge?.simulatedDelivery.token && <span className="auth-dev-code"> · dev: {resetChallenge.simulatedDelivery.token}</span>}
+              {resetChallenge?.simulatedDelivery.token && <span className="auth-dev-code"> Â· dev: {resetChallenge.simulatedDelivery.token}</span>}
             </p>
             <label className="auth-form-field">
               <span className="auth-field-label">Reset Token</span>
@@ -603,7 +605,7 @@ function AuthConsole() {
             </label>
             <label className="auth-form-field">
               <span className="auth-field-label">New Password</span>
-              <input className="auth-form-input" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} type="password" placeholder="••••••••" />
+              <input className="auth-form-input" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} type="password" placeholder="********" />
             </label>
             <button
               className="auth-submit-btn"
@@ -617,7 +619,7 @@ function AuthConsole() {
             >
               Set New Password
             </button>
-            <button className="auth-back-link" onClick={() => setAuthStep("reset")}>← Back</button>
+            <button className="auth-back-link" onClick={() => setAuthStep("reset")}>Back</button>
           </div>
         )}
 
@@ -661,9 +663,9 @@ function ScanConsole({ onReport }: { onReport: (report: ReportSnapshot) => void 
     try {
       void sendEditEvent("scan_started", null, { targetUrl, mode, competitorCount: request.competitorUrls?.length ?? 0 });
 
-      // Scan is async — backend returns 202 with a jobId, not an immediate report
+      // Scan is async - backend returns 202 with a jobId, not an immediate report
       const job = await createScan(request);
-      setScanProgress("Scan queued — analysing website...");
+      setScanProgress("Scan queued - analysing website...");
 
       const MAX_POLLS = 90; // 3 minutes at 2s interval
       for (let poll = 0; poll < MAX_POLLS; poll++) {
@@ -803,7 +805,7 @@ function EmptyState({ coverage }: { coverage: SpecCoverageItem[] }) {
   );
 }
 
-function ContentUnavailableReportView({ report, coverage, style }: { report: ReportSnapshot; coverage: SpecCoverageItem[]; style: CSSProperties }) {
+function ContentUnavailableReportView({ report, style }: { report: ReportSnapshot; style: CSSProperties }) {
   const customerAssessment = (report as unknown as {
     customerAssessment?: {
       status?: string;
@@ -852,10 +854,9 @@ function ContentUnavailableReportView({ report, coverage, style }: { report: Rep
           <CheckCircle2 size={18} />
           <h2>Recommended Action</h2>
         </div>
-        <p className="decision-summary">{customerAssessment?.recommendedAction ?? "Review access/security/robots settings and re-run scan."}</p>
+        <p className="decision-summary">{customerAssessment?.recommendedAction ?? "Review access/security settings and re-run scan."}</p>
       </section>
 
-      <CoveragePanel coverage={coverage} />
     </article>
   );
 }
@@ -872,6 +873,16 @@ interface CustomerBusinessReport {
     whyItMatters: string;
     confidence: string;
     window: string;
+  };
+  decisionTimeline: DecisionTimelineOutput | null;
+  businessDecisionSummary: {
+    confidenceScore: string;
+    evidenceStrength: string;
+    decisions: Array<{ title: string; meaning: string; priority: string }>;
+    businessDrivers: Array<{ title: string; driver: string; meaning: string }>;
+    revenueImpactAreas: Array<{ area: string; businessImpact: string; confidence: string }>;
+    priorityActions: Array<{ title: string; action: string; priority: string }>;
+    limitations: string[];
   };
   revenueLeaks: Array<{
     title: string;
@@ -895,6 +906,65 @@ interface CustomerBusinessReport {
     action: string;
     confidence: string;
   }>;
+  localVisibility: {
+    status: string;
+    gbpScore: string;
+    localVisibilityScore: string;
+    businessProfileCompleteness: string;
+    identityConsistency: string;
+    reviewAnalysis: { status: string; finding: string; gap: string; action: string };
+    serviceAreaClarity: { status: string; evidence: string; action: string };
+    citationCoverage: { status: string; score: string; action: string };
+    localCompetitorComparison: Array<{ competitor: string; position: string; reason: string }>;
+    localVisibilityOpportunities: Array<{ area: string; status: string; action: string; confidence: string }>;
+    limitations: string[];
+  };
+  competitorContentComparison: {
+    status: string;
+    summary: string;
+    comparedCompetitors: string[];
+    contentGaps: Array<{ competitor: string; area: string; clientEvidence: string; competitorEvidence: string; decisionImpact: string; action: string }>;
+    missingContentTypes: Array<{ contentType: string; status: string; action: string }>;
+    limitations: string[];
+  };
+  questionCoverage: {
+    status: string;
+    coverageScore: string;
+    questionsCustomersAsk: string[];
+    questionsAnsweredOnWebsite: string[];
+    questionsMissingFromWebsite: string[];
+    questionsCompetitorsAnswer: string[];
+    action: string;
+    confidence: string;
+  };
+  competitorWinReasons: {
+    status: string;
+    summary: string;
+    reasons: Array<{ competitor: string; reason: string; proof: string; decisionImpact: string; action: string }>;
+  };
+  revenueLeakage: {
+    status: string;
+    valueContext: string;
+    leakageAreas: Array<{ area: string; score: string; status: string; businessArea: string; customerImpact: string; action: string; confidence: string }>;
+    limitation: string;
+  };
+  outcomeAttribution: {
+    status: string;
+    summary: string;
+    outcomeLinks: Array<{ issue: string; businessAreas: string; strength: string; influence: string; explanation: string; confidence: string }>;
+    boundary: string;
+  };
+  dependencySummary: {
+    status: string;
+    summary: string;
+    businessConnections: Array<{ issue: string; role: string; rationale: string }>;
+    fixOrderWarnings: string[];
+  };
+  recommendationRoadmap: {
+    status: string;
+    summary: string;
+    phases: Array<{ phase: string; focus: string; timeframe: string; actions: Array<{ action: string; rationale: string; confidence: string; lifecycleState: string }> }>;
+  };
   psychology: Array<{
     label: string;
     reading: string;
@@ -938,7 +1008,7 @@ interface CustomerBusinessReport {
   }>;
 }
 
-function CustomerBusinessReportView({ report, coverage, style }: { report: ReportSnapshot; coverage: SpecCoverageItem[]; style: CSSProperties }) {
+function CustomerBusinessReportView({ report, style }: { report: ReportSnapshot; style: CSSProperties }) {
   const customer = buildCustomerBusinessReport(report);
   const scoreColor = customer.businessReadinessScore === null ? "#64748b" : visualStateForScore(customer.businessReadinessScore).color;
 
@@ -952,7 +1022,7 @@ function CustomerBusinessReportView({ report, coverage, style }: { report: Repor
           <div className="customer-tags">
             <span>{customer.businessType}</span>
             {customer.isEcommerce && <span>E-commerce Intelligence Active</span>}
-            <span>{report.scanCoverage?.coverageLabel ?? "Coverage unavailable"}</span>
+            <span>{report.scanCoverage?.coverageLabel ?? "Assessment breadth unavailable"}</span>
           </div>
         </div>
         <div className="business-score" style={{ borderColor: scoreColor }}>
@@ -980,6 +1050,9 @@ function CustomerBusinessReportView({ report, coverage, style }: { report: Repor
         </div>
       </section>
 
+      <CustomerBusinessDecisionSummary summary={customer.businessDecisionSummary} />
+      <CustomerDecisionTimelineSection timeline={customer.decisionTimeline} />
+
       <CustomerCategoryHeader
         title="Website Intelligence"
         description="Customer trust, conversion readiness, decision confidence, usability, and revenue-impacting website factors."
@@ -1003,6 +1076,8 @@ function CustomerBusinessReportView({ report, coverage, style }: { report: Repor
           ))}
         </div>
       </section>
+
+      <CustomerRevenueLeakageSection leakage={customer.revenueLeakage} />
 
       <section className="report-section">
         <div className="section-title">
@@ -1040,20 +1115,17 @@ function CustomerBusinessReportView({ report, coverage, style }: { report: Repor
       />
 
       <CustomerCategoryHeader
-        title="SEO Intelligence"
-        description="Search visibility readiness, topical coverage, discoverability, entity clarity, local visibility, freshness, and organic growth opportunities."
+        title="Visibility Intelligence"
+        description="Search visibility readiness, topical coverage, discoverability, local presence, freshness, and organic growth opportunities."
       />
 
       <CustomerIntelligenceSummary
-        title="SEO Opportunity Summary"
+        title="Visibility Opportunity Summary"
         icon={<Search size={18} />}
         items={customer.intelligenceSummaries.filter((item) => item.section === "search")}
       />
-      <CustomerIntelligenceSummary
-        title="Customer Question Coverage Summary"
-        icon={<Info size={18} />}
-        items={customer.intelligenceSummaries.filter((item) => item.section === "questions")}
-      />
+      <CustomerLocalVisibilitySection localVisibility={customer.localVisibility} />
+      <CustomerQuestionCoverageSection coverage={customer.questionCoverage} />
 
       <section className="report-section">
         <div className="section-title">
@@ -1105,6 +1177,10 @@ function CustomerBusinessReportView({ report, coverage, style }: { report: Repor
           ))}
         </div>
       </section>
+
+      <CustomerOutcomeAttributionSection attribution={customer.outcomeAttribution} />
+      <CustomerDependencySummarySection dependency={customer.dependencySummary} />
+      <CustomerRecommendationRoadmapSection roadmap={customer.recommendationRoadmap} />
 
       {customer.isEcommerce && (
         <section className="report-section">
@@ -1160,27 +1236,117 @@ function CustomerBusinessReportView({ report, coverage, style }: { report: Repor
         )}
       </section>
 
+      <CustomerCompetitorContentComparisonSection comparison={customer.competitorContentComparison} />
+      <CustomerCompetitorWinReasonsSection winReasons={customer.competitorWinReasons} />
+
       <details className="report-section customer-evidence-details">
         <summary>
-          <span>Expandable Evidence Layer</span>
-          <strong>{customer.evidenceItems.length} customer-safe evidence item{customer.evidenceItems.length === 1 ? "" : "s"}</strong>
+          <span>Supporting Findings</span>
+          <strong>{customer.evidenceItems.length} supporting finding{customer.evidenceItems.length === 1 ? "" : "s"}</strong>
         </summary>
         <div className="data-table compact">
-          {customer.evidenceItems.map((item) => (
+          {customer.evidenceItems.map((item, index) => (
             <div className="table-row" key={item.id}>
-              <span>{item.id}</span>
+              <span>Finding {index + 1}</span>
               <strong>{item.title}</strong>
               <small>{item.meaning} Confidence: {item.confidence}.</small>
             </div>
           ))}
         </div>
       </details>
-
-      <CoveragePanel coverage={coverage} />
     </article>
   );
 }
 
+function CustomerDecisionTimelineSection({ timeline }: { timeline: DecisionTimelineOutput | null }) {
+  if (!timeline) return null;
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <History size={18} />
+        <h2>Decision Timeline</h2>
+      </div>
+      <p className="decision-summary">{timeline.summary}</p>
+      <div className="meta-strip four-up">
+        <Metric label="Lifecycle" value={timeline.currentLifecycle.replaceAll("_", " ")} />
+        <Metric label="Status" value={timeline.status.replaceAll("_", " ")} />
+        <Metric label="Snapshots" value={String(timeline.points.length)} />
+        <Metric label="Engine" value={timeline.versionLedger.engineVersion} />
+      </div>
+      <div className="customer-intelligence-grid">
+        {timeline.points.slice(-4).map((point) => (
+          <div className="customer-intelligence-card" key={point.snapshotId}>
+            <span>{formatDate(point.capturedAt)}</span>
+            <strong>{point.oss === null ? "Not Scored" : "Business Readiness " + point.oss + "/100"}</strong>
+            <p>{point.topDecision}</p>
+            <small>{point.topRecommendedAction}</small>
+            <em>Confidence {point.confidenceScore}% - Evidence coverage {point.evidenceCoveragePercent}%</em>
+          </div>
+        ))}
+      </div>
+      {timeline.events.length > 0 && (
+        <div className="data-table compact customer-actions-table">
+          {timeline.events.slice(-8).map((event) => (
+            <div className="table-row" key={event.eventId}>
+              <span>{formatDate(event.capturedAt)}</span>
+              <strong>{event.title}</strong>
+              <small>{event.summary} {event.businessMeaning} Confidence: {event.confidenceScore}%.</small>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="meta-strip">
+        <Metric label="Decision Framework" value={timeline.versionLedger.decisionFrameworkVersion} />
+        <Metric label="Report Template" value={timeline.versionLedger.reportTemplateVersion} />
+        <Metric label="Source Of Truth" value={timeline.platformGovernance.sourceOfTruth} />
+      </div>
+      {timeline.limitations.map((item) => <p className="muted" key={item}>{item}</p>)}
+    </section>
+  );
+}
+
+function CustomerBusinessDecisionSummary({ summary }: { summary: CustomerBusinessReport["businessDecisionSummary"] }) {
+  const hasRows = summary.decisions.length > 0 || summary.priorityActions.length > 0 || summary.revenueImpactAreas.length > 0;
+  if (!hasRows) return null;
+
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <ListChecks size={18} />
+        <h2>Business Decision Summary</h2>
+      </div>
+      <div className="meta-strip">
+        <Metric label="Decision Confidence" value={summary.confidenceScore} />
+        <Metric label="Evidence Strength" value={summary.evidenceStrength} />
+        <Metric label="Business Decisions" value={String(summary.decisions.length)} />
+        <Metric label="Priority Actions" value={String(summary.priorityActions.length)} />
+      </div>
+      {summary.decisions.length > 0 && (
+        <div className="data-table compact">
+          {summary.decisions.slice(0, 5).map((item, index) => (
+            <div className="table-row" key={`${item.title}-${index}`}>
+              <span>{item.title}</span>
+              <strong>{item.priority}</strong>
+              <small>{item.meaning}</small>
+            </div>
+          ))}
+        </div>
+      )}
+      {summary.priorityActions.length > 0 && (
+        <div className="data-table compact customer-actions-table">
+          {summary.priorityActions.slice(0, 5).map((item, index) => (
+            <div className="table-row" key={`${item.title}-${index}`}>
+              <span>{item.title}</span>
+              <strong>{item.action}</strong>
+              <small>{item.priority}</small>
+            </div>
+          ))}
+        </div>
+      )}
+      {summary.limitations.map((item) => <p className="muted" key={item}>{item}</p>)}
+    </section>
+  );
+}
 function CustomerCategoryHeader({ title, description }: { title: string; description: string }) {
   return (
     <div className="customer-category-header">
@@ -1228,6 +1394,277 @@ function CustomerIntelligenceSummary({
   );
 }
 
+function CustomerRevenueLeakageSection({ leakage }: { leakage: CustomerBusinessReport["revenueLeakage"] }) {
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <DollarSign size={18} />
+        <h2>Revenue Leakage Analysis</h2>
+      </div>
+      <div className="meta-strip">
+        <Metric label="Status" value={leakage.status} />
+        <Metric label="Value Context" value={leakage.valueContext} />
+        <Metric label="Boundary" value={leakage.limitation} />
+      </div>
+      <div className="revenue-leak-grid extended-grid">
+        {leakage.leakageAreas.map((item) => (
+          <div className="revenue-leak-card" key={item.area}>
+            <span>{item.businessArea}</span>
+            <h3>{item.area}</h3>
+            <p>{item.score} - {item.status}</p>
+            <small>{item.customerImpact}</small>
+            <strong>{item.action}</strong>
+            <em>{item.confidence}</em>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CustomerLocalVisibilitySection({ localVisibility }: { localVisibility: CustomerBusinessReport["localVisibility"] }) {
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <MapPinned size={18} />
+        <h2>Local Presence Intelligence</h2>
+      </div>
+      <div className="meta-strip four-up">
+        <Metric label="Business Profile" value={localVisibility.gbpScore} />
+        <Metric label="Local Presence" value={localVisibility.localVisibilityScore} />
+        <Metric label="Profile Completeness" value={localVisibility.businessProfileCompleteness} />
+        <Metric label="Identity Clarity" value={localVisibility.identityConsistency} />
+      </div>
+      <div className="customer-intelligence-grid">
+        <div className="customer-intelligence-card">
+          <span>Review Analysis</span>
+          <strong>{localVisibility.reviewAnalysis.status}</strong>
+          <p>{localVisibility.reviewAnalysis.finding}</p>
+          <small>{localVisibility.reviewAnalysis.gap}</small>
+          <em>{localVisibility.reviewAnalysis.action}</em>
+        </div>
+        <div className="customer-intelligence-card">
+          <span>Service Area Clarity</span>
+          <strong>{localVisibility.serviceAreaClarity.status}</strong>
+          <p>{localVisibility.serviceAreaClarity.evidence}</p>
+          <small>{localVisibility.serviceAreaClarity.action}</small>
+        </div>
+        <div className="customer-intelligence-card">
+          <span>Citation Coverage</span>
+          <strong>{localVisibility.citationCoverage.status}</strong>
+          <p>{localVisibility.citationCoverage.score}</p>
+          <small>{localVisibility.citationCoverage.action}</small>
+        </div>
+      </div>
+      {localVisibility.localVisibilityOpportunities.length > 0 && (
+        <div className="data-table compact customer-actions-table">
+          {localVisibility.localVisibilityOpportunities.map((item) => (
+            <div className="table-row" key={`${item.area}-${item.status}`}>
+              <span>{item.area}</span>
+              <strong>{item.status}</strong>
+              <small>{item.action} Confidence: {item.confidence}.</small>
+            </div>
+          ))}
+        </div>
+      )}
+      {localVisibility.localCompetitorComparison.length > 0 && (
+        <div className="data-table compact customer-actions-table">
+          {localVisibility.localCompetitorComparison.map((item) => (
+            <div className="table-row" key={`${item.competitor}-${item.position}`}>
+              <span>{item.competitor}</span>
+              <strong>{item.position}</strong>
+              <small>{item.reason}</small>
+            </div>
+          ))}
+        </div>
+      )}
+      {localVisibility.limitations.map((item) => <p className="muted" key={item}>{item}</p>)}
+    </section>
+  );
+}
+
+function CustomerQuestionCoverageSection({ coverage }: { coverage: CustomerBusinessReport["questionCoverage"] }) {
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <Info size={18} />
+        <h2>Customer Question Coverage Summary</h2>
+      </div>
+      <div className="meta-strip">
+        <Metric label="Status" value={coverage.status} />
+        <Metric label="Coverage Score" value={coverage.coverageScore} />
+        <Metric label="Confidence" value={coverage.confidence} />
+      </div>
+      <div className="data-table compact question-coverage-table">
+        <div className="table-row">
+          <span>Questions Customers Ask</span>
+          <strong>{String(coverage.questionsCustomersAsk.length)}</strong>
+          <small>{joinCustomerList(coverage.questionsCustomersAsk)}</small>
+        </div>
+        <div className="table-row">
+          <span>Answered On Website</span>
+          <strong>{String(coverage.questionsAnsweredOnWebsite.length)}</strong>
+          <small>{joinCustomerList(coverage.questionsAnsweredOnWebsite)}</small>
+        </div>
+        <div className="table-row">
+          <span>Missing From Website</span>
+          <strong>{String(coverage.questionsMissingFromWebsite.length)}</strong>
+          <small>{joinCustomerList(coverage.questionsMissingFromWebsite)}</small>
+        </div>
+        <div className="table-row">
+          <span>Competitor Answers</span>
+          <strong>{String(coverage.questionsCompetitorsAnswer.length)}</strong>
+          <small>{joinCustomerList(coverage.questionsCompetitorsAnswer)}</small>
+        </div>
+        <div className="table-row">
+          <span>Recommended Action</span>
+          <strong>Answer gaps</strong>
+          <small>{coverage.action}</small>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CustomerOutcomeAttributionSection({ attribution }: { attribution: CustomerBusinessReport["outcomeAttribution"] }) {
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <BarChart3 size={18} />
+        <h2>What Affects Revenue Most</h2>
+      </div>
+      <p className="decision-summary">{attribution.summary}</p>
+      {attribution.outcomeLinks.length > 0 ? (
+        <div className="data-table compact customer-actions-table">
+          {attribution.outcomeLinks.map((item) => (
+            <div className="table-row" key={`${item.issue}-${item.businessAreas}`}>
+              <span>{item.issue}</span>
+              <strong>{item.businessAreas}</strong>
+              <small>{item.explanation} Strength: {item.strength}; influence: {item.influence}; confidence: {item.confidence}.</small>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No evidence-bound business impact link passed the reporting threshold in this scan.</p>
+      )}
+      <p className="muted">{attribution.boundary}</p>
+    </section>
+  );
+}
+
+function CustomerDependencySummarySection({ dependency }: { dependency: CustomerBusinessReport["dependencySummary"] }) {
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <Layers size={18} />
+        <h2>What To Fix Before Other Work</h2>
+      </div>
+      <p className="decision-summary">{dependency.summary}</p>
+      {dependency.businessConnections.length > 0 ? (
+        <div className="data-table compact customer-actions-table">
+          {dependency.businessConnections.map((item) => (
+            <div className="table-row" key={`${item.issue}-${item.role}`}>
+              <span>{item.issue}</span>
+              <strong>{item.role}</strong>
+              <small>{item.rationale}</small>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No fix-order relationship passed the reporting threshold in this scan.</p>
+      )}
+      {dependency.fixOrderWarnings.map((item) => <p className="muted" key={item}>{item}</p>)}
+    </section>
+  );
+}
+
+function CustomerRecommendationRoadmapSection({ roadmap }: { roadmap: CustomerBusinessReport["recommendationRoadmap"] }) {
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <ListChecks size={18} />
+        <h2>Implementation Roadmap</h2>
+      </div>
+      <p className="decision-summary">{roadmap.summary}</p>
+      <div className="customer-roadmap-grid">
+        {roadmap.phases.map((phase) => (
+          <div className="customer-roadmap-card" key={phase.phase}>
+            <span>{phase.phase}</span>
+            <strong>{phase.focus}</strong>
+            <em>{phase.timeframe}</em>
+            {phase.actions.length > 0 ? phase.actions.map((action, index) => (
+              <p key={`${phase.phase}-${index}`}>{action.action} <small>{action.confidence}; {action.lifecycleState}.</small></p>
+            )) : <p>No action in this phase from the current evidence.</p>}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CustomerCompetitorContentComparisonSection({ comparison }: { comparison: CustomerBusinessReport["competitorContentComparison"] }) {
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <Search size={18} />
+        <h2>Website vs Competitor Content Comparison</h2>
+      </div>
+      <div className="meta-strip">
+        <Metric label="Status" value={comparison.status} />
+        <Metric label="Competitors" value={comparison.comparedCompetitors.length ? comparison.comparedCompetitors.join(", ") : "Not assessed"} />
+        <Metric label="Summary" value={comparison.summary} />
+      </div>
+      {comparison.contentGaps.length > 0 ? (
+        <div className="data-table compact customer-actions-table">
+          {comparison.contentGaps.map((item) => (
+            <div className="table-row" key={`${item.competitor}-${item.area}`}>
+              <span>{item.area}</span>
+              <strong>{item.clientEvidence} vs {item.competitorEvidence}</strong>
+              <small>{item.competitor}: {item.decisionImpact} {item.action}</small>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No validated competitor content advantage was available in this scan.</p>
+      )}
+      <div className="data-table compact customer-actions-table">
+        {comparison.missingContentTypes.map((item) => (
+          <div className="table-row" key={item.contentType}>
+            <span>{item.contentType}</span>
+            <strong>{item.status}</strong>
+            <small>{item.action}</small>
+          </div>
+        ))}
+      </div>
+      {comparison.limitations.map((item) => <p className="muted" key={item}>{item}</p>)}
+    </section>
+  );
+}
+
+function CustomerCompetitorWinReasonsSection({ winReasons }: { winReasons: CustomerBusinessReport["competitorWinReasons"] }) {
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <ShieldCheck size={18} />
+        <h2>Why Competitors Are Winning</h2>
+      </div>
+      <p className="decision-summary">{winReasons.summary}</p>
+      {winReasons.reasons.length > 0 ? (
+        <div className="data-table compact customer-actions-table">
+          {winReasons.reasons.map((item) => (
+            <div className="table-row" key={`${item.competitor}-${item.reason}`}>
+              <span>{item.competitor}</span>
+              <strong>{item.reason}</strong>
+              <small>{item.proof} {item.decisionImpact} {item.action}</small>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">No specific competitor win reason was validated beyond score-level comparison.</p>
+      )}
+    </section>
+  );
+}
 function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessReport {
   const dimensions = report.dimensions ?? [];
   const score = typeof report.oss?.score === "number" && report.oss.scoringStatus !== "not_scored" ? report.oss.score : null;
@@ -1253,6 +1690,7 @@ function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessRe
     isEcommerce,
     verdict: customerVerdict(score, weakest),
     verdictExplanation: customerVerdictExplanation(report, weakest, strongest),
+    decisionTimeline: buildCustomerDecisionTimeline(report),
     highestRoiAction: {
       action: highest?.action ?? report.actionFirstPanel?.fallbackAction ?? "Clarify the main customer action and re-run the assessment.",
       whyItMatters: highestRoiReason,
@@ -1260,8 +1698,17 @@ function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessRe
       window: priorityToBusinessWindow(highest?.priority ?? report.priorityTimeline?.thisMonth?.[0]?.category ?? "THIS MONTH")
     },
     revenueLeaks,
+    businessDecisionSummary: buildCustomerBusinessDecisionSummary(report),
     businessRisks: buildCustomerBusinessRisks(report, recommendations),
     intelligenceSummaries: buildCustomerIntelligenceSummaries(report),
+    localVisibility: buildCustomerLocalVisibility(report),
+    competitorContentComparison: buildCustomerCompetitorContentComparison(report),
+    questionCoverage: buildCustomerQuestionCoverage(report),
+    competitorWinReasons: buildCustomerCompetitorWinReasons(report),
+    revenueLeakage: buildCustomerRevenueLeakage(report),
+    outcomeAttribution: buildCustomerOutcomeAttribution(report),
+    dependencySummary: buildCustomerDependencySummary(report),
+    recommendationRoadmap: buildCustomerRecommendationRoadmap(report),
     psychology: buildCustomerPsychology(report),
     impactSummary: buildBusinessImpactSummary(report, revenueLeaks, competitorGaps),
     recommendedActions: recommendations.slice(0, 6).map((item, index) => ({
@@ -1278,6 +1725,256 @@ function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessRe
   };
 }
 
+function buildCustomerDecisionTimeline(report: ReportSnapshot): DecisionTimelineOutput | null {
+  const fromPayload = (report as unknown as { decisionTimeline?: DecisionTimelineOutput }).decisionTimeline;
+  if (fromPayload?.points?.length) return fromPayload;
+  const evolution = report.businessEvolutionEngine;
+  if (!evolution?.timeline?.length) return null;
+  const points = evolution.timeline.map((point) => ({
+    snapshotId: point.snapshotId,
+    capturedAt: point.capturedAt,
+    scanDate: point.capturedAt,
+    reportLifecycle: "available" as const,
+    status: report.status,
+    oss: point.oss,
+    visualStateLabel: report.oss?.visualState?.label ?? "Unknown",
+    businessRiskStatus: report.businessRiskStatus?.classification ?? "UNKNOWN",
+    confidenceScore: Math.round(report.confidenceEngine?.overallConfidenceScore ?? averageConfidence(report)),
+    evidenceCoveragePercent: Math.round(((report.evidenceCoverageSummary?.pages ?? []).filter((page) => page.coverageStatus === "Complete").length / Math.max(1, report.evidenceCoverageSummary?.pages?.length ?? 1)) * 100),
+    totalPagesSampled: report.evidenceCoverageSummary?.totalPagesSampled ?? 0,
+    totalEvidenceObjects: report.evidenceCoverageSummary?.totalEvidenceObjects ?? report.evidenceObjects?.length ?? 0,
+    strongestSignal: report.dimensions?.slice().sort((a, b) => b.score - a.score)[0]?.label ?? "Not enough evidence",
+    weakestSignal: report.dimensions?.slice().sort((a, b) => a.score - b.score)[0]?.label ?? "Not enough evidence",
+    topDecision: point.topCause,
+    topRecommendedAction: report.recommendationEngine?.recommendations?.[0]?.action ?? report.executiveClarity?.recommendedFirstAction ?? "Re-run scan after evidence is available",
+    engineVersion: report.executionProvenance?.systemVersion ?? "SYSTOLAB V1",
+    intelligenceModelVersion: report.executionProvenance?.systemVersion ?? "SYSTOLAB V1",
+    decisionFrameworkVersion: report.reportGovernance?.version ?? "SYSTOLAB Governance v1.0",
+    reportTemplateVersion: report.structuredOutputSchema?.schemaVersion ?? "report-template-v1"
+  }));
+  return {
+    status: points.length <= 1 ? "baseline_only" : "active",
+    targetUrl: report.targetUrl,
+    tenantSlug: report.tenantBranding.slug,
+    generatedAt: new Date().toISOString(),
+    currentSnapshotId: report.snapshotId,
+    currentLifecycle: report.status === "completed" ? "available" : "limited",
+    summary: evolution.causeNarrative,
+    platformGovernance: {
+      sourceOfTruth: "SYSTOLAB Intelligence Engine",
+      mutationPolicy: "immutable_snapshot_history",
+      ethicsPolicy: "SYSTOLAB separates observed, inferred, and estimated conclusions."
+    },
+    versionLedger: {
+      engineVersion: report.executionProvenance?.systemVersion ?? "SYSTOLAB V1",
+      intelligenceModelVersion: report.executionProvenance?.systemVersion ?? "SYSTOLAB V1",
+      decisionFrameworkVersion: report.reportGovernance?.version ?? "SYSTOLAB Governance v1.0",
+      reportTemplateVersion: report.structuredOutputSchema?.schemaVersion ?? "report-template-v1",
+      currentScanDate: report.freshness?.capturedAt ?? report.createdAt
+    },
+    points,
+    events: [],
+    limitations: ["Timeline is built from available immutable report history for this website."]
+  };
+}
+
+function buildCustomerBusinessDecisionSummary(report: ReportSnapshot): CustomerBusinessReport["businessDecisionSummary"] {
+  const payload = (report as unknown as { customerBusinessDecisionSummary?: Partial<CustomerBusinessReport["businessDecisionSummary"]> }).customerBusinessDecisionSummary;
+  const contract = (report as unknown as { globalOutputContract?: ReportSnapshot["globalOutputContract"] }).globalOutputContract;
+  const fallback = contract && contract.status !== "content_unavailable" ? {
+    confidenceScore: `${Math.round(contract.confidenceScore)}%`,
+    evidenceStrength: customerEvidenceStrengthLabel(report),
+    decisions: contract.keyDecisionSummary.map((item, index) => ({
+      title: `Business decision ${index + 1}`,
+      meaning: customerSafeText(item.summary),
+      priority: customerSafeText(item.priorityTier)
+    })),
+    businessDrivers: contract.rootCauseClusters.map((item, index) => ({
+      title: `Business driver ${index + 1}`,
+      driver: customerSafeText(item.primaryCausalDriver),
+      meaning: customerSafeText(item.rootCauseStatement)
+    })),
+    revenueImpactAreas: contract.revenueImpactAreas.map((item) => ({
+      area: customerSafeText(item.impactArea),
+      businessImpact: customerSafeText(item.businessImpact),
+      confidence: `${Math.round(item.confidenceScore)}%`
+    })),
+    priorityActions: contract.actionPlanMapping.map((item, index) => ({
+      title: `Priority action ${index + 1}`,
+      action: customerSafeText(item.authoritativeAction),
+      priority: customerSafeText(item.priorityTier)
+    })),
+    limitations: textArray(contract.limitations)
+  } : undefined;
+
+  return {
+    confidenceScore: customerSafeText(payload?.confidenceScore ?? fallback?.confidenceScore ?? "0%"),
+    evidenceStrength: customerSafeText(payload?.evidenceStrength ?? fallback?.evidenceStrength ?? customerEvidenceStrengthLabel(report)),
+    decisions: normalizeRows(payload?.decisions).length ? normalizeRows(payload?.decisions) : fallback?.decisions ?? [],
+    businessDrivers: normalizeRows(payload?.businessDrivers).length ? normalizeRows(payload?.businessDrivers) : fallback?.businessDrivers ?? [],
+    revenueImpactAreas: normalizeRows(payload?.revenueImpactAreas).length ? normalizeRows(payload?.revenueImpactAreas) : fallback?.revenueImpactAreas ?? [],
+    priorityActions: normalizeRows(payload?.priorityActions).length ? normalizeRows(payload?.priorityActions) : fallback?.priorityActions ?? [],
+    limitations: textArray(payload?.limitations).length ? textArray(payload?.limitations) : fallback?.limitations ?? []
+  };
+}
+function buildCustomerLocalVisibility(report: ReportSnapshot): CustomerBusinessReport["localVisibility"] {
+  const payload = (report as unknown as { customerLocalVisibility?: Partial<CustomerBusinessReport["localVisibility"]> }).customerLocalVisibility;
+  return {
+    status: customerSafeText(payload?.status ?? report.gbpIdentity?.status ?? "Not assessed"),
+    gbpScore: customerSafeText(payload?.gbpScore ?? (report.gbpIdentity ? `${report.gbpIdentity.identityConsistencyScore}/100` : "Not assessed")),
+    localVisibilityScore: customerSafeText(payload?.localVisibilityScore ?? "Not assessed"),
+    businessProfileCompleteness: customerSafeText(payload?.businessProfileCompleteness ?? report.gbpIdentity?.profileCompletenessLevel ?? "Not Assessed"),
+    identityConsistency: customerSafeText(payload?.identityConsistency ?? report.gbpIdentity?.identityMismatchFlag ?? "Not assessed"),
+    reviewAnalysis: {
+      status: customerSafeText(payload?.reviewAnalysis?.status ?? "Review and rating trends not assessed"),
+      finding: customerSafeText(payload?.reviewAnalysis?.finding ?? "The current scan did not collect verified review count, rating trend, or business profile history evidence."),
+      gap: customerSafeText(payload?.reviewAnalysis?.gap ?? "Add visible review/rating proof or provide profile data before drawing review-trend conclusions."),
+      action: customerSafeText(payload?.reviewAnalysis?.action ?? "Show current reviews, rating proof, testimonial depth, service proof, and local credibility near decision points.")
+    },
+    serviceAreaClarity: {
+      status: customerSafeText(payload?.serviceAreaClarity?.status ?? "Service-area evidence limited"),
+      evidence: customerSafeText(payload?.serviceAreaClarity?.evidence ?? "No strong service-area, hours, map, or local contact signal was validated."),
+      action: customerSafeText(payload?.serviceAreaClarity?.action ?? "Clarify address, phone, hours, service areas, appointment path, and local proof.")
+    },
+    citationCoverage: {
+      status: customerSafeText(payload?.citationCoverage?.status ?? "Not assessed"),
+      score: customerSafeText(payload?.citationCoverage?.score ?? "Not assessed"),
+      action: customerSafeText(payload?.citationCoverage?.action ?? "Strengthen directory, association, partner, listing, media, and authority-reference signals where they support credibility.")
+    },
+    localCompetitorComparison: normalizeRows(payload?.localCompetitorComparison),
+    localVisibilityOpportunities: normalizeRows(payload?.localVisibilityOpportunities),
+    limitations: textArray(payload?.limitations)
+  };
+}
+
+function buildCustomerCompetitorContentComparison(report: ReportSnapshot): CustomerBusinessReport["competitorContentComparison"] {
+  const payload = (report as unknown as { customerCompetitorContentComparison?: Partial<CustomerBusinessReport["competitorContentComparison"]> }).customerCompetitorContentComparison;
+  const fallbackGaps = buildCustomerCompetitorGaps(report).map((gap) => ({
+    competitor: gap.competitor,
+    area: gap.area,
+    clientEvidence: "Client weaker",
+    competitorEvidence: "Competitor stronger",
+    decisionImpact: gap.decisionImpact,
+    action: "Close the competitor information gap with clearer proof, answers, transparency, or decision-support content."
+  }));
+  return {
+    status: customerSafeText(payload?.status ?? (fallbackGaps.length ? "Competitor content gaps detected" : "Not assessed")),
+    summary: customerSafeText(payload?.summary ?? (fallbackGaps.length ? "SYSTOLAB found areas where compared competitors provide stronger customer decision support." : "No validated competitor content advantage was available in this scan.")),
+    comparedCompetitors: textArray(payload?.comparedCompetitors),
+    contentGaps: normalizeRows(payload?.contentGaps).length ? normalizeRows(payload?.contentGaps) : fallbackGaps,
+    missingContentTypes: normalizeRows(payload?.missingContentTypes),
+    limitations: textArray(payload?.limitations)
+  };
+}
+
+function buildCustomerQuestionCoverage(report: ReportSnapshot): CustomerBusinessReport["questionCoverage"] {
+  const payload = (report as unknown as { customerQuestionCoverage?: Partial<CustomerBusinessReport["questionCoverage"]> }).customerQuestionCoverage;
+  return {
+    status: customerSafeText(payload?.status ?? "Not assessed"),
+    coverageScore: customerSafeText(payload?.coverageScore ?? "Not assessed"),
+    questionsCustomersAsk: textArray(payload?.questionsCustomersAsk),
+    questionsAnsweredOnWebsite: textArray(payload?.questionsAnsweredOnWebsite),
+    questionsMissingFromWebsite: textArray(payload?.questionsMissingFromWebsite),
+    questionsCompetitorsAnswer: textArray(payload?.questionsCompetitorsAnswer).length ? textArray(payload?.questionsCompetitorsAnswer) : ["Competitor question-answer coverage was not validated in this scan."],
+    action: customerSafeText(payload?.action ?? "Add direct answers for price, process, trust, comparison, objections, contact, service area, availability, and decision-stage questions."),
+    confidence: customerSafeText(payload?.confidence ?? "Limited confidence")
+  };
+}
+
+function buildCustomerCompetitorWinReasons(report: ReportSnapshot): CustomerBusinessReport["competitorWinReasons"] {
+  const payload = (report as unknown as { customerCompetitorWinReasons?: Partial<CustomerBusinessReport["competitorWinReasons"]> }).customerCompetitorWinReasons;
+  const fallback = buildCustomerCompetitorGaps(report).map((gap) => ({
+    competitor: gap.competitor,
+    reason: `${gap.competitor} appears stronger in ${gap.area}.`,
+    proof: gap.position,
+    decisionImpact: gap.decisionImpact,
+    action: "Improve the matching customer decision area with stronger content, proof, and next-step support."
+  }));
+  const payloadReasons = normalizeRows<CustomerBusinessReport["competitorWinReasons"]["reasons"][number]>(payload?.reasons);
+  const reasons = payloadReasons.length ? payloadReasons : fallback;
+  return {
+    status: customerSafeText(payload?.status ?? (reasons.length ? "Validated competitor advantage detected" : "Not validated")),
+    summary: customerSafeText(payload?.summary ?? (reasons.length ? "Competitors are winning in the specific evidence-backed areas listed below." : "This scan did not validate why a competitor is winning beyond score-level comparison.")),
+    reasons
+  };
+}
+
+function buildCustomerRevenueLeakage(report: ReportSnapshot): CustomerBusinessReport["revenueLeakage"] {
+  const payload = (report as unknown as { customerRevenueLeakage?: Partial<CustomerBusinessReport["revenueLeakage"]> }).customerRevenueLeakage;
+  const fallbackAreas = ["trust", "conversionReadiness", "informationClarity", "visibilityStructure"].map((key) => {
+    const dimension = (report.dimensions ?? []).find((item) => item.key === key);
+    return {
+      area: leakTitleForDimension(key, businessDimensionLabel(key)),
+      score: typeof dimension?.score === "number" ? `${dimension.score}/100` : "Not assessed",
+      status: dimension?.classification ?? "Not assessed",
+      businessArea: businessDimensionLabel(key),
+      customerImpact: customerImpactForDimension(key),
+      action: actionForDimensionKey(key),
+      confidence: dimension ? `${dimension.confidenceScore}% ${dimension.confidenceLevel}` : "Limited confidence"
+    };
+  });
+  return {
+    status: customerSafeText(payload?.status ?? report.revenueIntelligence?.status ?? "Not assessed"),
+    valueContext: customerSafeText(payload?.valueContext ?? (report.revenueIntelligence?.revenueOpportunityRange ? `${opportunityLabel(report.revenueIntelligence.revenueOpportunityRange.label)}: ${report.revenueIntelligence.revenueOpportunityRange.low}-${report.revenueIntelligence.revenueOpportunityRange.high}` : "Revenue leakage is not estimated without validated current-scan evidence.")),
+    leakageAreas: normalizeRows(payload?.leakageAreas).length ? normalizeRows(payload?.leakageAreas) : fallbackAreas,
+    limitation: customerSafeText(payload?.limitation ?? "These are structural leakage categories supported by scan evidence, not guaranteed revenue outcomes.")
+  };
+}
+
+function buildCustomerOutcomeAttribution(report: ReportSnapshot): CustomerBusinessReport["outcomeAttribution"] {
+  const payload = (report as unknown as { customerBusinessOutcomeSummary?: Partial<CustomerBusinessReport["outcomeAttribution"]> }).customerBusinessOutcomeSummary;
+  return {
+    status: customerSafeText(payload?.status ?? "Not assessed"),
+    summary: customerSafeText(payload?.summary ?? "No business impact link passed the current evidence threshold."),
+    outcomeLinks: normalizeRows(payload?.outcomeLinks),
+    boundary: customerSafeText(payload?.boundary ?? "Business impact links are directional and evidence-bound; they do not claim actual revenue loss without verified performance data.")
+  };
+}
+
+function buildCustomerDependencySummary(report: ReportSnapshot): CustomerBusinessReport["dependencySummary"] {
+  const payload = (report as unknown as { customerIssueConnectionSummary?: Partial<CustomerBusinessReport["dependencySummary"]> }).customerIssueConnectionSummary;
+  return {
+    status: customerSafeText(payload?.status ?? "Not assessed"),
+    summary: customerSafeText(payload?.summary ?? "No issue connection passed the evidence threshold."),
+    businessConnections: normalizeRows(payload?.businessConnections),
+    fixOrderWarnings: textArray(payload?.fixOrderWarnings)
+  };
+}
+
+function buildCustomerRecommendationRoadmap(report: ReportSnapshot): CustomerBusinessReport["recommendationRoadmap"] {
+  const payload = (report as unknown as { customerImplementationRoadmap?: Partial<CustomerBusinessReport["recommendationRoadmap"]> }).customerImplementationRoadmap;
+  const phases = normalizeRows<CustomerBusinessReport["recommendationRoadmap"]["phases"][number]>(payload?.phases);
+  return {
+    status: customerSafeText(payload?.status ?? (phases.some((phase) => phase.actions?.length) ? "Sequenced" : "Not assessed")),
+    summary: customerSafeText(payload?.summary ?? "Recommendations are grouped into practical phases."),
+    phases: phases.length ? phases : [
+      { phase: "Phase 1", focus: "Fix trust and critical blockers", timeframe: "FIX NOW", actions: [] },
+      { phase: "Phase 2", focus: "Fix conversion and decision clarity", timeframe: "THIS MONTH", actions: [] },
+      { phase: "Phase 3", focus: "Fix authority and visibility support", timeframe: "MONITOR", actions: [] },
+      { phase: "Phase 4", focus: "Capture demand and monitor gains", timeframe: "Follow-up", actions: [] }
+    ]
+  };
+}
+
+function normalizeRows<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function textArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(customerSafeText).filter(Boolean) : [];
+}
+
+function actionForDimensionKey(key: string): string {
+  if (key === "trust") return "Add stronger proof, reviews, testimonials, certifications, guarantees, and credibility cues.";
+  if (key === "conversionReadiness") return "Clarify the primary action path and remove friction before form, booking, contact, or purchase.";
+  if (key === "informationClarity") return "Explain the offer, process, pricing cues, outcomes, and next steps more clearly.";
+  if (key === "visibilityStructure") return "Improve discoverability, page structure, entity cues, local signals, and internal linking.";
+  return "Improve the weakest validated customer decision area first.";
+}
+
+function joinCustomerList(items: string[]): string {
+  return items.length ? items.map(customerSafeText).join(" ") : "Not validated in this scan.";
+}
 function detectBusinessType(report: ReportSnapshot): string {
   const declared = report.industryBenchmarkEngine?.industryType?.trim();
   if (declared && declared !== "general") return titleCase(declared.replaceAll("_", " "));
@@ -1304,12 +2001,13 @@ function hasCommerceSignals(report: ReportSnapshot): boolean {
 }
 
 function customerSearchText(report: ReportSnapshot): string {
+  const safeEvidenceItems = (report as unknown as { customerEvidenceItems?: Array<{ title?: string; meaning?: string }> }).customerEvidenceItems ?? [];
   const values = [
     report.targetUrl,
     report.industryBenchmarkEngine?.industryType,
     report.decisionSummary,
     ...(report.decisions ?? []).map((decision) => `${decision.category} ${decision.impactExplanation} ${decision.recommendedActionPath}`),
-    ...(report.evidenceObjects ?? []).slice(0, 60).map((evidence) => `${evidence.rawValue} ${evidence.url}`),
+    ...safeEvidenceItems.map((item) => `${item.title ?? ""} ${item.meaning ?? ""}`),
     ...(report.recommendationEngine?.recommendations ?? []).map((recommendation) => `${recommendation.issue} ${recommendation.action}`)
   ];
   return values.join(" ").toLowerCase();
@@ -1337,7 +2035,7 @@ function customerVerdictExplanation(
   strongest: ReportSnapshot["dimensions"][number] | undefined
 ): string {
   const pages = report.evidenceCoverageSummary?.totalPagesSampled ?? report.scanCoverage?.sampledPages ?? 0;
-  const evidence = report.evidenceCoverageSummary?.totalEvidenceObjects ?? report.evidenceObjects?.length ?? 0;
+  const evidence = customerValidatedFindingCount(report);
   if (pages <= 0 || evidence <= 0) return "SYSTOLAB did not infer business impact because validated website evidence was unavailable.";
   const weak = weakest ? `${businessDimensionLabel(weakest.label)} is the main validated constraint` : "No single dominant constraint was validated";
   const strong = strongest ? `${businessDimensionLabel(strongest.label)} is the strongest current signal` : "validated strengths were limited";
@@ -1441,6 +2139,9 @@ function buildCustomerBusinessRisks(
 }
 
 function buildCustomerIntelligenceSummaries(report: ReportSnapshot): CustomerBusinessReport["intelligenceSummaries"] {
+  const safeSummaries = (report as unknown as { customerIntelligenceSummaries?: CustomerBusinessReport["intelligenceSummaries"] }).customerIntelligenceSummaries;
+  if (safeSummaries?.length) return safeSummaries.slice(0, 15);
+
   const signals = nativeEvidence(report);
   const summaries = [
     ...summaryForSignals(
@@ -1452,8 +2153,12 @@ function buildCustomerIntelligenceSummaries(report: ReportSnapshot): CustomerBus
         "native_seo_technical_foundation_score",
         "native_schema_coverage_score",
         "native_topic_authority_coverage_score",
+        "native_search_demand_coverage_score",
+        "native_serp_opportunity_readiness_score",
+        "native_ranking_opportunity_priority_score",
         "native_entity_clarity_score",
         "native_citation_credibility_score",
+        "native_local_visibility_opportunity_score",
         "native_content_freshness_score",
         "native_competitor_content_gap_score"
       ]
@@ -1505,6 +2210,10 @@ function intelligenceMeaningForSignal(signalKey: string): string {
   if (signalKey.includes("trust_proof")) return "Weak proof can make customers delay decisions or compare competitors with stronger credibility signals.";
   if (signalKey.includes("journey")) return "The path from discovery to action may contain friction that interrupts confidence before conversion.";
   if (signalKey.includes("topic_authority")) return "Customers may be unable to find enough helpful service information to build confidence before contacting the business.";
+  if (signalKey.includes("search_demand")) return "Customer demand may exist around services, questions, comparisons, timing, or trust topics that the current website does not cover strongly enough.";
+  if (signalKey.includes("serp")) return "Search-result presentation opportunities may be missed when answer formats, local cues, reviews, visuals, or comparison support are incomplete.";
+  if (signalKey.includes("ranking_opportunity")) return "Visibility opportunities should be prioritized by evidence strength, customer relevance, trust gaps, and business impact rather than ranking promises.";
+  if (signalKey.includes("local_visibility")) return "Local customers may need clearer location, availability, service-area, contact, and credibility signals before choosing the business.";
   if (signalKey.includes("entity_clarity")) return "Customers and search systems may need clearer signals about the business, services, locations, people, and expertise.";
   if (signalKey.includes("citation")) return "Discoverability and credibility may be stronger when the business has clearer reputation, association, listing, and authority signals.";
   if (signalKey.includes("freshness")) return "Older or stale content can make customers question whether the offer, service, or information is still current.";
@@ -1521,6 +2230,10 @@ function actionForNativeSignal(signalKey: string): string {
   if (signalKey.includes("trust_proof")) return "Add testimonials, reviews, certifications, portfolio proof, case studies, awards, or client credibility signals.";
   if (signalKey.includes("journey")) return "Reduce navigation friction and make trust cues, key content, and CTAs visible along the path to action.";
   if (signalKey.includes("topic_authority")) return "Build stronger educational pages, service guides, supporting resources, and answers around the topics customers need before deciding.";
+  if (signalKey.includes("search_demand")) return "Add content for uncovered demand topics, service/product needs, comparison questions, local intent, reputation concerns, and seasonal or timing needs.";
+  if (signalKey.includes("serp")) return "Structure key pages with direct answers, FAQ-style sections, review proof, visual support, comparison context, and clear local/entity cues.";
+  if (signalKey.includes("ranking_opportunity")) return "Prioritize low-effort, medium-term, and strategic visibility improvements that also strengthen trust, clarity, and conversion readiness.";
+  if (signalKey.includes("local_visibility")) return "Clarify phone, address, opening hours, service area, appointments, directions, and local credibility.";
   if (signalKey.includes("entity_clarity")) return "Clarify business identity, service names, product/service relationships, team expertise, locations, and structured entity signals.";
   if (signalKey.includes("citation")) return "Strengthen reputation, association, directory, listing, partner, and authority references where they support business credibility.";
   if (signalKey.includes("freshness")) return "Update outdated pages, refresh service information, remove expired offers, and add current dates or reviewed content where useful.";
@@ -1711,6 +2424,16 @@ function visualActionForDimension(dimension: string): string {
 }
 
 function buildCustomerEvidenceItems(report: ReportSnapshot): CustomerBusinessReport["evidenceItems"] {
+  const safeRows = (report as unknown as { customerEvidenceItems?: Array<{ title?: string; confidence?: string; meaning?: string }> }).customerEvidenceItems;
+  if (safeRows?.length) {
+    return safeRows.slice(0, 18).map((item, index) => ({
+      id: `finding-${index + 1}`,
+      title: customerSafeText(item.title ?? "Validated Website Finding"),
+      confidence: customerSafeText(item.confidence ?? "Evidence-bound"),
+      meaning: customerSafeText(item.meaning ?? "Validated website evidence supports this finding.")
+    }));
+  }
+
   const databaseRows = (report.evidenceDatabase ?? []).map((evidence) => ({
     id: evidence.evidenceId,
     title: customerSafeText(evidence.issue),
@@ -1726,6 +2449,20 @@ function buildCustomerEvidenceItems(report: ReportSnapshot): CustomerBusinessRep
   return dedupeBy([...databaseRows, ...fallbackRows], (item) => item.id).slice(0, 18);
 }
 
+function customerValidatedFindingCount(report: ReportSnapshot): number {
+  const coverage = report.evidenceCoverageSummary as unknown as { totalEvidenceObjects?: number; totalValidatedFindings?: number } | undefined;
+  const safeRows = (report as unknown as { customerEvidenceItems?: unknown[] }).customerEvidenceItems;
+  return coverage?.totalValidatedFindings ?? coverage?.totalEvidenceObjects ?? safeRows?.length ?? report.evidenceObjects?.length ?? 0;
+}
+
+function customerEvidenceStrengthLabel(report: ReportSnapshot): string {
+  const sampledPages = report.evidenceCoverageSummary?.totalPagesSampled ?? report.scanCoverage?.sampledPages ?? 0;
+  const validatedFindings = customerValidatedFindingCount(report);
+  if (sampledPages <= 0 || validatedFindings <= 0) return "Very limited";
+  if (sampledPages < 2 || validatedFindings < 4) return "Limited";
+  if (validatedFindings < 10) return "Moderate";
+  return "Strong";
+}
 function averageConfidence(report: ReportSnapshot): number {
   const scores = [report.confidenceEngine?.overallConfidenceScore, ...(report.confidenceLayer ?? []).map((item) => item.confidenceScore)].filter((score): score is number => typeof score === "number");
   if (scores.length === 0) return 60;
@@ -1793,11 +2530,32 @@ function opportunityLabel(label: string): string {
 
 function customerSafeText(value: unknown): string {
   return String(value ?? "Not Available")
+    .replace(/\bEO-[A-Za-z0-9-]+/g, "validated finding")
+    .replace(/\bEV-[A-Za-z0-9-]+/g, "validated finding")
+    .replace(/\bREC-[A-Za-z0-9-]+/g, "recommendation")
+    .replace(/\bTRACE-[A-Za-z0-9-]+/gi, "internal reference")
     .replace(/\bOSS\b/g, "Business Readiness Score")
     .replace(/Operational Site Score/gi, "Business Readiness Score")
+    .replace(/Global Output Contract/gi, "Business Decision Summary")
+    .replace(/Action Plan Mapping/gi, "Priority Action Summary")
+    .replace(/canonical issue ids?/gi, "business decision references")
+    .replace(/canonical issues?/gi, "business decisions")
+    .replace(/canonical/gi, "business")
+    .replace(/dependency intelligence/gi, "fix-order guidance")
+    .replace(/dependency chains?/gi, "issue connections")
+    .replace(/dependencies/gi, "fix-order relationships")
+    .replace(/attribution/gi, "business impact link")
+    .replace(/robots\.txt|robots/gi, "website access rules")
+    .replace(/crawler|crawl/gi, "content collection")
+    .replace(/parser|parsing/gi, "content analysis")
+    .replace(/\bHTTP\b/gi, "website access")
+    .replace(/\bDOM\b/gi, "page structure")
     .replace(/Monthly Value Units/gi, "Revenue Leak Opportunity")
     .replace(/\bEO\b/g, "Evidence")
+    .replace(/evidence objects?/gi, "validated findings")
     .replace(/\bGTCS\b/g, "Evidence Confidence")
+    .replace(/\bGBP\b/g, "Business Profile")
+    .replace(/\bSEO\b/gi, "Visibility")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1821,21 +2579,11 @@ function InternalReportView({ report, coverage, audience = "customer" }: { repor
   } as CSSProperties;
 
   if (audience === "customer" && isContentUnavailableReport(report)) {
-    return (
-      <>
-        <ContentUnavailableReportView report={report} coverage={coverage} style={style} />
-        <FullReportDetailsView report={report} coverage={coverage} audience={audience} style={style} />
-      </>
-    );
+    return <ContentUnavailableReportView report={report} style={style} />;
   }
 
   if (audience === "customer") {
-    return (
-      <>
-        <CustomerBusinessReportView report={report} coverage={coverage} style={style} />
-        <FullReportDetailsView report={report} coverage={coverage} audience={audience} style={style} />
-      </>
-    );
+    return <CustomerBusinessReportView report={report} style={style} />;
   }
 
   return <FullReportDetailsView report={report} coverage={coverage} audience={audience} style={style} />;
@@ -2180,7 +2928,7 @@ function DecisionIntelligenceBriefSection({ report }: { report: ReportSnapshot }
   );
 }
 
-// ── Revenue Risk & Business Impact Assessment ─────────────────────────────────
+// Revenue Risk & Business Impact Assessment
 
 interface RriLevel {
   label: string;
@@ -2337,19 +3085,19 @@ function RevenueRiskAssessment({ report }: { report: ReportSnapshot }) {
         <div className="opportunity-estimates">
           <div className="opportunity-estimate-card">
             <span>Revenue Opportunity</span>
-            <strong>{revenue.revenueOpportunityRange?.low} – {revenue.revenueOpportunityRange?.high}</strong>
+            <strong>{revenue.revenueOpportunityRange?.low} - {revenue.revenueOpportunityRange?.high}</strong>
             <em>{revenue.revenueOpportunityRange?.unit?.replaceAll("_", " ")}</em>
             <p>{revenue.revenueOpportunityRange?.label}</p>
           </div>
           <div className="opportunity-estimate-card">
             <span>Conversion Potential</span>
-            <strong>{revenue.conversionPotentialRange?.low} – {revenue.conversionPotentialRange?.high}</strong>
+            <strong>{revenue.conversionPotentialRange?.low} - {revenue.conversionPotentialRange?.high}</strong>
             <em>{revenue.conversionPotentialRange?.unit?.replaceAll("_", " ")}</em>
             <p>{revenue.conversionPotentialRange?.label}</p>
           </div>
           <div className="opportunity-estimate-card">
             <span>Opportunity Cost Range</span>
-            <strong>{revenue.opportunityCostRange?.low} – {revenue.opportunityCostRange?.high}</strong>
+            <strong>{revenue.opportunityCostRange?.low} - {revenue.opportunityCostRange?.high}</strong>
             <em>{revenue.opportunityCostRange?.unit?.replaceAll("_", " ")}</em>
             <p>{revenue.opportunityCostRange?.label ?? "Not estimated because validated evidence was insufficient"}</p>
           </div>
@@ -2440,7 +3188,7 @@ function RevenueRiskAssessment({ report }: { report: ReportSnapshot }) {
           <div className="roadmap-phase-header">
             <div className="roadmap-phase-dot" style={{ background: "#EF4444" }} />
             <span>Immediate Actions</span>
-            <em>0–7 Days</em>
+            <em>0-7 Days</em>
           </div>
           {(timeline.fixNow?.length ?? 0) === 0 ? (
             <div className="roadmap-empty">No immediate actions required</div>
@@ -2454,7 +3202,7 @@ function RevenueRiskAssessment({ report }: { report: ReportSnapshot }) {
           <div className="roadmap-phase-header">
             <div className="roadmap-phase-dot" style={{ background: "#F59E0B" }} />
             <span>Short-Term Improvements</span>
-            <em>1–4 Weeks</em>
+            <em>1-4 Weeks</em>
           </div>
           {(timeline.thisMonth?.length ?? 0) === 0 ? (
             <div className="roadmap-empty">No short-term actions identified</div>
@@ -2468,7 +3216,7 @@ function RevenueRiskAssessment({ report }: { report: ReportSnapshot }) {
           <div className="roadmap-phase-header">
             <div className="roadmap-phase-dot" style={{ background: "#3B82F6" }} />
             <span>Long-Term Optimisation</span>
-            <em>1–3 Months</em>
+            <em>1-3 Months</em>
           </div>
           {(timeline.monitor?.length ?? 0) === 0 ? (
             <div className="roadmap-empty">No long-term initiatives identified</div>
@@ -4541,7 +5289,7 @@ function fallbackUnavailableDecisionBrief(report: ReportSnapshot): ReportSnapsho
     executiveVerdict: {
       currentSituation: "Website content could not be collected, so the current situation cannot be scored from validated page evidence.",
       seriousness: "No structural risk level or revenue impact was inferred because evidence coverage is 0%.",
-      firstAction: "Review website access, security, and robots settings before re-running the assessment.",
+      firstAction: "Review website access and security settings before re-running the assessment.",
       urgency: "Not Applicable",
       likelyBusinessImpact: "Unable to calculate from validated current-scan evidence.",
       evidenceBasis: "0 sampled pages and 0 validated page evidence objects were available."
@@ -4560,7 +5308,7 @@ function fallbackUnavailableDecisionBrief(report: ReportSnapshot): ReportSnapsho
       primaryBusinessConstraint: "Website content could not be collected.",
       potentialBusinessImpact: "Unable to calculate from validated current-scan evidence.",
       ifNotAddressedOutcome: "No outcome projection was generated because page evidence was unavailable.",
-      recommendedNextAction: "Review access/security/robots settings and re-run scan."
+      recommendedNextAction: "Review access/security settings and re-run scan."
     },
     actionPlan: [
       {

@@ -89,12 +89,72 @@ describe("content-unavailable customer report mapping", () => {
 
   it("keeps successful fixture reports scored with non-zero evidence", () => {
     const report = makeScoredReport();
-    const payload = buildCustomerReportPayload(report) as ReportSnapshot;
+    const payload = buildCustomerReportPayload(report) as Record<string, unknown>;
+    const oss = payload["oss"] as ReportSnapshot["oss"];
+    const scanCoverage = payload["scanCoverage"] as ReportSnapshot["scanCoverage"];
+    const customerEvidenceItems = payload["customerEvidenceItems"] as unknown[];
+    const json = JSON.stringify(payload);
 
-    expect(payload.oss.score).toBe(72);
-    expect(payload.oss.scoringStatus).toBe("scored");
-    expect(payload.evidenceObjects.length).toBeGreaterThan(0);
-    expect(payload.scanCoverage.sampledPages).toBeGreaterThan(0);
+    expect(oss.score).toBe(72);
+    expect(oss.scoringStatus).toBe("scored");
+    expect(scanCoverage.sampledPages).toBeGreaterThan(0);
+    const localVisibility = payload["customerLocalVisibility"] as { reviewAnalysis?: unknown; localVisibilityOpportunities?: unknown[] };
+    const questionCoverage = payload["customerQuestionCoverage"] as { questionsCustomersAsk?: unknown[] };
+    const competitorContent = payload["customerCompetitorContentComparison"] as { missingContentTypes?: unknown[] };
+    const revenueLeakage = payload["customerRevenueLeakage"] as { leakageAreas?: unknown[] };
+
+    expect(customerEvidenceItems.length).toBeGreaterThan(0);
+    expect(localVisibility.reviewAnalysis).toBeDefined();
+    expect(Array.isArray(localVisibility.localVisibilityOpportunities)).toBe(true);
+    expect(Array.isArray(questionCoverage.questionsCustomersAsk)).toBe(true);
+    expect(Array.isArray(competitorContent.missingContentTypes)).toBe(true);
+    expect(Array.isArray(revenueLeakage.leakageAreas)).toBe(true);
+    expect(json).not.toMatch(/evidenceObjects|rawSignalTelemetry|validationTrace|executionProvenance|rawDomSnapshot|selectorPath|normalizedInput/i);
+    expect(json).not.toMatch(/EO-1|EV-|REC-/);
+  });
+
+  it("exposes a customer-safe business decision summary instead of the backend output contract", () => {
+    const payload = buildCustomerReportPayload(makeScoredReport()) as Record<string, unknown>;
+    const summary = payload["customerBusinessDecisionSummary"] as {
+      decisions: Array<{ title: string; meaning: string; priority: string }>;
+      businessDrivers: unknown[];
+      priorityActions: Array<{ title: string; action: string; priority: string }>;
+      evidenceStrength: string;
+    };
+    const json = JSON.stringify(payload);
+
+    expect(payload).not.toHaveProperty("globalOutputContract");
+    expect(summary.decisions[0]?.title).toBe("Business decision 1");
+    expect(summary.decisions[0]?.meaning).toContain("Customers may be ready to act");
+    expect(summary.businessDrivers.length).toBe(1);
+    expect(summary.priorityActions[0]?.title).toBe("Priority action 1");
+    expect(summary.evidenceStrength).toBeTruthy();
+    expect(json).not.toMatch(/canonicalIssueId|globalOutputContract|systolab\.output_contract|CI-001|evidenceIds|recommendationIds|rawSignalTelemetry|validationTrace|selectorPath|rawDomSnapshot/i);
+  });
+
+  it("keeps backend outcome attribution and verification layers out of customer payloads", () => {
+    const report = makeScoredReport() as ReportSnapshot & Record<string, unknown>;
+    report.businessOutcomeAttributionLayer = { status: "active", profiles: [{ attributionProfileId: "OAP-CI-001", canonicalIssueId: "CI-001" }] } as unknown as ReportSnapshot["businessOutcomeAttributionLayer"];
+    report.dependencyIntelligenceLayer = { status: "active", issueRoles: [], dependencyMap: [], prerequisiteWarnings: [], summary: "internal" } as unknown as ReportSnapshot["dependencyIntelligenceLayer"];
+    report.recommendationSequencingEngine = { status: "sequenced", immediateActions: [], nearTermActions: [], mediumTermActions: [], strategicActions: [], orderingRules: [], summary: "internal" } as unknown as ReportSnapshot["recommendationSequencingEngine"];
+    report.evidenceFreshnessGovernanceLayer = { status: "active", evaluatedAt: "2026-06-14T00:00:00.000Z", evidenceFreshness: [], staleEvidenceIds: [], confidenceAdjustmentSummary: "internal" } as unknown as ReportSnapshot["evidenceFreshnessGovernanceLayer"];
+    report.closedLoopOutcomeVerificationLayer = { status: "baseline_pending", records: [], recommendationEffectivenessScores: [], outcomeIntelligenceRepository: { repositoryStatus: "baseline_only", anonymizedOutcomeCount: 0, issueResolutionPatterns: [], confidenceCalibrationNotes: [] }, summary: "internal" } as unknown as ReportSnapshot["closedLoopOutcomeVerificationLayer"];
+    report.businessObjectiveAlignmentValidation = { status: "aligned", primaryBusinessObjective: "internal", alignedRecommendationIds: [], misalignedRecommendationIds: [], validationNotes: [] } as unknown as ReportSnapshot["businessObjectiveAlignmentValidation"];
+
+    const payload = buildCustomerReportPayload(report);
+    const json = JSON.stringify(payload);
+
+    expect(payload).not.toHaveProperty("businessOutcomeAttributionLayer");
+    expect(payload).not.toHaveProperty("dependencyIntelligenceLayer");
+    expect(payload).not.toHaveProperty("recommendationSequencingEngine");
+    expect(payload).not.toHaveProperty("evidenceFreshnessGovernanceLayer");
+    expect(payload).not.toHaveProperty("closedLoopOutcomeVerificationLayer");
+    expect(payload).not.toHaveProperty("businessObjectiveAlignmentValidation");
+    expect(payload).not.toHaveProperty("recommendationOutcomeLoop");
+    expect(payload).toHaveProperty("customerBusinessOutcomeSummary");
+    expect(payload).toHaveProperty("customerIssueConnectionSummary");
+    expect(payload).toHaveProperty("customerImplementationRoadmap");
+    expect(json).not.toMatch(/OAP-CI-001|attributionProfileId|supportingEvidenceObjectIds|Outcome Verification|recommendationEffectivenessScores|dependencyMap|sequenceId|recommendationId|customerOutcomeAttribution|customerDependencySummary|customerRecommendationRoadmap/i);
   });
 
   it("maps failed fetch reports to Not Scored instead of 0/100", () => {
@@ -273,6 +333,27 @@ function makeScoredReport(): ReportSnapshot {
       capturedAt: "2026-06-14T00:00:00.000Z"
     }
   ] as unknown as ReportSnapshot["evidenceObjects"];
+  report.unifiedIssueCanvas = {
+    status: "active",
+    preSignalClassification: [],
+    canonicalIssues: [],
+    duplicateCollapseEngine: { rule: "semantic_causal_equivalence", rawIssueCount: 1, canonicalIssueCount: 1, collapsedDuplicateCount: 0 },
+    actionUnificationLayer: { rule: "one_issue_one_authoritative_action", authoritativeActionCount: 1, removedDuplicateActionCount: 0 },
+    postGenerationNormalization: { rule: "one_meaning_one_representation", normalized: true, removedResidualDuplicateCount: 0 },
+    priorityHierarchy: ["1. Conversion-blocking issues"]
+  } as unknown as ReportSnapshot["unifiedIssueCanvas"];
+  report.globalOutputContract = {
+    schemaVersion: "systolab.output_contract.v1",
+    status: "active",
+    keyDecisionSummary: [{ canonicalIssueId: "CI-001", summary: "Customers may be ready to act but need a clearer next step.", priorityTier: "FIX NOW" }],
+    rootCauseClusters: [{ canonicalIssueId: "CI-001", primaryCausalDriver: "The customer action path is not strongly supported.", rootCauseStatement: "Conversion Readiness: action path gap." }],
+    revenueImpactAreas: [{ canonicalIssueId: "CI-001", impactArea: "Lead readiness", businessImpact: "Structural opportunity only.", confidenceScore: 72 }],
+    confidenceScore: 72,
+    evidenceBreakdown: [{ canonicalIssueId: "CI-001", validatedFindingCount: 3, evidenceCoverage: "partial" }],
+    actionPlanMapping: [{ canonicalIssueId: "CI-001", actionReference: "REC-001", authoritativeAction: "Clarify the primary CTA.", priorityTier: "FIX NOW" }],
+    nonRedundancyRules: ["Each canonical issue appears once."],
+    limitations: ["Decision support only."]
+  } as unknown as ReportSnapshot["globalOutputContract"];
   return report;
 }
 
@@ -365,7 +446,7 @@ function makeUnavailableReport(): ReportSnapshot {
     executiveVerdict: {
       currentSituation: "Website content could not be collected, so the current situation cannot be scored from validated page evidence.",
       seriousness: "No structural risk level or revenue impact was inferred because evidence coverage is 0%.",
-      firstAction: "Review website access, security, and robots settings before re-running the assessment.",
+      firstAction: "Review website access and security settings before re-running the assessment.",
       urgency: "Not Applicable",
       likelyBusinessImpact: "Unable to calculate from validated current-scan evidence.",
       evidenceBasis: "0 sampled pages and 0 validated page evidence objects were available."
@@ -384,7 +465,7 @@ function makeUnavailableReport(): ReportSnapshot {
       primaryBusinessConstraint: "Website content could not be collected.",
       potentialBusinessImpact: "Unable to calculate from validated current-scan evidence.",
       ifNotAddressedOutcome: "No outcome projection was generated because page evidence was unavailable.",
-      recommendedNextAction: "Review access/security/robots settings and re-run scan."
+      recommendedNextAction: "Review access/security settings and re-run scan."
     },
     actionPlan: [
       {

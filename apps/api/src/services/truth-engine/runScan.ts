@@ -14,7 +14,13 @@ import {
   type BusinessDnaEngine,
   type BusinessEvolutionEngine,
   type BusinessRiskStatus,
+  type BusinessObjectiveAlignmentValidation,
+  type BusinessOutcomeAttributionLayer,
   type BusinessVitalSign,
+  type CanonicalIssue,
+  type CanonicalSignalCategory,
+  type CanonicalIssueDomain,
+  type ClosedLoopOutcomeVerificationLayer,
   type ClosedLoopProofSystem,
   type ComparativeFinding,
   type ConfidenceMetric,
@@ -25,16 +31,19 @@ import {
   type CompetitorTimelinePoint,
   type DataInputStatus,
   type DecisionOutput,
+  type DependencyIntelligenceLayer,
   type DimensionKey,
   type DimensionScore,
   type EditIntelligenceSystem,
   type EvidenceCluster,
   type EvidenceCoverageSummary,
   type EvidenceDatabaseEntry,
+  type EvidenceFreshnessGovernanceLayer,
   type EvidenceObject,
   type ExecutionProvenance,
   type ExecutiveSummaryRow,
   type GbpIdentityAnalysis,
+  type GlobalOutputContract,
   type GroundTruthValidationLogEntry,
   type ArchitectureLayerState,
   type IndustryBenchmarkEngine,
@@ -43,11 +52,16 @@ import {
   type MonitoringSchedulerState,
   type OperationalMemoryGraph,
   type OssInterpretation,
+  type OutcomeAttributionProfile,
   type OutcomeValidationEngine,
+  type OutcomeVerificationRecord,
   type PriorityTimelineFramework,
   type PriorityTimelineItem,
   type RawSignalEvent,
   type RecommendationEngineOutput,
+  type RecommendationLifecycleState,
+  type RecommendationSequenceItem,
+  type RecommendationSequencingEngine,
   type RevenueIntelligenceLayer,
   type RenderState,
   type ReportSnapshot,
@@ -56,6 +70,7 @@ import {
   type SystemHealthState,
   type TenantBranding,
   type TransformationProjection,
+  type UnifiedIssueCanvas,
   type ValidationTraceEntry,
   visualStateForScore
 } from "@systolab/shared";
@@ -171,7 +186,11 @@ export async function runSystolabScan(
   const status = contentUnavailable ? "content_unavailable" : primary.coverage.robotsTxtStatus === "blocked" ? "analysis_limited" : "completed";
   const visualState = contentUnavailable ? NOT_SCORED_VISUAL_STATE : visualStateForScore(scoreForDerivedInternalSections);
   const confidenceLayer = contentUnavailable ? buildContentUnavailableConfidenceLayer() : buildConfidenceLayer(primary);
-  const decisions = contentUnavailable ? [] : buildDecisions(primaryDimensions, primaryEvidenceObjects);
+  const rawDecisions = contentUnavailable ? [] : buildDecisions(primaryDimensions, primaryEvidenceObjects);
+  const unifiedIssueCanvas = contentUnavailable ? buildContentUnavailableUnifiedIssueCanvas() : buildUnifiedIssueCanvas(rawDecisions, primaryDimensions, primaryEvidenceObjects);
+  const businessOutcomeAttributionLayer = buildBusinessOutcomeAttributionLayer(unifiedIssueCanvas, primaryDimensions, primaryEvidenceObjects, contentUnavailable);
+  const dependencyIntelligenceLayer = buildDependencyIntelligenceLayer(unifiedIssueCanvas, businessOutcomeAttributionLayer);
+  const decisions = contentUnavailable ? [] : normalizeDecisionsThroughIssueCanvas(rawDecisions, unifiedIssueCanvas);
   const executiveClarity = contentUnavailable ? buildContentUnavailableExecutiveClarity() : buildExecutiveClarity(primaryDimensions, scoreForDerivedInternalSections, decisions);
   const verdictCard = contentUnavailable ? buildContentUnavailableVerdictCard() : buildVerdictCard(scoreForDerivedInternalSections, decisions, request.monthlyLeadVolume);
   const businessRiskStatus = contentUnavailable ? buildContentUnavailableBusinessRiskStatus() : buildBusinessRiskStatus(scoreForDerivedInternalSections, primaryDimensions, decisions);
@@ -189,7 +208,8 @@ export async function runSystolabScan(
   const marketReadinessPosition = buildMarketReadinessPosition(primaryDimensions, benchmarkContext);
   const competitorComparison = buildCompetitorComparison(primary, competitorResults);
   const revenueIntelligence = buildRevenueIntelligence(scoreForDerivedInternalSections, primaryDimensions, decisions, competitorComparison, request.monthlyLeadVolume);
-  const recommendationEngine = buildRecommendationEngine(primaryDimensions, decisions, revenueIntelligence);
+  const recommendationEngine = buildRecommendationEngine(primaryDimensions, decisions, revenueIntelligence, unifiedIssueCanvas, businessOutcomeAttributionLayer);
+  const recommendationSequencingEngine = buildRecommendationSequencingEngine(recommendationEngine, unifiedIssueCanvas, businessOutcomeAttributionLayer, dependencyIntelligenceLayer);
   const lightweightChangeDetection = buildLightweightChangeDetection(previousSnapshot, scoreForDerivedInternalSections, primaryDimensions, recommendationEngine);
   const architectureState = buildArchitectureState();
   const allEvidenceObjects = [...primaryEvidenceObjects, ...gbpResult.evidenceObjects];
@@ -204,7 +224,11 @@ export async function runSystolabScan(
   const evidenceCoverageSummary = buildEvidenceCoverageSummary(primary.pages, allEvidenceObjects);
   const evidenceDatabase = buildEvidenceDatabase(snapshotId, reportCreatedAt, previousSnapshot, decisions, allEvidenceObjects, allValidationTrace, lightweightChangeDetection);
   const recommendationOutcomeLoop = buildOutcomeValidationEngine(previousSnapshot, reportCreatedAt, scoreForDerivedInternalSections, primaryDimensions, recommendationEngine, revenueIntelligence);
+  const evidenceFreshnessGovernanceLayer = buildEvidenceFreshnessGovernanceLayer(allEvidenceObjects, reportCreatedAt);
+  const closedLoopOutcomeVerificationLayer = buildClosedLoopOutcomeVerificationLayer(previousSnapshot, recommendationSequencingEngine, recommendationOutcomeLoop, businessOutcomeAttributionLayer, unifiedIssueCanvas);
+  const businessObjectiveAlignmentValidation = buildBusinessObjectiveAlignmentValidation(request, recommendationSequencingEngine);
   const confidenceEngine = buildConfidenceEngine(confidenceLayer, evidenceCoverageSummary, revenueIntelligence, recommendationEngine, industryBenchmarkEngine, competitorComparison, recommendationOutcomeLoop);
+  const globalOutputContract = buildGlobalOutputContract(unifiedIssueCanvas, recommendationEngine, revenueIntelligence, confidenceEngine, contentUnavailable);
   const competitorIntelligenceEngine = buildCompetitorIntelligenceEngine(competitorComparison, snapshotHistory, snapshotId, reportCreatedAt);
   const monitoringScheduler = buildMonitoringScheduler(request, primary.normalizedUrl.toString(), reportCreatedAt);
   const alertEngine = buildAlertEngine(scoreForDerivedInternalSections, previousSnapshot, lightweightChangeDetection, competitorIntelligenceEngine, recommendationOutcomeLoop, revenueIntelligence, reportCreatedAt);
@@ -276,12 +300,20 @@ export async function runSystolabScan(
     groundTruthValidationLog,
     decisions,
     decisionSummary: buildDecisionSummary(decisions),
+    unifiedIssueCanvas,
+    globalOutputContract,
     businessOutcomeBridge,
     revenueIntelligence,
     recommendationEngine,
     lightweightChangeDetection,
     evidenceDatabase,
     recommendationOutcomeLoop,
+    businessOutcomeAttributionLayer,
+    dependencyIntelligenceLayer,
+    recommendationSequencingEngine,
+    evidenceFreshnessGovernanceLayer,
+    closedLoopOutcomeVerificationLayer,
+    businessObjectiveAlignmentValidation,
     confidenceEngine,
     industryBenchmarkEngine,
     competitorIntelligenceEngine,
@@ -992,6 +1024,808 @@ function buildDecisions(dimensions: DimensionScore[], evidenceObjects: EvidenceO
   }).filter((decision) => decision.evidenceTraceReferences.length > 0 || decision.category === "Insufficient Evidence State");
 }
 
+function buildContentUnavailableUnifiedIssueCanvas(): UnifiedIssueCanvas {
+  return {
+    status: "limited_evidence",
+    preSignalClassification: [],
+    canonicalIssues: [],
+    duplicateCollapseEngine: {
+      rule: "semantic_causal_equivalence",
+      rawIssueCount: 0,
+      canonicalIssueCount: 0,
+      collapsedDuplicateCount: 0
+    },
+    actionUnificationLayer: {
+      rule: "one_issue_one_authoritative_action",
+      authoritativeActionCount: 0,
+      removedDuplicateActionCount: 0
+    },
+    postGenerationNormalization: {
+      rule: "one_meaning_one_representation",
+      normalized: true,
+      removedResidualDuplicateCount: 0
+    },
+    priorityHierarchy: decisionPriorityHierarchy()
+  };
+}
+
+function buildUnifiedIssueCanvas(
+  decisions: DecisionOutput[],
+  dimensions: DimensionScore[],
+  evidenceObjects: EvidenceObject[]
+): UnifiedIssueCanvas {
+  const preSignalClassification = evidenceObjects.map((evidence, index) => classifyEvidenceSignal(evidence, index));
+  const rawIssues = decisions
+    .map((decision) => canonicalIssueFromDecision(decision, dimensions, evidenceObjects, preSignalClassification))
+    .filter((issue): issue is CanonicalIssue => Boolean(issue));
+
+  const collapsed = new Map<string, CanonicalIssue>();
+  for (const issue of rawIssues) {
+    const existing = collapsed.get(issue.duplicateCollapseKey);
+    if (!existing) {
+      collapsed.set(issue.duplicateCollapseKey, issue);
+      continue;
+    }
+    collapsed.set(issue.duplicateCollapseKey, mergeCanonicalIssues(existing, issue));
+  }
+
+  const issues = [...collapsed.values()]
+    .filter((issue) => issue.evidenceIds.length > 1 || issue.confidenceScore >= 65 || issue.primaryCategory === "technical_access")
+    .sort((a, b) =>
+      priorityOrder(a.primaryCategory) - priorityOrder(b.primaryCategory) ||
+      a.confidenceScore - b.confidenceScore ||
+      a.issueType.localeCompare(b.issueType)
+    )
+    .slice(0, 7)
+    .map((issue, index) => ({
+      ...issue,
+      canonicalIssueId: `CI-${String(index + 1).padStart(3, "0")}`,
+      priorityRank: index + 1,
+      priorityTier: priorityTierForRank(index, issue.primaryCategory)
+    }));
+
+  const uniqueActions = new Set(issues.map((issue) => normalizeActionText(issue.authoritativeAction)));
+  return {
+    status: issues.length > 0 ? "active" : "limited_evidence",
+    preSignalClassification,
+    canonicalIssues: issues,
+    duplicateCollapseEngine: {
+      rule: "semantic_causal_equivalence",
+      rawIssueCount: rawIssues.length,
+      canonicalIssueCount: issues.length,
+      collapsedDuplicateCount: Math.max(0, rawIssues.length - issues.length)
+    },
+    actionUnificationLayer: {
+      rule: "one_issue_one_authoritative_action",
+      authoritativeActionCount: uniqueActions.size,
+      removedDuplicateActionCount: Math.max(0, issues.length - uniqueActions.size)
+    },
+    postGenerationNormalization: {
+      rule: "one_meaning_one_representation",
+      normalized: true,
+      removedResidualDuplicateCount: Math.max(0, rawIssues.length - issues.length)
+    },
+    priorityHierarchy: decisionPriorityHierarchy()
+  };
+}
+
+function canonicalIssueFromDecision(
+  decision: DecisionOutput,
+  dimensions: DimensionScore[],
+  evidenceObjects: EvidenceObject[],
+  classifications: UnifiedIssueCanvas["preSignalClassification"]
+): CanonicalIssue | null {
+  const dimension = dimensionForDecision(decision, dimensions);
+  const evidenceIds = Array.from(new Set(decision.evidenceTraceReferences));
+  const evidence = evidenceObjects.filter((item) => evidenceIds.includes(item.evidenceId));
+  const signalKeys = Array.from(new Set(evidence.map((item) => String(item.normalizedInput?.["signalKey"] ?? "unknown_signal"))));
+  const ownership = ownershipForIssue(dimension?.key, signalKeys, classifications.filter((item) => evidenceIds.includes(item.evidenceId)));
+  const confidenceScore = clampScore(decision.confidenceScore);
+  const primaryCausalDriver = primaryDriverForIssue(ownership.issueType, dimension);
+  return {
+    canonicalIssueId: "CI-PENDING",
+    issueType: ownership.issueType,
+    primaryCategory: ownership.primaryCategory,
+    owningLayer: ownership.owningLayer,
+    systemDomain: ownership.owningLayer,
+    primaryCausalDriver,
+    rootCauseStatement: rootCauseStatementForIssue(ownership.issueType, dimension, decision),
+    customerDecisionProblem: customerProblemForIssue(ownership.issueType, decision),
+    priorityRank: 0,
+    priorityTier: priorityTierForRank(0, ownership.primaryCategory),
+    priorityReason: priorityReasonForCategory(ownership.primaryCategory),
+    mappedDimensions: dimension ? [dimension.key] : [],
+    contributingSignalKeys: signalKeys.sort(),
+    evidenceIds,
+    confidenceScore,
+    confidenceLevel: confidenceLevelForScore(confidenceScore),
+    authoritativeAction: decision.recommendedActionPath,
+    duplicateCollapseKey: `${ownership.issueType}:${dimension?.key ?? "unmapped"}`,
+    referencedInSections: ["keyDecisionSummary", "rootCauseClusters", "revenueImpactAreas", "evidenceBreakdown", "actionPlanMapping"]
+  };
+}
+
+function mergeCanonicalIssues(left: CanonicalIssue, right: CanonicalIssue): CanonicalIssue {
+  const evidenceIds = Array.from(new Set([...left.evidenceIds, ...right.evidenceIds])).sort();
+  const contributingSignalKeys = Array.from(new Set([...left.contributingSignalKeys, ...right.contributingSignalKeys])).sort();
+  const mappedDimensions = Array.from(new Set([...left.mappedDimensions, ...right.mappedDimensions]));
+  const confidenceScore = clampScore((left.confidenceScore + right.confidenceScore) / 2);
+  const preferred = priorityOrder(left.primaryCategory) <= priorityOrder(right.primaryCategory) ? left : right;
+  return {
+    ...preferred,
+    evidenceIds,
+    contributingSignalKeys,
+    mappedDimensions,
+    confidenceScore,
+    confidenceLevel: confidenceLevelForScore(confidenceScore),
+    authoritativeAction: shorterAction(left.authoritativeAction, right.authoritativeAction)
+  };
+}
+
+function normalizeDecisionsThroughIssueCanvas(decisions: DecisionOutput[], canvas: UnifiedIssueCanvas): DecisionOutput[] {
+  return canvas.canonicalIssues.map((issue, index) => {
+    const source = decisions.find((decision) => intersects(decision.evidenceTraceReferences, issue.evidenceIds));
+    return {
+      decisionId: `DEC-${String(index + 1).padStart(3, "0")}`,
+      category: issue.priorityTier === "FIX NOW" ? "Structural Priority: High" : issue.priorityTier === "THIS MONTH" ? "Optimization Required" : "Monitoring Suggested",
+      decisionClassification: issue.rootCauseStatement,
+      evidenceTraceReferences: issue.evidenceIds,
+      impactExplanation: issue.customerDecisionProblem,
+      recommendedActionPath: issue.authoritativeAction || source?.recommendedActionPath || "Improve the validated business decision constraint.",
+      confidenceScore: issue.confidenceScore,
+      confidenceLevel: issue.confidenceLevel
+    };
+  });
+}
+
+function buildGlobalOutputContract(
+  canvas: UnifiedIssueCanvas,
+  recommendationEngine: RecommendationEngineOutput,
+  revenueIntelligence: RevenueIntelligenceLayer,
+  confidenceEngine: ConfidenceEngineOutput,
+  contentUnavailable: boolean
+): GlobalOutputContract {
+  if (contentUnavailable || canvas.canonicalIssues.length === 0) {
+    return {
+      schemaVersion: "systolab.output_contract.v1",
+      status: contentUnavailable ? "content_unavailable" : "active",
+      keyDecisionSummary: [],
+      rootCauseClusters: [],
+      revenueImpactAreas: [],
+      confidenceScore: contentUnavailable ? 0 : confidenceEngine.overallConfidenceScore,
+      evidenceBreakdown: [],
+      actionPlanMapping: [],
+      nonRedundancyRules: outputNonRedundancyRules(),
+      limitations: contentUnavailable
+        ? ["Website content could not be collected, so canonical business decisions were not generated."]
+        : ["No canonical issue passed the evidence and confidence threshold for customer-facing decision output."]
+    };
+  }
+
+  return {
+    schemaVersion: "systolab.output_contract.v1",
+    status: "active",
+    keyDecisionSummary: canvas.canonicalIssues.map((issue) => ({
+      canonicalIssueId: issue.canonicalIssueId,
+      summary: issue.customerDecisionProblem,
+      priorityTier: issue.priorityTier
+    })),
+    rootCauseClusters: canvas.canonicalIssues.map((issue) => ({
+      canonicalIssueId: issue.canonicalIssueId,
+      primaryCausalDriver: issue.primaryCausalDriver,
+      rootCauseStatement: issue.rootCauseStatement
+    })),
+    revenueImpactAreas: canvas.canonicalIssues.map((issue) => ({
+      canonicalIssueId: issue.canonicalIssueId,
+      impactArea: impactAreaForCategory(issue.primaryCategory),
+      businessImpact: revenueIntelligence.revenueOpportunityRange.rationale,
+      confidenceScore: Math.min(issue.confidenceScore, revenueIntelligence.confidenceScore)
+    })),
+    confidenceScore: confidenceEngine.overallConfidenceScore,
+    evidenceBreakdown: canvas.canonicalIssues.map((issue) => ({
+      canonicalIssueId: issue.canonicalIssueId,
+      validatedFindingCount: issue.evidenceIds.length,
+      evidenceCoverage: issue.evidenceIds.length >= 5 ? "full" : issue.evidenceIds.length >= 3 ? "partial" : "limited"
+    })),
+    actionPlanMapping: canvas.canonicalIssues.map((issue, index) => ({
+      canonicalIssueId: issue.canonicalIssueId,
+      actionReference: recommendationEngine.recommendations[index]?.recommendationId ?? `Action ${index + 1}`,
+      authoritativeAction: issue.authoritativeAction,
+      priorityTier: issue.priorityTier
+    })),
+    nonRedundancyRules: outputNonRedundancyRules(),
+    limitations: [
+      "Each canonical issue is represented once and referenced by canonical issue ID across the output contract.",
+      "SYSTOLAB does not guarantee rankings, traffic, leads, sales, or revenue outcomes.",
+      "SEO signals are supporting diagnostic evidence only and are not used for ranking prediction or keyword optimisation claims."
+    ]
+  };
+}
+
+function classifyEvidenceSignal(evidence: EvidenceObject, index: number): UnifiedIssueCanvas["preSignalClassification"][number] {
+  const signalKey = String(evidence.normalizedInput?.["signalKey"] ?? "unknown_signal");
+  const ownership = ownershipForIssue(evidence.dimensionRefs[0], [signalKey], []);
+  return {
+    signalId: `SIG-${String(index + 1).padStart(4, "0")}`,
+    evidenceId: evidence.evidenceId,
+    signalKey,
+    primaryCategory: ownership.primaryCategory,
+    owningLayer: ownership.owningLayer,
+    canonicalIssueType: ownership.issueType,
+    classificationBasis: `Pre-signal classification assigned one primary category (${ownership.primaryCategory}) and one owning layer (${ownership.owningLayer}).`
+  };
+}
+
+function ownershipForIssue(
+  dimension: DimensionKey | undefined,
+  signalKeys: string[],
+  classifications: UnifiedIssueCanvas["preSignalClassification"]
+): { primaryCategory: CanonicalSignalCategory; owningLayer: CanonicalIssueDomain; issueType: string } {
+  const signalText = signalKeys.join(" ").toLowerCase();
+  if (dimension === "conversionReadiness" || /cta|form|checkout|cart|purchase|conversion|primary_cta/.test(signalText)) {
+    return { primaryCategory: "conversion_blocker", owningLayer: "Conversion Intelligence", issueType: "conversion_action_gap" };
+  }
+  if (dimension === "trust" || /trust|review|testimonial|privacy|terms|about|https|security|citation|credibility|proof/.test(signalText)) {
+    return { primaryCategory: "trust_failure", owningLayer: "Trust Intelligence", issueType: "trust_proof_gap" };
+  }
+  if (dimension === "stability" || dimension === "websiteHealth" || dimension === "renderingQuality" || dimension === "accessibility" || dimension === "mobileExperience" || /http|fetch|robots|render|resource|dom|viewport|alt|label|lang|metadata|security_headers/.test(signalText)) {
+    return { primaryCategory: "technical_access", owningLayer: "Website Health Intelligence", issueType: "website_health_access_gap" };
+  }
+  if (/local_visibility|service_area|local_result/.test(signalText)) {
+    return { primaryCategory: "visibility_gap", owningLayer: "Local Visibility Intelligence", issueType: "local_visibility_gap" };
+  }
+  if (dimension === "informationClarity" || /question|intent|pricing|process|topic|content|freshness|search_demand|decision_confidence/.test(signalText)) {
+    return { primaryCategory: "content_intent_gap", owningLayer: classifications.some((item) => item.owningLayer === "Content Gap Intelligence") ? "Content Gap Intelligence" : "Customer Intent Intelligence", issueType: "customer_intent_content_gap" };
+  }
+  if (dimension === "visibilityStructure" || /seo|schema|geo|serp|ranking|visibility|canonical|title|h1|internal_link|entity/.test(signalText)) {
+    return { primaryCategory: "visibility_gap", owningLayer: signalText.includes("entity") ? "Entity Intelligence" : "SERP Intelligence", issueType: signalText.includes("entity") ? "entity_clarity_gap" : "visibility_presentation_gap" };
+  }
+  return { primaryCategory: "evidence_limited", owningLayer: "Website Health Intelligence", issueType: "limited_evidence_gap" };
+}
+
+function dimensionForDecision(decision: DecisionOutput, dimensions: DimensionScore[]): DimensionScore | undefined {
+  const byLabel = dimensions.find((dimension) => decision.decisionClassification.toLowerCase().startsWith(dimension.label.toLowerCase()));
+  if (byLabel) return byLabel;
+  return dimensions.find((dimension) => intersects(dimension.evidenceIds, decision.evidenceTraceReferences));
+}
+
+function primaryDriverForIssue(issueType: string, dimension: DimensionScore | undefined): string {
+  const label = dimension?.label ?? "Validated website evidence";
+  const map: Record<string, string> = {
+    conversion_action_gap: "The customer action path is not strongly supported by visible next-step signals.",
+    trust_proof_gap: "The business does not show enough trust proof at decision points.",
+    website_health_access_gap: "The website foundation limits reliable access, structure, or usability evidence.",
+    customer_intent_content_gap: "Customer intent questions are not answered with enough clarity for confident decisions.",
+    local_visibility_gap: "Local discovery and service-area confidence signals are incomplete.",
+    entity_clarity_gap: "Business, service, location, or expertise entities are not clear enough.",
+    visibility_presentation_gap: "Search-result presentation support is incomplete without creating a ranking prediction."
+  };
+  return map[issueType] ?? `${label} is the single primary causal driver for this issue.`;
+}
+
+function rootCauseStatementForIssue(issueType: string, dimension: DimensionScore | undefined, decision: DecisionOutput): string {
+  const label = dimension?.label ?? decision.decisionClassification;
+  return `${label}: ${primaryDriverForIssue(issueType, dimension)}`;
+}
+
+function customerProblemForIssue(issueType: string, decision: DecisionOutput): string {
+  const map: Record<string, string> = {
+    conversion_action_gap: "Customers may be ready to act but do not receive a clear enough next step.",
+    trust_proof_gap: "Customers may hesitate or compare alternatives because credibility signals are incomplete.",
+    website_health_access_gap: "Customers or crawlers may encounter structural friction before understanding the offer.",
+    customer_intent_content_gap: "Customers may not find the information they need to understand, compare, and choose the business.",
+    local_visibility_gap: "Nearby customers may not see enough local proof, service-area clarity, or contact confidence.",
+    entity_clarity_gap: "Customers and AI/search systems may not clearly connect the business to services, locations, and expertise.",
+    visibility_presentation_gap: "Search opportunities may be missed because answers, proof, or entity context are not packaged clearly."
+  };
+  return map[issueType] ?? decision.impactExplanation;
+}
+
+function priorityOrder(category: CanonicalSignalCategory): number {
+  const order: Record<CanonicalSignalCategory, number> = {
+    conversion_blocker: 1,
+    trust_failure: 2,
+    technical_access: 3,
+    content_intent_gap: 4,
+    visibility_gap: 5,
+    evidence_limited: 6
+  };
+  return order[category];
+}
+
+function priorityTierForRank(index: number, category: CanonicalSignalCategory): CanonicalIssue["priorityTier"] {
+  if (category === "conversion_blocker" || category === "trust_failure" || index === 0) return "FIX NOW";
+  if (category === "technical_access" || category === "content_intent_gap" || index <= 3) return "THIS MONTH";
+  return "MONITOR";
+}
+
+function priorityReasonForCategory(category: CanonicalSignalCategory): string {
+  const reasons: Record<CanonicalSignalCategory, string> = {
+    conversion_blocker: "Conversion-blocking issues outrank all other decision layers.",
+    trust_failure: "Trust failures are prioritized after direct conversion blockers.",
+    technical_access: "Technical and access issues are prioritized before content and visibility gaps.",
+    content_intent_gap: "Customer intent and content gaps are prioritized before SEO-only visibility gaps.",
+    visibility_gap: "Visibility gaps are handled as supporting evidence after business-critical decision friction.",
+    evidence_limited: "Limited evidence is monitored until stronger validation exists."
+  };
+  return reasons[category];
+}
+
+function impactAreaForCategory(category: CanonicalSignalCategory): string {
+  const areas: Record<CanonicalSignalCategory, string> = {
+    conversion_blocker: "Lead, booking, purchase, or inquiry readiness",
+    trust_failure: "Customer confidence and comparison decisions",
+    technical_access: "Website accessibility, reliability, and structural usability",
+    content_intent_gap: "Customer understanding, education, and decision clarity",
+    visibility_gap: "Discoverability, local visibility, and search-result presentation support",
+    evidence_limited: "Assessment confidence"
+  };
+  return areas[category];
+}
+
+function decisionPriorityHierarchy(): string[] {
+  return [
+    "1. Conversion-blocking issues",
+    "2. Trust failures",
+    "3. Technical or access issues",
+    "4. Content and customer-intent mismatches",
+    "5. SEO, SERP, ranking-opportunity, and visibility gaps"
+  ];
+}
+
+function outputNonRedundancyRules(): string[] {
+  return [
+    "Each canonical issue appears once in the output contract.",
+    "Other report sections must reference the canonical issue instead of restating the same insight.",
+    "Actions are unified so one issue maps to one authoritative action.",
+    "Weak single-signal findings are not promoted into customer-facing decisions without sufficient confidence."
+  ];
+}
+
+function buildBusinessOutcomeAttributionLayer(
+  canvas: UnifiedIssueCanvas,
+  dimensions: DimensionScore[],
+  evidenceObjects: EvidenceObject[],
+  contentUnavailable: boolean
+): BusinessOutcomeAttributionLayer {
+  if (contentUnavailable || canvas.canonicalIssues.length === 0) {
+    return {
+      status: "limited_evidence",
+      profiles: [],
+      rankingMethod: "relative_influence_not_prediction",
+      summary: "Outcome attribution is pending until canonical issues and validated evidence are available."
+    };
+  }
+
+  const profiles = canvas.canonicalIssues.map((issue, index) => {
+    const dimensionScore = Math.min(...issue.mappedDimensions.map((key) => dimensions.find((dimension) => dimension.key === key)?.score ?? 100), 100);
+    const evidenceCount = evidenceObjects.filter((evidence) => issue.evidenceIds.includes(evidence.evidenceId)).length;
+    const confidenceScore = clampScore((issue.confidenceScore * 0.72) + (Math.min(evidenceCount, 6) / 6) * 18 + (100 - dimensionScore) * 0.1);
+    return {
+      attributionProfileId: `OAP-${issue.canonicalIssueId}`,
+      canonicalIssueId: issue.canonicalIssueId,
+      impactAreas: impactAreasForCanonicalIssue(issue),
+      attributionStrength: attributionStrengthForIssue(issue, index, confidenceScore),
+      confidenceScore,
+      confidenceLevel: confidenceLevelForScore(confidenceScore),
+      supportingEvidenceObjectIds: issue.evidenceIds,
+      relativeBusinessInfluence: relativeInfluenceForIssue(index, issue, confidenceScore),
+      comparativeRank: index + 1,
+      customerBehaviorExplanation: attributionBehaviorExplanation(issue),
+      nonPredictiveBoundary: "Attribution is comparative and evidence-bound. It ranks likely relative influence and does not predict traffic, leads, revenue, or causation."
+    };
+  });
+
+  return {
+    status: "active",
+    profiles,
+    rankingMethod: "relative_influence_not_prediction",
+    summary: `${profiles.length} canonical issue attribution profile(s) rank relative business influence without making absolute outcome predictions.`
+  };
+}
+
+function buildDependencyIntelligenceLayer(
+  canvas: UnifiedIssueCanvas,
+  attributionLayer: BusinessOutcomeAttributionLayer
+): DependencyIntelligenceLayer {
+  if (canvas.canonicalIssues.length === 0) {
+    return {
+      status: "limited_evidence",
+      issueRoles: [],
+      dependencyMap: [],
+      prerequisiteWarnings: [],
+      summary: "Dependency intelligence is pending until canonical issues are available."
+    };
+  }
+
+  const issueRoles = canvas.canonicalIssues.map((issue, index) => ({
+    canonicalIssueId: issue.canonicalIssueId,
+    role: dependencyRoleForIssue(issue, index),
+    rationale: dependencyRationaleForIssue(issue)
+  }));
+  const dependencyMap: DependencyIntelligenceLayer["dependencyMap"] = [];
+  for (const child of canvas.canonicalIssues) {
+    const parent = canvas.canonicalIssues.find((candidate) => candidate.canonicalIssueId !== child.canonicalIssueId && isLikelyDependencyParent(candidate, child));
+    if (!parent) continue;
+    const profile = attributionLayer.profiles.find((item) => item.canonicalIssueId === parent.canonicalIssueId);
+    dependencyMap.push({
+      parentCanonicalIssueId: parent.canonicalIssueId,
+      childCanonicalIssueId: child.canonicalIssueId,
+      relationship: parent.primaryCategory === "technical_access" ? "prerequisite_for" : "can_reduce",
+      confidenceScore: Math.min(parent.confidenceScore, child.confidenceScore, profile?.confidenceScore ?? 75),
+      explanation: `${parent.canonicalIssueId} should be addressed before ${child.canonicalIssueId} because ${parent.primaryCausalDriver}`
+    });
+  }
+
+  return {
+    status: "active",
+    issueRoles,
+    dependencyMap,
+    prerequisiteWarnings: dependencyMap.map((item) => `${item.parentCanonicalIssueId} is a prerequisite or reducer for ${item.childCanonicalIssueId}.`),
+    summary: dependencyMap.length
+      ? `${dependencyMap.length} issue dependency relationship(s) were identified to prevent downstream fixes from being sequenced ahead of root causes.`
+      : "No strong cross-issue dependency was identified; recommendations can be sequenced by priority and attribution strength."
+  };
+}
+
+function buildRecommendationSequencingEngine(
+  recommendationEngine: RecommendationEngineOutput,
+  canvas: UnifiedIssueCanvas,
+  attributionLayer: BusinessOutcomeAttributionLayer,
+  dependencyLayer: DependencyIntelligenceLayer
+): RecommendationSequencingEngine {
+  const items = recommendationEngine.recommendations
+    .map((recommendation, index) => {
+      const issue = canvas.canonicalIssues.find((item) => item.canonicalIssueId === recommendation.canonicalIssueId) ?? canvas.canonicalIssues[index];
+      const attribution = issue ? attributionLayer.profiles.find((profile) => profile.canonicalIssueId === issue.canonicalIssueId) : undefined;
+      const dependencyChain = issue ? dependencyChainForIssue(issue.canonicalIssueId, dependencyLayer) : [];
+      const sequencePosition = index + 1 + dependencyChain.length;
+      const bucket = bucketForSequenceItem(issue, attribution, dependencyChain, index);
+      return {
+        sequenceId: `SEQ-${String(index + 1).padStart(3, "0")}`,
+        recommendationId: recommendation.recommendationId,
+        canonicalIssueId: issue?.canonicalIssueId ?? recommendation.canonicalIssueId,
+        action: recommendation.action,
+        sequencePosition,
+        bucket,
+        rationale: sequenceRationale(recommendation, issue, attribution, dependencyChain),
+        dependencyChain,
+        attributionProfileId: attribution?.attributionProfileId ?? recommendation.attributionProfileId,
+        confidenceScore: Math.min(recommendation.confidenceScore, attribution?.confidenceScore ?? recommendation.confidenceScore),
+        lifecycleState: recommendation.lifecycleState ?? "Recommended"
+      } satisfies RecommendationSequenceItem;
+    })
+    .sort((a, b) => a.sequencePosition - b.sequencePosition || b.confidenceScore - a.confidenceScore)
+    .map((item, index) => ({ ...item, sequencePosition: index + 1 }));
+
+  return {
+    status: items.length > 0 ? "sequenced" : "limited",
+    immediateActions: items.filter((item) => item.bucket === "Immediate Actions"),
+    nearTermActions: items.filter((item) => item.bucket === "Near-Term Actions"),
+    mediumTermActions: items.filter((item) => item.bucket === "Medium-Term Actions"),
+    strategicActions: items.filter((item) => item.bucket === "Strategic Actions"),
+    orderingRules: [
+      "Prerequisite and root-cause actions are sequenced before dependent fixes.",
+      "High attribution strength and high confidence move actions earlier.",
+      "Low-impact visibility optimisations cannot outrank conversion, trust, or access constraints."
+    ],
+    summary: items.length > 0 ? `${items.length} recommendation(s) were ordered into an implementation sequence.` : "No recommendations were available for sequencing."
+  };
+}
+
+function buildEvidenceFreshnessGovernanceLayer(evidenceObjects: EvidenceObject[], evaluatedAt: string): EvidenceFreshnessGovernanceLayer {
+  const evaluatedTime = Date.parse(evaluatedAt);
+  const evidenceFreshness = evidenceObjects.map((evidence) => {
+    const freshness = evidence.freshness ?? fallbackEvidenceFreshness(evidence.timestamp ?? evaluatedAt);
+    const acquiredTime = Date.parse(freshness.acquiredAt);
+    const ageHours = Number.isFinite(acquiredTime) && Number.isFinite(evaluatedTime) ? Math.max(0, Math.round((evaluatedTime - acquiredTime) / 36_000) / 100) : 0;
+    const status = freshnessStatusForAge(freshness, ageHours);
+    return {
+      evidenceId: evidence.evidenceId,
+      category: evidenceFreshnessCategory(evidence),
+      acquiredAt: freshness.acquiredAt,
+      validatedAt: freshness.validatedAt,
+      ageHours,
+      sourceRecency: freshness.sourceRecency,
+      expectedUpdateFrequency: freshness.updateFrequencyExpectation,
+      freshnessStatus: status,
+      confidenceAdjustment: status === "fresh" || status === "current" ? freshness.confidenceAdjustment : Math.min(-10, freshness.confidenceAdjustment - 5)
+    };
+  });
+  const staleEvidenceIds = evidenceFreshness.filter((item) => item.freshnessStatus === "stale" || item.freshnessStatus === "expired" || item.freshnessStatus === "incomplete").map((item) => item.evidenceId);
+  return {
+    status: evidenceObjects.length > 0 ? "active" : "limited_evidence",
+    evaluatedAt,
+    evidenceFreshness,
+    staleEvidenceIds,
+    confidenceAdjustmentSummary: staleEvidenceIds.length
+      ? `${staleEvidenceIds.length} evidence object(s) received freshness confidence downgrades.`
+      : "All evaluated evidence is current for this scan."
+  };
+}
+
+function buildClosedLoopOutcomeVerificationLayer(
+  previousSnapshot: ReportSnapshot | null | undefined,
+  sequencing: RecommendationSequencingEngine,
+  outcomeValidation: OutcomeValidationEngine,
+  attributionLayer: BusinessOutcomeAttributionLayer,
+  canvas: UnifiedIssueCanvas
+): ClosedLoopOutcomeVerificationLayer {
+  const sequenceItems = [...sequencing.immediateActions, ...sequencing.nearTermActions, ...sequencing.mediumTermActions, ...sequencing.strategicActions].sort((a, b) => a.sequencePosition - b.sequencePosition);
+  const multipleRecommendationsChanged = outcomeValidation.validations.filter((validation) => validation.implementedStatus === "validated").length > 1;
+  const records: OutcomeVerificationRecord[] = sequenceItems.map((item, index) => {
+    const validation = outcomeValidation.validations.find((entry) => entry.recommendationId === item.recommendationId);
+    const issue = canvas.canonicalIssues.find((entry) => entry.canonicalIssueId === item.canonicalIssueId);
+    const attribution = attributionLayer.profiles.find((profile) => profile.canonicalIssueId === item.canonicalIssueId);
+    const deltas = validation?.dimensionDeltas ?? [];
+    const materialDelta = Math.max(validation?.ossDelta ?? 0, ...deltas.map((delta) => delta.delta ?? 0));
+    const implementationStatus = lifecycleFromValidation(validation, previousSnapshot);
+    return {
+      outcomeVerificationId: `OVR-${String(index + 1).padStart(3, "0")}`,
+      recommendationId: item.recommendationId,
+      canonicalIssueId: item.canonicalIssueId,
+      implementationStatus,
+      verificationStatus: !previousSnapshot ? "pending" : validation?.implementedStatus === "validated" || validation?.implementedStatus === "regressed" ? "verified" : "inconclusive",
+      preImplementationState: !previousSnapshot ? "No previous snapshot baseline was available." : deltas.map((delta) => `${delta.dimensionLabel}: ${delta.beforeScore ?? "not measured"}`).join("; ") || "Previous state was available but not mapped to a dimension.",
+      postImplementationState: deltas.map((delta) => `${delta.dimensionLabel}: ${delta.afterScore}`).join("; ") || "Post-implementation state has limited mapped evidence.",
+      observedChange: observedChangeText(validation, materialDelta),
+      confidenceOfVerification: Math.min(validation?.confidenceScore ?? 0, attribution?.confidenceScore ?? item.confidenceScore),
+      supportingEvidenceObjectIds: Array.from(new Set([...(validation?.evidenceIds ?? []), ...(attribution?.supportingEvidenceObjectIds ?? [])])),
+      outcomeClassification: outcomeClassificationForDelta(validation, materialDelta),
+      attributionUncertainty: multipleRecommendationsChanged
+        ? "Multiple recommendations changed in the same comparison window, so causation is not assigned to this recommendation alone."
+        : "Verification remains evidence-bound and does not assume causation beyond observed mapped changes."
+    };
+  });
+
+  const effectiveRecords = records.filter((record) => record.outcomeClassification.includes("Positive"));
+  const status: ClosedLoopOutcomeVerificationLayer["status"] = !previousSnapshot ? "baseline_pending" : records.length === 0 ? "insufficient_evidence" : effectiveRecords.length > 0 ? "learning_active" : "verification_active";
+  return {
+    status,
+    records,
+    recommendationEffectivenessScores: buildRecommendationEffectivenessScores(records, canvas),
+    outcomeIntelligenceRepository: {
+      repositoryStatus: records.length >= 5 ? "learning_ready" : records.length > 0 ? "accumulating" : "baseline_only",
+      anonymizedOutcomeCount: records.length,
+      issueResolutionPatterns: buildIssueResolutionPatterns(records, canvas),
+      confidenceCalibrationNotes: [
+        "Outcome records are stored as internal learning signals, not customer-facing promises.",
+        "Recommendation effectiveness scores require repeated verified outcomes before raising future confidence."
+      ]
+    },
+    summary: !previousSnapshot
+      ? "Baseline created. Re-scan after implementation to verify recommendation outcomes."
+      : `${records.length} recommendation outcome verification record(s) were evaluated against the previous snapshot.`
+  };
+}
+
+function buildBusinessObjectiveAlignmentValidation(
+  request: ScanRequest,
+  sequencing: RecommendationSequencingEngine
+): BusinessObjectiveAlignmentValidation {
+  const allItems = [...sequencing.immediateActions, ...sequencing.nearTermActions, ...sequencing.mediumTermActions, ...sequencing.strategicActions];
+  const primaryBusinessObjective = inferPrimaryBusinessObjective(request);
+  if (allItems.length === 0) {
+    return {
+      status: "not_assessed",
+      primaryBusinessObjective,
+      alignedRecommendationIds: [],
+      misalignedRecommendationIds: [],
+      validationNotes: ["No recommendations were available for objective alignment validation."]
+    };
+  }
+  const aligned = allItems.filter((item) => objectiveAligned(item, primaryBusinessObjective));
+  const misaligned = allItems.filter((item) => !objectiveAligned(item, primaryBusinessObjective));
+  return {
+    status: misaligned.length === 0 ? "aligned" : aligned.length > 0 ? "partially_aligned" : "not_assessed",
+    primaryBusinessObjective,
+    alignedRecommendationIds: aligned.map((item) => item.recommendationId),
+    misalignedRecommendationIds: misaligned.map((item) => item.recommendationId),
+    validationNotes: [
+      "Objective alignment validates that recommendations support the business goal before internal prioritisation is finalized.",
+      `${aligned.length} of ${allItems.length} sequenced recommendation(s) directly support the inferred objective.`
+    ]
+  };
+}
+
+function impactAreasForCanonicalIssue(issue: CanonicalIssue): BusinessOutcomeAttributionLayer["profiles"][number]["impactAreas"] {
+  if (issue.primaryCategory === "conversion_blocker") return ["conversion_loss", "lead_generation_loss", "revenue_leakage"];
+  if (issue.primaryCategory === "trust_failure") return ["trust_loss", "customer_confidence_loss", "customer_acquisition_loss"];
+  if (issue.primaryCategory === "technical_access") return ["customer_acquisition_loss", "conversion_loss", "retention_risk"];
+  if (issue.primaryCategory === "content_intent_gap") return ["customer_confidence_loss", "conversion_loss", "customer_acquisition_loss"];
+  if (issue.primaryCategory === "visibility_gap") return ["visibility_loss", "customer_acquisition_loss"];
+  return ["customer_confidence_loss"];
+}
+
+function attributionStrengthForIssue(issue: CanonicalIssue, index: number, confidenceScore: number): BusinessOutcomeAttributionLayer["profiles"][number]["attributionStrength"] {
+  if (confidenceScore >= 78 && index <= 1) return "high";
+  if (confidenceScore >= 62 && priorityOrder(issue.primaryCategory) <= 4) return "moderate";
+  if (confidenceScore >= 45) return "low";
+  return "limited";
+}
+
+function relativeInfluenceForIssue(index: number, issue: CanonicalIssue, confidenceScore: number): BusinessOutcomeAttributionLayer["profiles"][number]["relativeBusinessInfluence"] {
+  if (index === 0 && confidenceScore >= 60) return "primary";
+  if (priorityOrder(issue.primaryCategory) <= 2 && confidenceScore >= 60) return "strong";
+  if (confidenceScore >= 50) return "moderate";
+  if (confidenceScore > 0) return "supporting";
+  return "unverified";
+}
+
+function attributionBehaviorExplanation(issue: CanonicalIssue): string {
+  if (issue.primaryCategory === "conversion_blocker") return "This issue can interrupt the moment when an interested visitor tries to contact, book, buy, or request information.";
+  if (issue.primaryCategory === "trust_failure") return "This issue can make visitors hesitate, compare alternatives, or delay sharing contact and purchase intent.";
+  if (issue.primaryCategory === "technical_access") return "This issue can prevent customers or scan systems from reliably reaching, reading, or using the business website.";
+  if (issue.primaryCategory === "content_intent_gap") return "This issue can leave customer questions unanswered during comparison and evaluation.";
+  if (issue.primaryCategory === "visibility_gap") return "This issue can weaken discoverability and the way the business is understood in search or local contexts.";
+  return "This issue has limited evidence and is retained for internal monitoring."
+}
+
+function dependencyRoleForIssue(issue: CanonicalIssue, index: number): DependencyIntelligenceLayer["issueRoles"][number]["role"] {
+  if (index === 0 || issue.primaryCategory === "conversion_blocker" || issue.primaryCategory === "technical_access") return "Root Cause Issue";
+  if (issue.primaryCategory === "trust_failure" || issue.primaryCategory === "content_intent_gap") return "Contributing Issue";
+  if (issue.primaryCategory === "visibility_gap") return "Dependent Issue";
+  return "Downstream Effect";
+}
+
+function dependencyRationaleForIssue(issue: CanonicalIssue): string {
+  if (issue.primaryCategory === "technical_access") return "Access and structural health can block reliable analysis and downstream customer experience improvements.";
+  if (issue.primaryCategory === "conversion_blocker") return "Conversion blockers directly constrain the business action path and should not wait behind optimisations.";
+  if (issue.primaryCategory === "trust_failure") return "Trust gaps reinforce conversion hesitation and can reduce the value of visibility improvements.";
+  return "This issue depends on higher-priority business constraints when those are present."
+}
+
+function isLikelyDependencyParent(parent: CanonicalIssue, child: CanonicalIssue): boolean {
+  if (priorityOrder(parent.primaryCategory) >= priorityOrder(child.primaryCategory)) return false;
+  if (parent.primaryCategory === "technical_access") return true;
+  if (parent.primaryCategory === "conversion_blocker" && child.primaryCategory !== "technical_access") return true;
+  if (parent.primaryCategory === "trust_failure" && (child.primaryCategory === "content_intent_gap" || child.primaryCategory === "visibility_gap")) return true;
+  return false;
+}
+
+function dependencyChainForIssue(canonicalIssueId: string, dependencyLayer: DependencyIntelligenceLayer): string[] {
+  const parents = dependencyLayer.dependencyMap.filter((item) => item.childCanonicalIssueId === canonicalIssueId).map((item) => item.parentCanonicalIssueId);
+  return Array.from(new Set(parents));
+}
+
+function bucketForSequenceItem(
+  issue: CanonicalIssue | undefined,
+  attribution: OutcomeAttributionProfile | undefined,
+  dependencyChain: string[],
+  index: number
+): RecommendationSequenceItem["bucket"] {
+  if (dependencyChain.length > 0 && index > 0) return "Near-Term Actions";
+  if (!issue) return "Strategic Actions";
+  if (issue.primaryCategory === "conversion_blocker" || attribution?.relativeBusinessInfluence === "primary") return "Immediate Actions";
+  if (issue.primaryCategory === "trust_failure" || issue.primaryCategory === "technical_access") return "Near-Term Actions";
+  if (issue.primaryCategory === "content_intent_gap") return "Medium-Term Actions";
+  return "Strategic Actions";
+}
+
+function sequenceRationale(
+  recommendation: RecommendationEngineOutput["recommendations"][number],
+  issue: CanonicalIssue | undefined,
+  attribution: OutcomeAttributionProfile | undefined,
+  dependencyChain: string[]
+): string {
+  const dependencyText = dependencyChain.length ? ` It follows prerequisite issue(s): ${dependencyChain.join(", ")}.` : " No prerequisite issue blocks this action.";
+  const attributionText = attribution ? ` Attribution strength is ${attribution.attributionStrength} with ${attribution.relativeBusinessInfluence} relative influence.` : " Attribution profile is limited.";
+  return `${recommendation.priority} action sequenced for ${issue?.canonicalIssueId ?? "unmapped issue"}.${dependencyText}${attributionText}`;
+}
+
+function fallbackEvidenceFreshness(timestamp: string): EvidenceObject["freshness"] {
+  return {
+    acquiredAt: timestamp,
+    validatedAt: timestamp,
+    sourceRecency: "unknown",
+    updateFrequencyExpectation: "unknown",
+    freshnessStatus: "incomplete",
+    confidenceAdjustment: -8
+  };
+}
+
+function freshnessStatusForAge(freshness: EvidenceObject["freshness"], ageHours: number): EvidenceObject["freshness"]["freshnessStatus"] {
+  if (freshness.freshnessStatus === "incomplete" || freshness.sourceRecency === "unknown") return "incomplete";
+  if (freshness.updateFrequencyExpectation === "per_scan" && ageHours <= 24) return "fresh";
+  if (ageHours <= 24 * 7) return "current";
+  if (ageHours <= 24 * 30) return "aging";
+  if (ageHours <= 24 * 90) return "stale";
+  return "expired";
+}
+
+function evidenceFreshnessCategory(evidence: EvidenceObject): string {
+  const signalKey = String(evidence.normalizedInput?.["signalKey"] ?? "").toLowerCase();
+  if (signalKey.includes("competitor")) return "competitor_intelligence_freshness";
+  if (signalKey.includes("citation")) return "citation_freshness";
+  if (signalKey.includes("review") || signalKey.includes("trust")) return "trust_signal_freshness";
+  if (signalKey.includes("local") || signalKey.includes("gbp")) return "business_profile_freshness";
+  if (signalKey.includes("serp") || signalKey.includes("search")) return "search_environment_freshness";
+  if (signalKey.includes("freshness")) return "content_freshness";
+  return "current_scan_evidence_freshness";
+}
+
+function lifecycleFromValidation(
+  validation: OutcomeValidationEngine["validations"][number] | undefined,
+  previousSnapshot: ReportSnapshot | null | undefined
+): RecommendationLifecycleState {
+  if (!previousSnapshot) return "Recommended";
+  if (!validation) return "Outcome Inconclusive";
+  if (validation.implementedStatus === "validated" && validation.improvementStatus === "improved") return "Verified Effective";
+  if (validation.implementedStatus === "regressed" || validation.improvementStatus === "declined") return "Verified Ineffective";
+  if (validation.implementedStatus === "not_detected") return "Not Implemented";
+  if (validation.implementedStatus === "detected") return "Implemented";
+  return "Outcome Inconclusive";
+}
+
+function observedChangeText(validation: OutcomeValidationEngine["validations"][number] | undefined, materialDelta: number): string {
+  if (!validation) return "No validation record was available for this recommendation.";
+  if (validation.ossDelta === null && validation.dimensionDeltas.every((item) => item.delta === null)) return "No before/after baseline was available.";
+  return `OSS delta ${validation.ossDelta ?? "not available"}; strongest mapped dimension delta ${materialDelta}.`;
+}
+
+function outcomeClassificationForDelta(
+  validation: OutcomeValidationEngine["validations"][number] | undefined,
+  materialDelta: number
+): OutcomeVerificationRecord["outcomeClassification"] {
+  if (!validation || validation.implementedStatus === "pending_baseline") return "Insufficient Evidence";
+  if (validation.improvementStatus === "declined" || materialDelta <= -3) return "Negative Outcome";
+  if (validation.improvementStatus === "unchanged") return "No Observable Change";
+  if (materialDelta >= 12) return "Strong Positive Outcome";
+  if (materialDelta >= 6) return "Moderate Positive Outcome";
+  if (materialDelta >= 3) return "Weak Positive Outcome";
+  return "Mixed Outcome";
+}
+
+function buildRecommendationEffectivenessScores(
+  records: OutcomeVerificationRecord[],
+  canvas: UnifiedIssueCanvas
+): ClosedLoopOutcomeVerificationLayer["recommendationEffectivenessScores"] {
+  return canvas.canonicalIssues.map((issue) => {
+    const linked = records.filter((record) => record.canonicalIssueId === issue.canonicalIssueId);
+    const positive = linked.filter((record) => record.outcomeClassification.includes("Positive")).length;
+    const effectivenessScore = linked.length === 0 ? 0 : clampScore((positive / linked.length) * 100);
+    return {
+      issueType: issue.issueType,
+      recommendationPattern: issue.authoritativeAction,
+      verifiedOutcomeCount: linked.length,
+      effectivenessScore,
+      confidenceScore: linked.length >= 3 ? 70 : linked.length > 0 ? 42 : 0
+    };
+  });
+}
+
+function buildIssueResolutionPatterns(records: OutcomeVerificationRecord[], canvas: UnifiedIssueCanvas): string[] {
+  const positiveIssueIds = new Set(records.filter((record) => record.outcomeClassification.includes("Positive")).map((record) => record.canonicalIssueId).filter(Boolean));
+  const patterns = canvas.canonicalIssues.filter((issue) => positiveIssueIds.has(issue.canonicalIssueId)).map((issue) => `${issue.issueType}: ${issue.authoritativeAction}`);
+  return patterns.length ? patterns : ["More verified follow-up scans are required before stable resolution patterns are learned."];
+}
+
+function inferPrimaryBusinessObjective(request: ScanRequest): string {
+  if (request.monthlyLeadVolume && request.monthlyLeadVolume > 0) return "Improve lead generation and customer conversion readiness";
+  if (request.industryType?.toLowerCase().includes("ecommerce")) return "Improve purchase confidence and revenue readiness";
+  if (request.industryType?.toLowerCase().includes("local")) return "Improve local customer acquisition and trust";
+  return "Improve customer trust, understanding, and action readiness";
+}
+
+function objectiveAligned(item: RecommendationSequenceItem, objective: string): boolean {
+  const haystack = `${item.action} ${item.rationale} ${item.bucket}`.toLowerCase();
+  if (objective.includes("lead")) return /lead|contact|call|form|cta|conversion|trust|confidence|action/.test(haystack);
+  if (objective.includes("purchase")) return /purchase|checkout|product|trust|confidence|conversion|action/.test(haystack);
+  if (objective.includes("local")) return /local|location|contact|trust|visibility|service area|action/.test(haystack);
+  return /trust|confidence|clarity|action|conversion|customer/.test(haystack);
+}
+function normalizeActionText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function shorterAction(left: string, right: string): string {
+  return left.length <= right.length ? left : right;
+}
+
+function intersects(left: string[], right: string[]): boolean {
+  const values = new Set(left);
+  return right.some((item) => values.has(item));
+}
 function buildExecutiveClarity(dimensions: DimensionScore[], oss: number, decisions: DecisionOutput[]): ReportSnapshot["executiveClarity"] {
   const weakest = [...dimensions].sort((a, b) => a.score - b.score)[0];
   const topDecision = decisions[0];
@@ -1763,15 +2597,24 @@ function buildRevenueIntelligence(
 function buildRecommendationEngine(
   dimensions: DimensionScore[],
   decisions: DecisionOutput[],
-  revenueIntelligence: RevenueIntelligenceLayer
+  revenueIntelligence: RevenueIntelligenceLayer,
+  canvas?: UnifiedIssueCanvas,
+  attributionLayer?: BusinessOutcomeAttributionLayer
 ): RecommendationEngineOutput {
   const recommendations = decisions.map((decision, index) => {
     const dimension = dimensions.find((item) => decision.decisionClassification.toLowerCase().startsWith(item.label.toLowerCase()));
     const priority: RecommendationEngineOutput["recommendations"][number]["priority"] =
       decision.category === "Structural Priority: High" ? "FIX NOW" : decision.category === "Optimization Required" ? "THIS MONTH" : "MONITOR";
+    const canonicalIssue = canvas?.canonicalIssues[index];
+    const attributionProfile = canonicalIssue ? attributionLayer?.profiles.find((profile) => profile.canonicalIssueId === canonicalIssue.canonicalIssueId) : undefined;
     return {
       recommendationId: `REC-${String(index + 1).padStart(3, "0")}`,
       sourceDecisionId: decision.decisionId,
+      canonicalIssueId: canonicalIssue?.canonicalIssueId,
+      attributionProfileId: attributionProfile?.attributionProfileId,
+      dependencyChain: [],
+      lifecycleState: "Recommended" as const,
+      sequencePosition: index + 1,
       issue: decision.decisionClassification,
       action: decision.recommendedActionPath,
       priority,
@@ -1888,6 +2731,21 @@ function buildArchitectureState(): ArchitectureLayerState {
       "Revenue Intelligence Engine",
       "Recommendation Engine",
       "Recommendation Outcome Validation Loop",
+      "Pre-Signal Classification Layer",
+      "Signal Ownership and Evidence Fusion Layer",
+      "Canonical Issue Mapping Layer",
+      "Unified Issue Canvas",
+      "Duplicate Collapse Engine",
+      "Action Unification Layer",
+      "Post-Generation Normalization Layer",
+      "Global Output Contract",
+      "Feedback Validation Loop",
+      "Business Outcome Attribution Layer",
+      "Dependency Intelligence Layer",
+      "Recommendation Sequencing Engine",
+      "Evidence Freshness Governance Layer",
+      "Closed-Loop Outcome Verification and Learning Layer",
+      "Business Objective Alignment Validation",
       "Industry Benchmark Engine",
       "Competitor Snapshot Analysis",
       "Competitor Intelligence Engine",
@@ -3059,7 +3917,9 @@ function buildReportGovernance(): ReportSnapshot["reportGovernance"] {
     systemRules: [
       "Reports must render decision layer, insight layer, and proof layer in that order.",
       "Every score must include numeric value, visual intelligence state, confidence, and evidence references.",
-      "Every action must map to one explanation, one executable fix, and one evidence cluster."
+      "Every action must map to one explanation, one executable fix, and one evidence cluster.",
+      "Every signal must receive one primary classification and one owning intelligence layer before report output.",
+      "Every customer-facing insight must map back to one canonical issue representation."
     ],
     outputFormat: ["decision_layer", "insight_layer", "proof_layer"],
     constraints: [
@@ -3082,7 +3942,8 @@ function buildReportGovernance(): ReportSnapshot["reportGovernance"] {
     rejectionRules: [
       "Reject private, local, non-HTTP, and unsafe URLs before crawling.",
       "Reject claims that imply revenue, profit, ranking, traffic, or conversion guarantees.",
-      "Reject untraceable findings that do not include EO references."
+      "Reject untraceable findings that do not include EO references.",
+      "Reject duplicate customer-facing conclusions that restate the same canonical issue in multiple forms."
     ],
     ossCalculationLogic:
       "OSS v1.0 is the weighted average of deterministic dimension scores: trust 16%, accessibility 10%, rendering quality 10%, stability 10%, mobile experience 14%, website health 12%, visibility structure 10%, conversion readiness 14%, information clarity 4%."
@@ -3101,11 +3962,19 @@ function buildStructuredOutputSchema(): ReportSnapshot["structuredOutputSchema"]
       "gbpIdentity",
       "competitorComparison",
       "businessOutcomeBridge",
+      "unifiedIssueCanvas",
+      "globalOutputContract",
       "revenueIntelligence",
       "recommendationEngine",
       "lightweightChangeDetection",
       "evidenceDatabase",
       "recommendationOutcomeLoop",
+      "businessOutcomeAttributionLayer",
+      "dependencyIntelligenceLayer",
+      "recommendationSequencingEngine",
+      "evidenceFreshnessGovernanceLayer",
+      "closedLoopOutcomeVerificationLayer",
+      "businessObjectiveAlignmentValidation",
       "confidenceEngine",
       "industryBenchmarkEngine",
       "competitorIntelligenceEngine",
@@ -3122,10 +3991,11 @@ function buildStructuredOutputSchema(): ReportSnapshot["structuredOutputSchema"]
       "rawSignalTelemetry"
     ],
     layerKeys: {
-      decision_layer: ["actionFirstPanel", "systemVerdict", "ossInterpretation", "verdictCard", "businessRiskStatus"],
+      decision_layer: ["actionFirstPanel", "systemVerdict", "ossInterpretation", "verdictCard", "businessRiskStatus", "globalOutputContract"],
       insight_layer: [
         "businessVitalSigns",
         "dimensions",
+        "unifiedIssueCanvas",
         "gbpIdentity",
         "competitorComparison",
         "businessOutcomeBridge",
@@ -3148,6 +4018,12 @@ function buildStructuredOutputSchema(): ReportSnapshot["structuredOutputSchema"]
         "evidenceDatabase",
         "evidenceClusters",
         "recommendationOutcomeLoop",
+        "businessOutcomeAttributionLayer",
+        "dependencyIntelligenceLayer",
+        "recommendationSequencingEngine",
+        "evidenceFreshnessGovernanceLayer",
+        "closedLoopOutcomeVerificationLayer",
+        "businessObjectiveAlignmentValidation",
         "confidenceEngine",
         "operationalMemoryGraph",
         "groundTruthValidationLog",

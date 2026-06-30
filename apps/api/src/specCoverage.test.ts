@@ -36,5 +36,7 @@ describe("SYSTOLAB governance rules", () => {
     expect(ids.has("SYSTOLAB-ADMIN-RBAC-001")).toBe(true);
     expect(ids.has("SYSTOLAB-ADMIN-PDF-001")).toBe(true);
     expect(ids.has("SYSTOLAB-ADMIN-USER-INTEL-001")).toBe(true);
+    expect(ids.has("SYSTOLAB-CANONICAL-ISSUE-001")).toBe(true);
+    expect(ids.has("SYSTOLAB-OUTCOME-ATTRIBUTION-001")).toBe(true);
   });
 });

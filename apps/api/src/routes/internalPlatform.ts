@@ -46,9 +46,11 @@ import {
   buildAiAnalystContext,
   enqueuePlatformJob,
   evaluateFeatureFlag,
+  evaluateManagedWhiteLabelAccess,
   getDisasterRecoveryStatus,
   getDataGovernanceStatus,
   getGovernanceContractStatus,
+  getManagedWhiteLabelGovernance,
   getObservabilityStatus,
   getPlatformOverview,
   getRealtimeRefreshState,
@@ -63,6 +65,7 @@ import {
   listFeatureFlags,
   listGraphIntelligence,
   listLineage,
+  listManagedWhiteLabelWorkspaces,
   listPlatformJobs,
   listUserSearchActivities,
   listPlatformModules,
@@ -74,6 +77,7 @@ import {
   runSandboxExperiment,
   setPlatformModuleActivation,
   upsertFeatureFlag,
+  upsertManagedWhiteLabelWorkspace,
   upsertPlatformModule,
   validatePlatformModules
 } from "../services/platformControlPlaneService.js";
@@ -160,6 +164,7 @@ internalPlatformRouter.get("/dashboard", async (_req, res) => {
     cost,
     graph,
     featureFlags,
+    managedWhiteLabel,
     sandbox,
     userJourney,
     security,
@@ -189,6 +194,7 @@ internalPlatformRouter.get("/dashboard", async (_req, res) => {
     listControls(100, "cost_intelligence"),
     listGraphIntelligence(40),
     listFeatureFlags(),
+    getManagedWhiteLabelGovernance(),
     listControls(100, "sandbox"),
     getUserJourneyIntelligence(60),
     getSecurityIntelligence(60),
@@ -220,6 +226,7 @@ internalPlatformRouter.get("/dashboard", async (_req, res) => {
     cost,
     graph,
     featureFlags,
+    managedWhiteLabel,
     sandbox,
     userJourney,
     security,
@@ -410,6 +417,36 @@ internalPlatformRouter.post("/feature-flags", ownerOnly, auditAdminAction("featu
 
 internalPlatformRouter.get("/feature-flags/:flagKey/evaluate", async (req, res) => {
   res.json({ item: await evaluateFeatureFlag(req.params.flagKey, { workspaceId: stringQuery(req.query.workspaceId), userId: stringQuery(req.query.userId) }) });
+});
+
+internalPlatformRouter.get("/white-label/governance", async (_req, res) => {
+  res.json(await getManagedWhiteLabelGovernance());
+});
+
+internalPlatformRouter.get("/white-label/workspaces", async (_req, res) => {
+  res.json({ items: await listManagedWhiteLabelWorkspaces() });
+});
+
+internalPlatformRouter.post("/white-label/workspaces", ownerOnly, auditAdminAction("white_label.workspace.upsert", "white_label"), async (req, res) => {
+  const input = req.body as { tenantSlug?: string; workspaceName?: string };
+  if (!input.tenantSlug || !input.workspaceName) {
+    res.status(400).json({ error: { message: "tenantSlug and workspaceName are required." } });
+    return;
+  }
+  try {
+    res.status(201).json({ item: await upsertManagedWhiteLabelWorkspace({ ...req.body, tenantSlug: input.tenantSlug, workspaceName: input.workspaceName }, req.adminUser?.adminUserId) });
+  } catch (error) {
+    res.status(400).json({ error: { message: error instanceof Error ? error.message : "Unable to save managed white-label workspace." } });
+  }
+});
+
+internalPlatformRouter.post("/white-label/access/evaluate", async (req, res) => {
+  const input = req.body as { role?: "super_admin" | "partner" | "team_member" | "client" };
+  if (!input.role || !["super_admin", "partner", "team_member", "client"].includes(input.role)) {
+    res.status(400).json({ error: { message: "role must be super_admin, partner, team_member, or client." } });
+    return;
+  }
+  res.json({ item: await evaluateManagedWhiteLabelAccess({ ...req.body, role: input.role }) });
 });
 
 internalPlatformRouter.get("/sandbox/experiments", async (_req, res) => {

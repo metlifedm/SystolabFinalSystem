@@ -1,5 +1,6 @@
 import type {
   DimensionKey,
+  EvidenceFreshnessMetadata,
   EvidenceObject,
   EvidenceSourceType,
   EvidenceVisibilityState,
@@ -35,11 +36,14 @@ export class EvidenceBuilder {
 
   add(input: EvidenceInput): EvidenceObject {
     this.sequence += 1;
-    const hash = sha256(stableStringify({ ...input, snapshotSeed: this.snapshotSeed, sequence: this.sequence }));
+    const now = new Date().toISOString();
+    const freshness = buildEvidenceFreshness(input, now);
+    const hash = sha256(stableStringify({ ...input, freshness, snapshotSeed: this.snapshotSeed, sequence: this.sequence }));
     return {
       evidenceId: `EO-${String(this.sequence).padStart(4, "0")}-${hash.slice(0, 10)}`,
       selectorPath: input.selectorPath ?? null,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
+      freshness,
       groundTruthMeaning: input.groundTruthMeaning ?? meaningForGtcs(input.groundTruthConfidence),
       renderVisibility: input.renderVisibility ?? defaultVisibility(input),
       hash,
@@ -65,4 +69,22 @@ function defaultVisibility(input: EvidenceInput): EvidenceVisibilityState {
   if (input.renderState === "not_rendered") return "not_rendered";
   if (String(input.normalizedInput.value) === "false") return "hidden";
   return "visible_below_fold";
+}
+
+function buildEvidenceFreshness(input: EvidenceInput, now: string): EvidenceFreshnessMetadata {
+  const expectation: EvidenceFreshnessMetadata["updateFrequencyExpectation"] =
+    input.sourceType === "http" || input.sourceType === "network" ? "per_scan" :
+    input.sourceType === "render" ? "per_scan" :
+    String(input.normalizedInput.signalKey ?? "").includes("competitor") ? "weekly" :
+    String(input.normalizedInput.signalKey ?? "").includes("freshness") ? "monthly" :
+    "per_scan";
+
+  return {
+    acquiredAt: now,
+    validatedAt: now,
+    sourceRecency: "current_scan",
+    updateFrequencyExpectation: expectation,
+    freshnessStatus: "fresh",
+    confidenceAdjustment: 0
+  };
 }

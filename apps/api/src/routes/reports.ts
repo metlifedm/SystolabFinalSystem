@@ -4,6 +4,7 @@ import { authOptional } from "../middleware/authOptional.js";
 import { findSnapshot } from "../services/persistenceService.js";
 import { buildCustomerDecisionObject } from "../services/decisionCompressionService.js";
 import { buildCustomerReportPayload } from "../services/customerReportService.js";
+import { buildDecisionTimelineForReport } from "../services/decisionTimelineService.js";
 import { renderReportPdf } from "../services/pdfService.js";
 import { resolveArtifactBuffer } from "../services/artifactService.js";
 import { completePlatformJob, enqueuePlatformJob, failPlatformJob } from "../services/platformControlPlaneService.js";
@@ -31,6 +32,22 @@ reportsRouter.get("/:snapshotId/decision", authOptional, async (req: Request, re
 });
 
 // Full internal ReportSnapshot — for authenticated internal operators.
+reportsRouter.get("/:snapshotId/timeline", authOptional, async (req: Request, res: Response) => {
+  const snapshotId = req.params.snapshotId;
+  if (!snapshotId) {
+    res.status(400).json({ error: { message: "snapshotId is required." } });
+    return;
+  }
+  const report = await findSnapshot(snapshotId);
+  if (!report) {
+    res.status(404).json({ error: { message: "Snapshot not found." } });
+    return;
+  }
+  const allowed = await canReadReport(req, res, report);
+  if (!allowed) return;
+  res.json(await buildDecisionTimelineForReport(report));
+});
+
 reportsRouter.get("/:snapshotId", authOptional, async (req: Request, res: Response) => {
   const snapshotId = req.params.snapshotId;
   if (!snapshotId) {
@@ -44,7 +61,9 @@ reportsRouter.get("/:snapshotId", authOptional, async (req: Request, res: Respon
   }
   const allowed = await canReadReport(req, res, report);
   if (!allowed) return;
-  res.json(buildCustomerReportPayload(report));
+  const payload = buildCustomerReportPayload(report);
+  payload.decisionTimeline = await buildDecisionTimelineForReport(report);
+  res.json(payload);
 });
 
 reportsRouter.get("/:snapshotId/pdf", authOptional, async (req, res) => {

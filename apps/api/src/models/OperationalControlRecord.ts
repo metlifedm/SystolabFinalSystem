@@ -14,6 +14,7 @@ export interface OperationalControlRecordDocument extends mongoose.Document {
     | "sandbox"
     | "ai_analyst_context"
     | "realtime_refresh"
+    | "managed_white_label"
     | "retention_job"
     | "benchmark_version";
   status: "passing" | "warning" | "failing" | "informational";
