@@ -150,6 +150,7 @@ export async function renderReportPdf(
         writeEnterpriseCompetitorScorecard(doc, report);
         writeEnterpriseExpandedCustomerInsights(doc, report);
         writeEnterpriseCustomerActionCenter(doc, report);
+        writeEnterpriseRecommendedActions(doc, report);
         writeEnterpriseFooterAndPageNumbers(doc);
         doc.end();
       } catch (error) {
@@ -504,9 +505,66 @@ function writeEnterpriseContinuationHeader(doc: PDFKit.PDFDocument): void {
   doc.y = doc.page.margins.top + 50;
 }
 
+function buildPdfExecutiveNarrative(report: ReportSnapshot): string {
+  if (isPdfContentUnavailable(report)) {
+    return "Website content was not available for a full customer decision assessment. SYSTOLAB did not infer business impact, risk, conversion loss, or revenue loss without validated current-scan evidence.";
+  }
+  const score = typeof report.oss?.score === "number" ? report.oss.score : null;
+  const dimensions = report.dimensions ?? [];
+  const weakest = dimensions.slice().sort((a, b) => a.score - b.score)[0];
+  const strongest = dimensions.slice().sort((a, b) => b.score - a.score)[0];
+  const hasCompetitorGap = (report.competitorComparison ?? []).some((comparison) => comparison.evidenceTraceabilityMap.some((row) => row.position === "primary_weaker"));
+  const foundation = score === null ? "limited" : score >= 80 ? "strong" : score >= 65 ? "solid" : score >= 50 ? "recoverable" : "fragile";
+  const strongestText = strongest ? `${pdfCustomerText(strongest.label)} is currently the strongest signal for customer confidence.` : "The scan found some usable customer decision signals.";
+  const weakLabel = weakest ? pdfCustomerText(weakest.label).toLowerCase() : "decision support";
+  const competitorText = hasCompetitorGap
+    ? "Competitors generally provide stronger decision-support content in the areas listed below, which may influence customers during evaluation."
+    : "Competitor intelligence did not validate a stronger external advantage in this scan.";
+  return `Your business presents a ${foundation} foundation for customer trust and conversion. ${strongestText} The largest opportunity is improving ${weakLabel} so visitors reach key information and act with less friction. ${competitorText}`;
+}
+
+function buildPdfBusinessHealthSnapshot(report: ReportSnapshot): Array<{ area: string; status: string; meaning: string }> {
+  if (isPdfContentUnavailable(report)) {
+    return [
+      { area: "Customer Acquisition", status: "Not Assessed", meaning: "Website content could not be collected." },
+      { area: "Customer Trust", status: "Not Assessed", meaning: "Trust signals could not be validated from current evidence." },
+      { area: "Customer Decision Support", status: "Not Assessed", meaning: "Customer decision support could not be evaluated." },
+      { area: "Competitive Position", status: "Not Assessed", meaning: "Competitor position was not inferred without customer website evidence." },
+      { area: "Local Presence", status: "Not Assessed", meaning: "Local profile, review, citation, and service-area evidence was unavailable." },
+      { area: "Revenue Opportunity", status: "Not Assessed", meaning: "Revenue opportunity was not estimated without validated page evidence." },
+      { area: "Priority", status: "Review Access", meaning: "Allow content collection and re-run the assessment." }
+    ];
+  }
+  const score = typeof report.oss?.score === "number" ? report.oss.score : null;
+  const weakest = (report.dimensions ?? []).slice().sort((a, b) => a.score - b.score)[0];
+  const decisionSupport = pdfAverageNullable([pdfScoreForDimension(report, "informationClarity"), pdfScoreForDimension(report, "conversionReadiness"), pdfScoreForDimension(report, "mobileExperience")]);
+  const hasCompetitorGap = (report.competitorComparison ?? []).some((comparison) => comparison.evidenceTraceabilityMap.some((row) => row.position === "primary_weaker"));
+  const local = pdfNativeSignal(report, "native_local_visibility_opportunity_score") ?? pdfNativeSignal(report, "native_local_business_readiness_score");
+  const localScore = firstPdfNumber([pdfSignalScoreOrNull(local), report.gbpIdentity?.identityConsistencyScore]);
+  return [
+    { area: "Customer Acquisition", status: pdfHealthStatusForScore(pdfScoreForDimension(report, "visibilityStructure")), meaning: "How easily customers can discover and understand the business from search and website structure." },
+    { area: "Customer Trust", status: pdfHealthStatusForScore(pdfScoreForDimension(report, "trust")), meaning: "How much visible proof supports confidence before a visitor contacts, books, or buys." },
+    { area: "Customer Decision Support", status: pdfHealthStatusForScore(decisionSupport), meaning: "How well the website answers questions and reduces hesitation before action." },
+    { area: "Competitive Position", status: hasCompetitorGap ? "Needs Improvement" : "Competitive", meaning: hasCompetitorGap ? "Compared competitors show stronger decision support in at least one validated area." : "No validated competitor advantage was found from the available comparison evidence." },
+    { area: "Local Presence", status: pdfHealthStatusForScore(localScore), meaning: "How clearly local profile, reviews, service-area, citation, and contact signals support nearby customers." },
+    { area: "Revenue Opportunity", status: score === null ? "Not Assessed" : score >= 55 ? "Moderate" : "High", meaning: "The practical opportunity indicated by current evidence-bound customer friction, not a guaranteed revenue claim." },
+    { area: "Priority", status: weakest ? `Improve ${pdfCustomerText(weakest.label)}` : "Improve Decision Support", meaning: "The first business area to improve based on the weakest validated customer decision signal." }
+  ];
+}
+
 function writeEnterpriseDecisionBrief(doc: PDFKit.PDFDocument, report: ReportSnapshot): void {
   const brief = pdfDecisionBrief(report);
   writeEnterpriseSectionLabel(doc, report, "SYSTOLAB Decision Intelligence Brief");
+
+  writeEnterpriseBox(doc, report, "Executive Summary", "green", 88, () => {
+    doc.font("Helvetica").fontSize(9.4).fillColor(ENTERPRISE_PDF.ink).text(pdfCustomerText(buildPdfExecutiveNarrative(report)), enterpriseInnerX(doc), doc.y, { width: enterpriseInnerWidth(doc) });
+  });
+
+  writeEnterpriseBox(doc, report, "Business Health Snapshot", "blue", 170, () => {
+    buildPdfBusinessHealthSnapshot(report).forEach((row, index) => {
+      writeEnterpriseTableRow(doc, row.area, `${row.status}. ${row.meaning}`, index);
+    });
+  });
 
   writeEnterpriseBox(doc, report, "Executive Verdict", "green", 116, () => {
     doc
@@ -689,16 +747,22 @@ function writeEnterpriseOutputContract(doc: PDFKit.PDFDocument, report: ReportSn
         { width: enterpriseInnerWidth(doc) }
       );
     doc.y += 8;
-    contract.keyDecisionSummary.slice(0, 5).forEach((item, index) => {
-      writeEnterpriseTableRow(doc, `Business Decision ${index + 1} - ${pdfCustomerText(item.priorityTier)}`, pdfCustomerText(item.summary), index);
+    dedupePdfDecisionRows(
+      contract.keyDecisionSummary.map((item) => ({ label: pdfCustomerText(item.priorityTier), value: pdfCustomerText(item.summary) })),
+      "Business Decision"
+    ).forEach((item, index) => {
+      writeEnterpriseTableRow(doc, `${item.label} - ${item.priority}`, item.value, index);
     });
   });
 
   if (contract.actionPlanMapping.length > 0) {
     writeEnterpriseSectionLabel(doc, report, "Priority Action Summary");
     writeEnterpriseBox(doc, report, "Recommended Business Actions", "green", 130, () => {
-      contract.actionPlanMapping.slice(0, 5).forEach((item, index) => {
-        writeEnterpriseTableRow(doc, `Priority Action ${index + 1}`, `${pdfCustomerText(item.authoritativeAction)} (${pdfCustomerText(item.priorityTier)})`, index);
+      dedupePdfDecisionRows(
+        contract.actionPlanMapping.map((item) => ({ label: "", value: pdfCustomerText(item.authoritativeAction), priority: pdfCustomerText(item.priorityTier) })),
+        "Priority Action"
+      ).forEach((item, index) => {
+        writeEnterpriseTableRow(doc, item.label || `Priority Action ${index + 1}`, `${item.value} (${item.priority})`, index);
       });
     });
   }
@@ -788,7 +852,7 @@ function writeEnterpriseCompetitorScorecard(doc: PDFKit.PDFDocument, report: Rep
       writeEnterpriseTableRow(
         doc,
         comparison.competitorLabel || safePdfHostLabel(comparison.competitorUrl),
-        `Client ${formatPdfOss(comparison.primaryOss)} vs competitor ${formatPdfOss(comparison.competitorOss)}. ${pdfCustomerText(comparison.structuralGapSummary)}`,
+        `Client ${formatPdfOss(comparison.primaryOss)} vs competitor ${formatPdfOss(comparison.competitorOss)}. Competitors provide more information that helps customers compare services and make confident decisions. ${pdfCustomerText(comparison.structuralGapSummary)}`,
         comparisonIndex
       );
       comparison.evidenceTraceabilityMap.slice(0, 4).forEach((row, rowIndex) => {
@@ -801,7 +865,7 @@ function writeEnterpriseCompetitorScorecard(doc: PDFKit.PDFDocument, report: Rep
         writeEnterpriseTableRow(
           doc,
           pdfCustomerText(row.dimensionLabel),
-          `${position}: client ${row.primaryScore}/100 vs competitor ${row.competitorScore ?? "Not scored"}. This area can influence comparison decisions.`,
+          `${position}: client ${row.primaryScore}/100 vs competitor ${row.competitorScore ?? "Not scored"}. Competitors provide more information that helps customers compare services and make confident decisions.`,
           comparisonIndex + rowIndex + 1
         );
       });
@@ -842,12 +906,12 @@ function writeEnterpriseExpandedCustomerInsights(doc: PDFKit.PDFDocument, report
         .filter((row) => row.position === "primary_weaker")
         .map((row) => ({
           label: comparison.competitorLabel || safePdfHostLabel(comparison.competitorUrl),
-          value: `${pdfCustomerText(row.dimensionLabel)}: client ${row.primaryScore}/100 vs competitor ${row.competitorScore ?? "Not scored"}. ${pdfPdfActionForDimension(row.dimension)}`
+          value: `${pdfCustomerText(row.dimensionLabel)}: client ${row.primaryScore}/100 vs competitor ${row.competitorScore ?? "Not scored"}. Competitors provide more information that helps customers compare services and make confident decisions. ${pdfPdfActionForDimension(row.dimension)}`
         }))
     );
     const signalRows = competitorGaps.map((evidence) => ({
       label: pdfCustomerText(evidence.normalizedInput?.["competitor"] ?? "Compared competitor"),
-      value: `${pdfSignalArea(String(evidence.normalizedInput?.["comparedSignal"] ?? "customer decision support"))}: client ${evidence.normalizedInput?.["primaryScore"] ?? "Not assessed"}/100 vs competitor ${evidence.normalizedInput?.["competitorScore"] ?? "Not assessed"}/100. ${seoMeaningForSignal(String(evidence.normalizedInput?.["comparedSignal"] ?? ""))}`
+      value: `${pdfSignalArea(String(evidence.normalizedInput?.["comparedSignal"] ?? "customer decision support"))}: client ${evidence.normalizedInput?.["primaryScore"] ?? "Not assessed"}/100 vs competitor ${evidence.normalizedInput?.["competitorScore"] ?? "Not assessed"}/100. Competitors provide more information that helps customers compare services and make confident decisions. ${seoMeaningForSignal(String(evidence.normalizedInput?.["comparedSignal"] ?? ""))}`
     }));
     const rows = dedupePdfRows([...signalRows, ...weakerRows]).slice(0, 7);
     if (rows.length === 0) writeEnterpriseTableRow(doc, "Status", "No validated competitor content advantage was available in this scan.", 0);
@@ -914,11 +978,12 @@ function writeEnterpriseRecommendedActions(doc: PDFKit.PDFDocument, report: Repo
         .font("Helvetica-Bold")
         .fontSize(9.5)
         .fillColor(ENTERPRISE_PDF.ink)
-        .text(recommendation.issue, enterpriseInnerX(doc), doc.y, { width: enterpriseInnerWidth(doc) })
+        .text(pdfBusinessExplanationForAction(recommendation.action, recommendation.revenueIntelligenceMapping || recommendation.issue), enterpriseInnerX(doc), doc.y, { width: enterpriseInnerWidth(doc) })
         .font("Helvetica")
         .fontSize(9)
-        .text(recommendation.action, { width: enterpriseInnerWidth(doc) })
+        .text(pdfCustomerText(recommendation.revenueIntelligenceMapping || recommendation.issue), { width: enterpriseInnerWidth(doc) })
         .fillColor(ENTERPRISE_PDF.muted)
+        .text(`Evidence & Implementation: ${pdfCustomerText(recommendation.action)} ${pdfTechnicalTasksForAction(recommendation.action).join(" ")}`, { width: enterpriseInnerWidth(doc) })
         .text(`Confidence: ${recommendation.confidenceScore}%`, { width: enterpriseInnerWidth(doc) });
     }, 2);
   });
@@ -1187,7 +1252,6 @@ function pdfCustomerText(value: unknown): string {
     .replace(/evidence objects?/gi, "validated findings")
     .replace(/headless browser rendering/gi, "visual validation")
     .replace(/\bGBP\b/g, "Business Profile")
-    .replace(/\bSEO\b/gi, "Visibility")
     .replace(/HTTP fetch failed|parser success|parserSuccess|robots unavailable|crawler diagnostics|recovery logs|rawSignalTelemetry|executionProvenance|validationTrace/gi, "technical collection detail")
     .replace(/\s+/g, " ")
     .trim();
@@ -1297,6 +1361,35 @@ function pdfPdfActionForDimension(key: string): string {
 function buildCustomerPdfSeoRows(report: ReportSnapshot): Array<{ label: string; value: string }> {
   const rows: Array<{ label: string; value: string }> = [];
   const visibility = report.dimensions?.find((dimension) => dimension.key === "visibilityStructure");
+  const question = pdfNativeSignal(report, "native_customer_question_coverage_score");
+  const missingQuestions = pdfStringArray(question?.normalizedInput?.["missingQuestionFamilies"]).map(pdfQuestionLabel);
+  const hasCompetitorGap = (report.competitorComparison ?? []).some((comparison) => comparison.evidenceTraceabilityMap.some((row) => row.position === "primary_weaker"));
+  rows.push(
+    {
+      label: "Can customers find your business?",
+      value: visibility ? `${visibility.score}/100 - ${visibility.classification}. Search visibility affects discovery before customers compare options.` : "Search visibility could not be scored from current evidence."
+    },
+    {
+      label: "What are customers searching for that you do not answer?",
+      value: missingQuestions.length ? pdfJoin(missingQuestions) : "No major unanswered customer-question gap was validated in this scan."
+    },
+    {
+      label: "Why are competitors appearing above you?",
+      value: hasCompetitorGap ? "Competitors provide more information that helps customers compare services and make confident decisions." : "Competitor evidence did not validate a stronger decision-support reason in this scan."
+    },
+    {
+      label: "Where are you losing organic traffic?",
+      value: "Organic traffic is most likely limited where discoverability, topical depth, local signals, or customer-answer coverage is incomplete."
+    },
+    {
+      label: "Which SEO improvements create the greatest business impact?",
+      value: "Prioritize SEO work that also improves trust, clarity, conversion readiness, and customer confidence."
+    },
+    {
+      label: "How confident are these recommendations?",
+      value: report.confidenceEngine ? `${report.confidenceEngine.overallConfidenceScore}% ${report.confidenceEngine.confidenceLevel}.` : "Confidence depends on current-scan evidence coverage."
+    }
+  );
   if (visibility) {
     rows.push({
       label: "Search Visibility Readiness",
@@ -1327,6 +1420,81 @@ function buildCustomerPdfSeoRows(report: ReportSnapshot): Array<{ label: string;
   }
 
   return dedupePdfRows(rows).slice(0, 10);
+}
+
+function pdfScoreForDimension(report: ReportSnapshot, key: string): number | null {
+  const dimension = report.dimensions?.find((item) => item.key === key || item.label === key);
+  return typeof dimension?.score === "number" && Number.isFinite(dimension.score) ? dimension.score : null;
+}
+
+function pdfAverageNullable(values: Array<number | null | undefined>): number | null {
+  const scores = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (scores.length === 0) return null;
+  return scores.reduce((sum, value) => sum + value, 0) / scores.length;
+}
+
+function pdfHealthStatusForScore(score: number | null | undefined): string {
+  if (typeof score !== "number" || !Number.isFinite(score)) return "Not Assessed";
+  if (score >= 75) return "Strong";
+  if (score >= 55) return "Moderate";
+  return "Needs Improvement";
+}
+
+function pdfSignalScoreOrNull(evidence: ReportSnapshot["evidenceObjects"][number] | undefined): number | null {
+  return evidence ? pdfSignalScore(evidence) : null;
+}
+
+function firstPdfNumber(values: Array<number | null | undefined>): number | null {
+  return values.find((value): value is number => typeof value === "number" && Number.isFinite(value)) ?? null;
+}
+
+function dedupePdfDecisionRows(rows: Array<{ label: string; value: string; priority?: string }>, prefix: string): Array<{ label: string; value: string; priority: string }> {
+  const seen = new Set<string>();
+  const result: Array<{ label: string; value: string; priority: string }> = [];
+  for (const row of rows) {
+    const key = pdfCanonicalDecisionKey(`${row.value} ${row.priority ?? row.label}`);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    result.push({ label: `${prefix} ${result.length + 1}`, value: row.value, priority: row.priority ?? row.label });
+  }
+  return result.slice(0, 4);
+}
+
+function pdfCanonicalDecisionKey(value: string): string {
+  const text = value.toLowerCase();
+  if (/mobile|viewport|resource|speed|responsive|tap/.test(text)) return "mobile_conversion_path";
+  if (/trust|review|testimonial|proof|credib|guarantee|certif|case stud/.test(text)) return "customer_trust";
+  if (/competitor|compare|comparison|alternative|versus/.test(text)) return "competitor_decision_support";
+  if (/question|faq|answer|pricing|cost|process|objection/.test(text)) return "customer_questions";
+  if (/visibility|search|local|schema|entity|citation|discover/.test(text)) return "search_visibility";
+  if (/conversion|cta|book|buy|form|lead|checkout|contact path|action path|ready to act|next step|taking action|take action|act but need/.test(text)) return "conversion_readiness";
+  if (/clarity|message|offer|explain|information/.test(text)) return "offer_clarity";
+  return text.replace(/[^a-z0-9]+/g, " ").trim().slice(0, 80);
+}
+
+function pdfBusinessExplanationForAction(action: string, reason: string): string {
+  const text = `${action} ${reason}`.toLowerCase();
+  if (/viewport|resource|mobile|contact|cta|action path|speed|responsive/.test(text)) return "Make it easier for mobile visitors to quickly understand your offer and contact your business. This reduces abandonment among high-intent visitors.";
+  if (/trust|review|testimonial|proof|credib|guarantee|certif/.test(text)) return "Give visitors stronger reasons to trust the business before they compare alternatives or decide to contact you.";
+  if (/competitor|compare|comparison|alternative|versus/.test(text)) return "Close the information gap that may make competitors feel safer or easier to choose during customer comparison.";
+  if (/question|faq|answer|pricing|cost|process|objection/.test(text)) return "Answer the questions customers ask before they contact, book, or buy so fewer people leave to research elsewhere.";
+  if (/visibility|search|local|schema|entity|citation|discover/.test(text)) return "Help customers find the right pages and understand the business faster when they are searching for a solution.";
+  if (/conversion|form|booking|checkout|lead|buy|contact/.test(text)) return "Make the next step clearer so interested visitors can move from interest to action with less friction.";
+  return "Improve the customer decision path so visitors can understand the offer, trust the business, and take the next step with less hesitation.";
+}
+
+function pdfTechnicalTasksForAction(action: string): string[] {
+  const safeAction = pdfCustomerText(action);
+  const text = safeAction.toLowerCase();
+  const tasks = new Set<string>();
+  if (/viewport|responsive/.test(text)) tasks.add("Improve viewport and responsive layout behavior.");
+  if (/resource|speed|weight|load/.test(text)) tasks.add("Reduce resource weight and loading friction.");
+  if (/mobile|tap|contact|cta|action path/.test(text)) tasks.add("Make mobile contact and primary action paths easier to reach.");
+  if (/review|testimonial|proof|trust|credib/.test(text)) tasks.add("Add visible trust proof near high-intent decision points.");
+  if (/faq|question|answer|pricing|cost|process/.test(text)) tasks.add("Add direct answers for pricing, process, objections, and decision-stage questions.");
+  if (/schema|entity|citation|local|search|visibility/.test(text)) tasks.add("Strengthen entity, local, internal-linking, and structured SEO cues where supported by evidence.");
+  tasks.add(safeAction);
+  return Array.from(tasks).slice(0, 5);
 }
 
 function seoStatusForScore(score: number): string {

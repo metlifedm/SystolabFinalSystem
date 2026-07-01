@@ -132,6 +132,56 @@ describe("content-unavailable customer report mapping", () => {
     expect(json).not.toMatch(/canonicalIssueId|globalOutputContract|systolab\.output_contract|CI-001|evidenceIds|recommendationIds|rawSignalTelemetry|validationTrace|selectorPath|rawDomSnapshot/i);
   });
 
+  it("adds executive narrative, health snapshot, SEO questions, and recommendation implementation detail", () => {
+    const payload = buildCustomerReportPayload(makeScoredReport()) as Record<string, unknown>;
+    const narrative = payload["customerExecutiveNarrative"] as string;
+    const health = payload["customerBusinessHealthSnapshot"] as Array<{ area: string; status: string }>;
+    const seoQuestions = payload["customerSeoBusinessQuestions"] as Array<{ question: string; businessMeaning: string }>;
+    const engine = payload["recommendationEngine"] as { recommendations: Array<{ action: string; businessExplanation: string; technicalTasks: string[] }> };
+    const json = JSON.stringify(payload);
+
+    expect(narrative).toContain("foundation for customer trust and conversion");
+    expect(health.map((item) => item.area)).toEqual(expect.arrayContaining(["Customer Acquisition", "Customer Trust", "Customer Decision Support", "Competitive Position", "Local Presence", "Revenue Opportunity", "Priority"]));
+    expect(seoQuestions.map((item) => item.question)).toEqual(expect.arrayContaining(["Can customers find your business?", "Which SEO improvements will create the greatest business impact?"]));
+    expect(engine.recommendations[0]?.action).toContain("Improve viewport, resource weight, and mobile contact/action paths.");
+    expect(engine.recommendations[0]?.businessExplanation).toContain("mobile visitors");
+    expect(engine.recommendations[0]?.technicalTasks).toEqual(expect.arrayContaining(["Improve viewport and responsive layout behavior.", "Reduce resource weight and loading friction."]));
+    expect(json).toContain("SEO improvements");
+    expect(json).not.toContain("Which Visibility improvements");
+  });
+
+  it("deduplicates repeated business decisions into fewer stronger decisions", () => {
+    const report = makeScoredReport();
+    report.globalOutputContract = {
+      ...report.globalOutputContract,
+      keyDecisionSummary: [
+        { canonicalIssueId: "CI-001", summary: "Customers may be ready to act but need a clearer next step.", priorityTier: "FIX NOW" },
+        { canonicalIssueId: "CI-002", summary: "The action path is unclear, so ready customers may not know what to do next.", priorityTier: "FIX NOW" },
+        { canonicalIssueId: "CI-003", summary: "Visitors need a clearer contact and CTA path before taking action.", priorityTier: "THIS MONTH" }
+      ],
+      actionPlanMapping: [
+        { canonicalIssueId: "CI-001", actionReference: "REC-001", authoritativeAction: "Clarify the primary CTA.", priorityTier: "FIX NOW" },
+        { canonicalIssueId: "CI-002", actionReference: "REC-002", authoritativeAction: "Make the contact and CTA path clearer.", priorityTier: "FIX NOW" }
+      ]
+    } as ReportSnapshot["globalOutputContract"];
+
+    const payload = buildCustomerReportPayload(report) as Record<string, unknown>;
+    const summary = payload["customerBusinessDecisionSummary"] as { decisions: unknown[]; priorityActions: unknown[] };
+
+    expect(summary.decisions).toHaveLength(1);
+    expect(summary.priorityActions).toHaveLength(1);
+  });
+
+  it("explains competitor score gaps with business implication", () => {
+    const payload = buildCustomerReportPayload(makeScoredReport()) as Record<string, unknown>;
+    const comparison = payload["customerCompetitorContentComparison"] as { contentGaps: Array<{ scoreComparison: string; implication: string }> };
+    const winReasons = payload["customerCompetitorWinReasons"] as { summary: string };
+
+    expect(comparison.contentGaps[0]?.scoreComparison).toBe("Client 54/100 vs competitor 83/100");
+    expect(comparison.contentGaps[0]?.implication).toContain("compare services and make confident decisions");
+    expect(winReasons.summary).toContain("reduces uncertainty before customers contact them");
+  });
+
   it("keeps backend outcome attribution and verification layers out of customer payloads", () => {
     const report = makeScoredReport() as ReportSnapshot & Record<string, unknown>;
     report.businessOutcomeAttributionLayer = { status: "active", profiles: [{ attributionProfileId: "OAP-CI-001", canonicalIssueId: "CI-001" }] } as unknown as ReportSnapshot["businessOutcomeAttributionLayer"];
@@ -242,6 +292,7 @@ function makeReport(): ReportSnapshot {
       dimension("conversionReadiness", "Conversion Readiness", 34),
       dimension("mobileExperience", "Mobile Experience", 68),
       dimension("informationClarity", "Information Clarity", 74),
+      dimension("visibilityStructure", "Visibility Structure", 54),
       dimension("websiteHealth", "Website Health", 81)
     ],
     revenueIntelligence: {
@@ -333,6 +384,48 @@ function makeScoredReport(): ReportSnapshot {
       capturedAt: "2026-06-14T00:00:00.000Z"
     }
   ] as unknown as ReportSnapshot["evidenceObjects"];
+  report.recommendationEngine = {
+    status: "generated",
+    recommendations: [
+      {
+        recommendationId: "REC-001",
+        issue: "Mobile visitors may not reach the contact path quickly.",
+        action: "Improve viewport, resource weight, and mobile contact/action paths.",
+        priority: "THIS MONTH",
+        mappedDimensions: ["mobileExperience", "conversionReadiness"],
+        expectedScoreMovement: 8,
+        revenueIntelligenceMapping: "High-intent mobile visitors need to understand the offer and contact the business quickly.",
+        confidenceScore: 81,
+        changeValidationPlan: "Re-scan the mobile layout and action path after implementation."
+      }
+    ],
+    mappingSystem: { rule: "one_recommendation_one_change_cluster", explanation: "Test mapping." }
+  } as unknown as ReportSnapshot["recommendationEngine"];
+  report.competitorComparison = [
+    {
+      status: "assessed",
+      competitorUrl: "https://competitor.example",
+      competitorLabel: "Competitor A",
+      primaryOss: 54,
+      competitorOss: 83,
+      assessedPages: 2,
+      structuralGapSummary: "Competitor provides stronger decision-support content.",
+      primaryStrengthCount: 1,
+      competitorStrengthCount: 3,
+      equivalentCount: 0,
+      dataAvailability: "Compared from fixture evidence.",
+      evidenceTraceabilityMap: [
+        {
+          dimension: "informationClarity",
+          dimensionLabel: "Information Clarity",
+          primaryScore: 54,
+          competitorScore: 83,
+          position: "primary_weaker",
+          difference: -29
+        }
+      ]
+    }
+  ] as unknown as ReportSnapshot["competitorComparison"];
   report.unifiedIssueCanvas = {
     status: "active",
     preSignalClassification: [],

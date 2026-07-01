@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   --bg: #f6f4ee;
   --surface: #fffdfa;
   --surface-2: #eef3ed;
@@ -1661,6 +1661,48 @@ main {
   line-height: 1.35;
 }
 
+.business-health-grid,
+.seo-question-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.executive-narrative-card .decision-summary {
+  font-size: 1rem;
+  line-height: 1.65;
+}
+
+.action-with-details {
+  align-items: start;
+}
+
+.evidence-implementation-panel {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 10px 12px;
+}
+
+.evidence-implementation-panel summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.evidence-implementation-panel p {
+  margin: 10px 0 6px;
+  color: #334155;
+  line-height: 1.5;
+}
+
+.implementation-task-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #475569;
+  line-height: 1.5;
+}
+
 .customer-evidence-details {
   display: block;
 }
@@ -1828,7 +1870,7 @@ main {
   color: var(--muted);
 }
 
-/* â”€â”€ Premium Auth Page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Premium Auth Page */
 
 .auth-overlay {
   position: fixed;
@@ -2950,7 +2992,7 @@ pre {
   line-height: 1.5;
 }
 
-/* â”€â”€ Revenue Risk & Business Impact Assessment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Revenue Risk & Business Impact Assessment */
 
 .rri-header {
   display: grid;

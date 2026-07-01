@@ -868,6 +868,9 @@ interface CustomerBusinessReport {
   isEcommerce: boolean;
   verdict: string;
   verdictExplanation: string;
+  executiveNarrative: string;
+  businessHealthSnapshot: Array<{ area: string; status: string; meaning: string }>;
+  seoBusinessQuestions: Array<{ question: string; answer: string; businessMeaning: string; action: string; confidence: string }>;
   highestRoiAction: {
     action: string;
     whyItMatters: string;
@@ -923,7 +926,7 @@ interface CustomerBusinessReport {
     status: string;
     summary: string;
     comparedCompetitors: string[];
-    contentGaps: Array<{ competitor: string; area: string; clientEvidence: string; competitorEvidence: string; decisionImpact: string; action: string }>;
+    contentGaps: Array<{ competitor: string; area: string; clientEvidence: string; competitorEvidence: string; scoreComparison?: string; implication?: string; decisionImpact: string; action: string }>;
     missingContentTypes: Array<{ contentType: string; status: string; action: string }>;
     limitations: string[];
   };
@@ -975,6 +978,8 @@ interface CustomerBusinessReport {
     title: string;
     action: string;
     reason: string;
+    businessExplanation: string;
+    technicalTasks: string[];
     confidence: string;
   }>;
   competitorGaps: Array<{
@@ -1031,6 +1036,9 @@ function CustomerBusinessReportView({ report, style }: { report: ReportSnapshot;
           <em>{customer.scoreLabel}</em>
         </div>
       </section>
+
+      <CustomerExecutiveNarrativeSection narrative={customer.executiveNarrative} />
+      <CustomerBusinessHealthSnapshotSection snapshot={customer.businessHealthSnapshot} />
 
       <section className="report-section highest-roi-card">
         <div className="section-title">
@@ -1119,6 +1127,7 @@ function CustomerBusinessReportView({ report, style }: { report: ReportSnapshot;
         description="Search visibility readiness, topical coverage, discoverability, local presence, freshness, and organic growth opportunities."
       />
 
+      <CustomerSeoBusinessQuestionsSection questions={customer.seoBusinessQuestions} />
       <CustomerIntelligenceSummary
         title="Visibility Opportunity Summary"
         icon={<Search size={18} />}
@@ -1207,10 +1216,17 @@ function CustomerBusinessReportView({ report, style }: { report: ReportSnapshot;
         </div>
         <div className="data-table compact customer-actions-table">
           {customer.recommendedActions.map((action) => (
-            <div className="table-row" key={action.title}>
+            <div className="table-row action-with-details" key={action.title}>
               <span>{action.title}</span>
-              <strong>{action.action}</strong>
+              <strong>{action.businessExplanation}</strong>
               <small>{action.reason} Confidence: {action.confidence}.</small>
+              <details className="evidence-implementation-panel">
+                <summary>Evidence & Implementation</summary>
+                <p>{action.action}</p>
+                <ul className="implementation-task-list">
+                  {action.technicalTasks.map((task) => <li key={task}>{task}</li>)}
+                </ul>
+              </details>
             </div>
           ))}
         </div>
@@ -1255,6 +1271,63 @@ function CustomerBusinessReportView({ report, style }: { report: ReportSnapshot;
         </div>
       </details>
     </article>
+  );
+}
+
+function CustomerExecutiveNarrativeSection({ narrative }: { narrative: string }) {
+  if (!narrative.trim()) return null;
+  return (
+    <section className="report-section executive-narrative-card">
+      <div className="section-title">
+        <FileText size={18} />
+        <h2>Executive Summary</h2>
+      </div>
+      <p className="decision-summary">{narrative}</p>
+    </section>
+  );
+}
+
+function CustomerBusinessHealthSnapshotSection({ snapshot }: { snapshot: CustomerBusinessReport["businessHealthSnapshot"] }) {
+  if (!snapshot.length) return null;
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <Gauge size={18} />
+        <h2>Business Health Snapshot</h2>
+      </div>
+      <div className="customer-intelligence-grid business-health-grid">
+        {snapshot.map((item) => (
+          <div className="customer-intelligence-card business-health-card" key={item.area}>
+            <span>{item.area}</span>
+            <strong>{item.status}</strong>
+            <p>{item.meaning}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CustomerSeoBusinessQuestionsSection({ questions }: { questions: CustomerBusinessReport["seoBusinessQuestions"] }) {
+  if (!questions.length) return null;
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <Search size={18} />
+        <h2>SEO Business Questions</h2>
+      </div>
+      <div className="customer-intelligence-grid seo-question-grid">
+        {questions.map((item) => (
+          <div className="customer-intelligence-card" key={item.question}>
+            <span>{item.question}</span>
+            <strong>{item.answer}</strong>
+            <p>{item.businessMeaning}</p>
+            <small>{item.action}</small>
+            <em>{item.confidence}</em>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1619,8 +1692,8 @@ function CustomerCompetitorContentComparisonSection({ comparison }: { comparison
           {comparison.contentGaps.map((item) => (
             <div className="table-row" key={`${item.competitor}-${item.area}`}>
               <span>{item.area}</span>
-              <strong>{item.clientEvidence} vs {item.competitorEvidence}</strong>
-              <small>{item.competitor}: {item.decisionImpact} {item.action}</small>
+              <strong>{item.scoreComparison ?? `${item.clientEvidence} vs ${item.competitorEvidence}`}</strong>
+              <small>{item.competitor}: {item.implication ?? item.decisionImpact} {item.action}</small>
             </div>
           ))}
         </div>
@@ -1690,6 +1763,9 @@ function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessRe
     isEcommerce,
     verdict: customerVerdict(score, weakest),
     verdictExplanation: customerVerdictExplanation(report, weakest, strongest),
+    executiveNarrative: buildCustomerExecutiveNarrative(report, score, weakest, strongest, competitorGaps),
+    businessHealthSnapshot: buildBusinessHealthSnapshot(report, score, weakest, competitorGaps),
+    seoBusinessQuestions: buildSeoBusinessQuestions(report),
     decisionTimeline: buildCustomerDecisionTimeline(report),
     highestRoiAction: {
       action: highest?.action ?? report.actionFirstPanel?.fallbackAction ?? "Clarify the main customer action and re-run the assessment.",
@@ -1715,6 +1791,8 @@ function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessRe
       title: `Action ${index + 1}`,
       action: item.action,
       reason: item.reason,
+      businessExplanation: businessExplanationForAction(item.action, item.reason),
+      technicalTasks: technicalTasksForAction(item.action),
       confidence: `${Math.round(item.score)}%`
     })),
     competitorGaps,
@@ -1723,6 +1801,124 @@ function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessRe
     visualMarkers: buildVisualMarkers(report),
     evidenceItems: buildCustomerEvidenceItems(report)
   };
+}
+
+function buildCustomerExecutiveNarrative(
+  report: ReportSnapshot,
+  score: number | null,
+  weakest: ReportSnapshot["dimensions"][number] | undefined,
+  strongest: ReportSnapshot["dimensions"][number] | undefined,
+  competitorGaps: CustomerBusinessReport["competitorGaps"]
+): string {
+  const payload = (report as unknown as { customerExecutiveNarrative?: string }).customerExecutiveNarrative;
+  if (typeof payload === "string" && payload.trim()) return customerSafeText(payload);
+  const evidence = customerValidatedFindingCount(report);
+  if (score === null || evidence <= 0) {
+    return "Website content was not available for a full customer decision assessment. SYSTOLAB did not infer business impact, risk, conversion loss, or revenue loss without validated current-scan evidence.";
+  }
+  const foundation = score >= 80 ? "strong" : score >= 65 ? "solid" : score >= 50 ? "recoverable" : "fragile";
+  const strongestText = strongest
+    ? `${businessDimensionLabel(strongest.label)} is currently the strongest signal for customer confidence.`
+    : "The scan found some usable customer decision signals.";
+  const weakLabel = weakest ? businessDimensionLabel(weakest.label).toLowerCase() : "decision support";
+  const competitorText = competitorGaps.length
+    ? "Competitors generally provide stronger decision-support content in the areas listed below, which may influence customers during evaluation."
+    : "Competitor intelligence did not validate a stronger external advantage in this scan.";
+  return `Your business presents a ${foundation} foundation for customer trust and conversion. ${strongestText} The largest opportunity is improving ${weakLabel} so visitors reach key information and act with less friction. ${competitorText}`;
+}
+
+function buildBusinessHealthSnapshot(
+  report: ReportSnapshot,
+  score: number | null,
+  weakest: ReportSnapshot["dimensions"][number] | undefined,
+  competitorGaps: CustomerBusinessReport["competitorGaps"]
+): CustomerBusinessReport["businessHealthSnapshot"] {
+  const payload = (report as unknown as { customerBusinessHealthSnapshot?: CustomerBusinessReport["businessHealthSnapshot"] }).customerBusinessHealthSnapshot;
+  if (Array.isArray(payload) && payload.length) return payload.map((item) => ({ ...item, area: customerSafeText(item.area), status: customerSafeText(item.status), meaning: customerSafeText(item.meaning) }));
+  const acquisition = scoreForDimension(report, "visibilityStructure");
+  const trust = scoreForDimension(report, "trust");
+  const decisionSupport = averageNullable([scoreForDimension(report, "informationClarity"), scoreForDimension(report, "conversionReadiness"), scoreForDimension(report, "mobileExperience")]);
+  const localVisibility = buildCustomerLocalVisibility(report);
+  const localPresence = firstNullable([
+    scoreForDimension(report, "localVisibility"),
+    report.gbpIdentity?.identityConsistencyScore,
+    numberFromText(localVisibility.localVisibilityScore),
+    numberFromText(localVisibility.gbpScore)
+  ]);
+  const revenueStatus = score === null ? "Not Assessed" : score >= 55 ? "Moderate" : "High";
+  const priorityLabel = weakest ? `Improve ${businessDimensionLabel(weakest.label)}` : "Improve Decision Support";
+  return [
+    { area: "Customer Acquisition", status: healthStatusForScore(acquisition), meaning: "How easily customers can discover and understand the business from search and website structure." },
+    { area: "Customer Trust", status: healthStatusForScore(trust), meaning: "How much visible proof supports confidence before a visitor contacts, books, or buys." },
+    { area: "Customer Decision Support", status: healthStatusForScore(decisionSupport), meaning: "How well the website answers questions and reduces hesitation before action." },
+    { area: "Competitive Position", status: competitorGaps.length ? "Needs Improvement" : "Competitive", meaning: competitorGaps.length ? "Compared competitors show stronger decision support in at least one validated area." : "No validated competitor advantage was found from the available comparison evidence." },
+    { area: "Local Presence", status: healthStatusForScore(localPresence), meaning: "How clearly local profile, reviews, service-area, citation, and contact signals support nearby customers." },
+    { area: "Revenue Opportunity", status: revenueStatus, meaning: "The practical opportunity indicated by current evidence-bound customer friction, not a guaranteed revenue claim." },
+    { area: "Priority", status: priorityLabel, meaning: "The first business area to improve based on the weakest validated customer decision signal." }
+  ];
+}
+
+function buildSeoBusinessQuestions(report: ReportSnapshot): CustomerBusinessReport["seoBusinessQuestions"] {
+  const payload = (report as unknown as { customerSeoBusinessQuestions?: CustomerBusinessReport["seoBusinessQuestions"] }).customerSeoBusinessQuestions;
+  if (Array.isArray(payload) && payload.length) {
+    return payload.map((item) => ({
+      question: customerSafeText(item.question),
+      answer: customerSafeText(item.answer),
+      businessMeaning: customerSafeText(item.businessMeaning),
+      action: customerSafeText(item.action),
+      confidence: customerSafeText(item.confidence)
+    }));
+  }
+  const visibility = scoreForDimension(report, "visibilityStructure");
+  const clarity = scoreForDimension(report, "informationClarity");
+  const questionCoverage = buildCustomerQuestionCoverage(report);
+  const competitorContent = buildCustomerCompetitorContentComparison(report);
+  const missingCount = questionCoverage.questionsMissingFromWebsite.length;
+  const competitorGapCount = competitorContent.contentGaps.length;
+  return [
+    {
+      question: "Can customers find your business?",
+      answer: healthStatusForScore(visibility),
+      businessMeaning: visibility === null ? "Search visibility could not be scored from current evidence." : `Search visibility readiness is ${Math.round(visibility)}/100, which affects discovery before customers compare options.`,
+      action: actionForDimensionKey("visibilityStructure"),
+      confidence: customerEvidenceStrengthLabel(report)
+    },
+    {
+      question: "What are customers searching for that you do not answer?",
+      answer: missingCount ? `${missingCount} question gap${missingCount === 1 ? "" : "s"}` : "No major question gap validated",
+      businessMeaning: missingCount ? joinCustomerList(questionCoverage.questionsMissingFromWebsite.slice(0, 4)) : "Current evidence did not validate a separate unanswered-question cluster.",
+      action: questionCoverage.action,
+      confidence: questionCoverage.confidence
+    },
+    {
+      question: "Why are competitors appearing above you?",
+      answer: competitorGapCount ? `${competitorGapCount} competitor advantage${competitorGapCount === 1 ? "" : "s"}` : "Not validated",
+      businessMeaning: competitorGapCount ? "Competitors provide more information that helps customers compare services and make confident decisions." : "Competitor evidence did not validate a stronger decision-support reason in this scan.",
+      action: competitorGapCount ? competitorContent.contentGaps[0]?.action ?? "Close validated competitor content gaps." : "Add competitor URLs and collect full evidence before drawing a stronger conclusion.",
+      confidence: customerEvidenceStrengthLabel(report)
+    },
+    {
+      question: "Where are you losing organic traffic?",
+      answer: clarity !== null && visibility !== null && visibility < clarity ? "Discovery structure" : "Content decision support",
+      businessMeaning: "Organic traffic is most likely limited where discoverability, topical depth, local signals, or customer-answer coverage is incomplete.",
+      action: visibility !== null && visibility < 70 ? actionForDimensionKey("visibilityStructure") : "Add decision-stage service content, FAQs, comparison support, and helpful educational pages.",
+      confidence: customerEvidenceStrengthLabel(report)
+    },
+    {
+      question: "Which SEO improvements will create the greatest business impact?",
+      answer: "Prioritized roadmap",
+      businessMeaning: "The strongest SEO work should also improve trust, clarity, conversion readiness, and customer confidence, not only rankings.",
+      action: buildCustomerRecommendationRoadmap(report).phases.find((phase) => phase.actions.length)?.actions[0]?.action ?? actionForDimensionKey("visibilityStructure"),
+      confidence: customerEvidenceStrengthLabel(report)
+    },
+    {
+      question: "How confident are these recommendations?",
+      answer: customerEvidenceStrengthLabel(report),
+      businessMeaning: "Confidence rises when current-scan evidence covers enough pages, validated findings, questions, competitors, and business signals.",
+      action: "Use the Evidence & Implementation panel for technical tasks, then re-scan to validate improvement.",
+      confidence: `${Math.round(report.confidenceEngine?.overallConfidenceScore ?? averageConfidence(report))}%`
+    }
+  ];
 }
 
 function buildCustomerDecisionTimeline(report: ReportSnapshot): DecisionTimelineOutput | null {
@@ -1778,6 +1974,34 @@ function buildCustomerDecisionTimeline(report: ReportSnapshot): DecisionTimeline
   };
 }
 
+function dedupeCustomerBusinessDecisions(
+  decisions: CustomerBusinessReport["businessDecisionSummary"]["decisions"]
+): CustomerBusinessReport["businessDecisionSummary"]["decisions"] {
+  return dedupeBy(decisions, (item) => canonicalDecisionKey(`${item.meaning} ${item.priority}`))
+    .slice(0, 4)
+    .map((item, index) => ({ ...item, title: `Business Decision ${index + 1}` }));
+}
+
+function dedupeCustomerPriorityActions(
+  actions: CustomerBusinessReport["businessDecisionSummary"]["priorityActions"]
+): CustomerBusinessReport["businessDecisionSummary"]["priorityActions"] {
+  return dedupeBy(actions, (item) => canonicalDecisionKey(`${item.action} ${item.priority}`))
+    .slice(0, 4)
+    .map((item, index) => ({ ...item, title: `Priority Action ${index + 1}` }));
+}
+
+function canonicalDecisionKey(value: string): string {
+  const text = value.toLowerCase();
+  if (/mobile|viewport|resource|speed|responsive|tap/.test(text)) return "mobile_conversion_path";
+  if (/trust|review|testimonial|proof|credib|guarantee|certif|case stud/.test(text)) return "customer_trust";
+  if (/competitor|compare|comparison|alternative|versus/.test(text)) return "competitor_decision_support";
+  if (/question|faq|answer|pricing|cost|process|objection/.test(text)) return "customer_questions";
+  if (/visibility|search|local|schema|entity|citation|discover/.test(text)) return "search_visibility";
+  if (/conversion|cta|book|buy|form|lead|checkout|contact path|action path|ready to act|next step|taking action|take action|act but need/.test(text)) return "conversion_readiness";
+  if (/clarity|message|offer|explain|information/.test(text)) return "offer_clarity";
+  return text.replace(/[^a-z0-9]+/g, " ").trim().slice(0, 80);
+}
+
 function buildCustomerBusinessDecisionSummary(report: ReportSnapshot): CustomerBusinessReport["businessDecisionSummary"] {
   const payload = (report as unknown as { customerBusinessDecisionSummary?: Partial<CustomerBusinessReport["businessDecisionSummary"]> }).customerBusinessDecisionSummary;
   const contract = (report as unknown as { globalOutputContract?: ReportSnapshot["globalOutputContract"] }).globalOutputContract;
@@ -1810,10 +2034,10 @@ function buildCustomerBusinessDecisionSummary(report: ReportSnapshot): CustomerB
   return {
     confidenceScore: customerSafeText(payload?.confidenceScore ?? fallback?.confidenceScore ?? "0%"),
     evidenceStrength: customerSafeText(payload?.evidenceStrength ?? fallback?.evidenceStrength ?? customerEvidenceStrengthLabel(report)),
-    decisions: normalizeRows(payload?.decisions).length ? normalizeRows(payload?.decisions) : fallback?.decisions ?? [],
+    decisions: dedupeCustomerBusinessDecisions(normalizeRows(payload?.decisions).length ? normalizeRows(payload?.decisions) : fallback?.decisions ?? []),
     businessDrivers: normalizeRows(payload?.businessDrivers).length ? normalizeRows(payload?.businessDrivers) : fallback?.businessDrivers ?? [],
     revenueImpactAreas: normalizeRows(payload?.revenueImpactAreas).length ? normalizeRows(payload?.revenueImpactAreas) : fallback?.revenueImpactAreas ?? [],
-    priorityActions: normalizeRows(payload?.priorityActions).length ? normalizeRows(payload?.priorityActions) : fallback?.priorityActions ?? [],
+    priorityActions: dedupeCustomerPriorityActions(normalizeRows(payload?.priorityActions).length ? normalizeRows(payload?.priorityActions) : fallback?.priorityActions ?? []),
     limitations: textArray(payload?.limitations).length ? textArray(payload?.limitations) : fallback?.limitations ?? []
   };
 }
@@ -1854,6 +2078,8 @@ function buildCustomerCompetitorContentComparison(report: ReportSnapshot): Custo
     area: gap.area,
     clientEvidence: "Client weaker",
     competitorEvidence: "Competitor stronger",
+    scoreComparison: gap.position,
+    implication: "Competitors provide more information that helps customers compare services and make confident decisions. This reduces uncertainty before customers contact them.",
     decisionImpact: gap.decisionImpact,
     action: "Close the competitor information gap with clearer proof, answers, transparency, or decision-support content."
   }));
@@ -1894,7 +2120,7 @@ function buildCustomerCompetitorWinReasons(report: ReportSnapshot): CustomerBusi
   const reasons = payloadReasons.length ? payloadReasons : fallback;
   return {
     status: customerSafeText(payload?.status ?? (reasons.length ? "Validated competitor advantage detected" : "Not validated")),
-    summary: customerSafeText(payload?.summary ?? (reasons.length ? "Competitors are winning in the specific evidence-backed areas listed below." : "This scan did not validate why a competitor is winning beyond score-level comparison.")),
+    summary: customerSafeText(payload?.summary ?? (reasons.length ? "Competitors provide more information that helps customers compare services and make confident decisions. This reduces uncertainty before customers contact them." : "This scan did not validate why a competitor is winning beyond score-level comparison.")),
     reasons
   };
 }
@@ -1975,6 +2201,72 @@ function actionForDimensionKey(key: string): string {
 function joinCustomerList(items: string[]): string {
   return items.length ? items.map(customerSafeText).join(" ") : "Not validated in this scan.";
 }
+function businessExplanationForAction(action: string, reason: string): string {
+  const text = `${action} ${reason}`.toLowerCase();
+  if (/viewport|resource|mobile|contact|cta|action path|speed|responsive/.test(text)) {
+    return "Make it easier for mobile visitors to quickly understand your offer and contact your business. This reduces abandonment among high-intent visitors.";
+  }
+  if (/trust|review|testimonial|proof|credib|guarantee|certif/.test(text)) {
+    return "Give visitors stronger reasons to trust the business before they compare alternatives or decide to contact you.";
+  }
+  if (/competitor|compare|comparison|alternative|versus/.test(text)) {
+    return "Close the information gap that may make competitors feel safer or easier to choose during customer comparison.";
+  }
+  if (/question|faq|answer|pricing|cost|process|objection/.test(text)) {
+    return "Answer the questions customers ask before they contact, book, or buy so fewer people leave to research elsewhere.";
+  }
+  if (/visibility|search|local|schema|entity|citation|discover/.test(text)) {
+    return "Help customers find the right pages and understand the business faster when they are searching for a solution.";
+  }
+  if (/conversion|form|booking|checkout|lead|buy|contact/.test(text)) {
+    return "Make the next step clearer so interested visitors can move from interest to action with less friction.";
+  }
+  return "Improve the customer decision path so visitors can understand the offer, trust the business, and take the next step with less hesitation.";
+}
+
+function technicalTasksForAction(action: string): string[] {
+  const safeAction = customerSafeText(action);
+  const text = safeAction.toLowerCase();
+  const tasks = new Set<string>();
+  if (/viewport|responsive/.test(text)) tasks.add("Improve viewport and responsive layout behavior.");
+  if (/resource|speed|weight|load/.test(text)) tasks.add("Reduce resource weight and loading friction.");
+  if (/mobile|tap|contact|cta|action path/.test(text)) tasks.add("Make mobile contact and primary action paths easier to reach.");
+  if (/review|testimonial|proof|trust|credib/.test(text)) tasks.add("Add visible trust proof near high-intent decision points.");
+  if (/faq|question|answer|pricing|cost|process/.test(text)) tasks.add("Add direct answers for pricing, process, objections, and decision-stage questions.");
+  if (/schema|entity|citation|local|search|visibility/.test(text)) tasks.add("Strengthen entity, local, internal-linking, and structured visibility cues where supported by evidence.");
+  tasks.add(safeAction);
+  return Array.from(tasks).slice(0, 5);
+}
+
+function scoreForDimension(report: ReportSnapshot, key: string): number | null {
+  const dimension = (report.dimensions ?? []).find((item) => item.key === key || item.label === key);
+  return typeof dimension?.score === "number" && Number.isFinite(dimension.score) ? dimension.score : null;
+}
+
+function averageNullable(values: Array<number | null | undefined>): number | null {
+  const scores = values.filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (!scores.length) return null;
+  return scores.reduce((sum, value) => sum + value, 0) / scores.length;
+}
+
+function firstNullable(values: Array<number | null | undefined>): number | null {
+  return values.find((value): value is number => typeof value === "number" && Number.isFinite(value)) ?? null;
+}
+
+function numberFromText(value: string): number | null {
+  const match = value.match(/(\d+(?:\.\d+)?)/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function healthStatusForScore(score: number | null | undefined): string {
+  if (typeof score !== "number" || !Number.isFinite(score)) return "Not Assessed";
+  if (score >= 75) return "Strong";
+  if (score >= 55) return "Moderate";
+  return "Needs Improvement";
+}
+
 function detectBusinessType(report: ReportSnapshot): string {
   const declared = report.industryBenchmarkEngine?.industryType?.trim();
   if (declared && declared !== "general") return titleCase(declared.replaceAll("_", " "));
@@ -2555,7 +2847,6 @@ function customerSafeText(value: unknown): string {
     .replace(/evidence objects?/gi, "validated findings")
     .replace(/\bGTCS\b/g, "Evidence Confidence")
     .replace(/\bGBP\b/g, "Business Profile")
-    .replace(/\bSEO\b/gi, "Visibility")
     .replace(/\s+/g, " ")
     .trim();
 }
