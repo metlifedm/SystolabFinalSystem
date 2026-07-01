@@ -30,6 +30,21 @@ describe("enterprise PDF report rendering", () => {
     expect(text).not.toMatch(/System Health Status|Evidence Explorer|Ground Truth Validation Log|Layered Intelligence Architecture|Parser success|Crawler stability|rawSignalTelemetry|executionProvenance|validationTrace/i);
     expect(text).not.toMatch(/EV-\d+|EO-\d+|REC-\d+|Snapshot ID/i);
   });
+
+  it("sanitizes raw internal snapshot terms before customer PDF integrity validation", async () => {
+    const report = makeEnterpriseReport();
+    report.businessRiskStatus.explanation = "Parser success rawSignalTelemetry executionProvenance should remain internal.";
+    report.recommendationEngine.recommendations[0].issue = "HTTP fetch failed parser success rawSignalTelemetry executionProvenance.";
+    report.recommendationEngine.recommendations[0].revenueIntelligenceMapping = "Crawler diagnostics and recovery logs are internal.";
+    report.priorityTimeline.thisMonth[0].action = "Review crawler diagnostics and parser logs internally.";
+    report.freshness.cacheStatus = "crawler diagnostics" as ReportSnapshot["freshness"]["cacheStatus"];
+
+    const pdf = await renderReportPdf(report);
+    const text = pdf.toString("latin1");
+
+    expect(text).toContain("SYSTOLAB Customer Intelligence Report");
+    expect(text).not.toMatch(/HTTP fetch failed|parser success|rawSignalTelemetry|executionProvenance|crawler diagnostics|recovery logs/i);
+  });
 });
 
 function pdfPageCount(text: string): number {

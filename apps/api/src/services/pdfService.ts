@@ -380,6 +380,70 @@ type PdfReportMode = "customer" | "internal";
 const CUSTOMER_PDF_FORBIDDEN_PATTERN =
   /crawler|parser|executionProvenance|rawSignalTelemetry|validationTrace|systemHealthState|execution trace|trace id|http trace|dom trace|recovery log|bot-detection|challenge type|compatibility intelligence|failure memory|rendering diagnostics|operational diagnostics|system health|evidence explorer|ground truth validation|layered intelligence architecture/i;
 
+function sanitizePdfIntegrityValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizePdfIntegrityValue);
+  if (!value || typeof value !== "object") return typeof value === "string" ? pdfCustomerText(value) : value;
+  const clean: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (/trace|raw|diagnostic|telemetry|provenance|parser|crawler|evidenceIds?|recommendationIds?|selector|screenshot|hash|fingerprint/i.test(key)) continue;
+    clean[key] = sanitizePdfIntegrityValue(entry);
+  }
+  return clean;
+}
+
+function buildCustomerPdfIntegrityPayload(report: ReportSnapshot, brief: ReportSnapshot["decisionIntelligenceBrief"]): Record<string, unknown> {
+  const sanitizeTimeline = (items: ReportSnapshot["priorityTimeline"]["fixNow"] | undefined) =>
+    (items ?? []).map((item) => ({
+      action: pdfCustomerText(item.action),
+      category: item.category,
+      timeWindow: pdfCustomerText(item.timeWindow),
+      structuralSeverity: pdfCustomerText(item.structuralSeverity),
+      evidenceStrength: pdfCustomerText(item.evidenceStrength)
+    }));
+
+  return {
+    snapshotId: report.snapshotId,
+    targetUrl: report.targetUrl,
+    createdAt: report.createdAt,
+    scanCoverage: pdfCustomerText(report.scanCoverage?.coverageLabel),
+    decisionIntelligenceBrief: sanitizePdfIntegrityValue(brief),
+    oss: report.oss ? { score: report.oss.score, classification: pdfCustomerText(report.oss.classification) } : undefined,
+    businessRiskStatus: {
+      classification: report.businessRiskStatus?.classification,
+      level: pdfCustomerText(report.businessRiskStatus?.level),
+      primaryRiskDriver: pdfCustomerText(report.businessRiskStatus?.primaryRiskDriver),
+      explanation: pdfCustomerText(report.businessRiskStatus?.explanation)
+    },
+    recommendations: (report.recommendationEngine?.recommendations ?? []).map((recommendation) => ({
+      issue: pdfCustomerText(recommendation.issue),
+      action: pdfCustomerText(recommendation.action),
+      priority: recommendation.priority,
+      mappedDimensions: recommendation.mappedDimensions,
+      expectedScoreMovement: recommendation.expectedScoreMovement,
+      revenueIntelligenceMapping: pdfCustomerText(recommendation.revenueIntelligenceMapping),
+      confidenceScore: recommendation.confidenceScore,
+      changeValidationPlan: pdfCustomerText(recommendation.changeValidationPlan)
+    })),
+    priorityTimeline: {
+      fixNow: sanitizeTimeline(report.priorityTimeline?.fixNow),
+      thisMonth: sanitizeTimeline(report.priorityTimeline?.thisMonth),
+      monitor: sanitizeTimeline(report.priorityTimeline?.monitor)
+    },
+    evidenceCoverageSummary: {
+      totalPagesSampled: report.evidenceCoverageSummary?.totalPagesSampled,
+      totalValidatedFindings: report.evidenceCoverageSummary?.totalEvidenceObjects,
+      globalCoverageStatus: pdfCustomerText((report.evidenceCoverageSummary as unknown as { globalCoverageStatus?: string })?.globalCoverageStatus)
+    },
+    freshness: report.freshness ? {
+      capturedAt: report.freshness.capturedAt,
+      cacheStatus: pdfCustomerText(report.freshness.cacheStatus),
+      validityWindowHours: report.freshness.validityWindowHours,
+      stalenessRisk: pdfCustomerText(report.freshness.stalenessRisk),
+      nextRecommendedScanAt: report.freshness.nextRecommendedScanAt
+    } : undefined
+  };
+}
+
 function validatePdfIntegrity(report: ReportSnapshot, mode: PdfReportMode): void {
   const brief = pdfDecisionBrief(report);
   const missing: string[] = [];
@@ -402,19 +466,7 @@ function validatePdfIntegrity(report: ReportSnapshot, mode: PdfReportMode): void
   }
 
   if (mode === "customer") {
-    const customerRenderPayload = {
-      snapshotId: report.snapshotId,
-      targetUrl: report.targetUrl,
-      createdAt: report.createdAt,
-      scanCoverage: report.scanCoverage?.coverageLabel,
-      decisionIntelligenceBrief: brief,
-      oss: report.oss ? { score: report.oss.score, classification: report.oss.classification } : undefined,
-      businessRiskStatus: report.businessRiskStatus,
-      recommendations: report.recommendationEngine?.recommendations,
-      priorityTimeline: report.priorityTimeline,
-      evidenceCoverageSummary: report.evidenceCoverageSummary,
-      freshness: report.freshness
-    };
+    const customerRenderPayload = buildCustomerPdfIntegrityPayload(report, brief);
     const serialized = JSON.stringify(customerRenderPayload);
     if (CUSTOMER_PDF_FORBIDDEN_PATTERN.test(serialized)) {
       throw new Error("PDF integrity validation failed: customer PDF payload contains internal-only intelligence.");
