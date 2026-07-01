@@ -1,10 +1,25 @@
 import mongoose, { Schema } from "mongoose";
 
+export type MonitoringCadence = "manual" | "daily" | "weekly" | "monthly";
+
+export interface WorkspaceMonitoringConfig {
+  cadence?: MonitoringCadence;
+  enabled?: boolean;
+}
+
 export interface WorkspaceDocument extends mongoose.Document {
   workspaceId: string;
   tenantSlug: string;
   ownerUserId?: string;
   targetUrl: string;
+  projectName?: string;
+  businessType?: string;
+  targetCountry?: string;
+  targetLocation?: string;
+  competitorUrls?: string[];
+  gbpUrl?: string;
+  monitoringConfig?: WorkspaceMonitoringConfig;
+  clientAccessEnabled?: boolean;
   industry?: string;
   businessContext?: Record<string, unknown>;
   preferences?: Record<string, unknown>;
@@ -18,6 +33,14 @@ const WorkspaceSchema = new Schema<WorkspaceDocument>(
     tenantSlug: { type: String, required: true, index: true },
     ownerUserId: { type: String, index: true },
     targetUrl: { type: String, required: true, index: true },
+    projectName: { type: String },
+    businessType: { type: String, index: true },
+    targetCountry: { type: String, index: true },
+    targetLocation: { type: String, index: true },
+    competitorUrls: { type: [String], default: [] },
+    gbpUrl: { type: String },
+    monitoringConfig: { type: Schema.Types.Mixed },
+    clientAccessEnabled: { type: Boolean, default: false },
     industry: { type: String, index: true },
     businessContext: { type: Schema.Types.Mixed },
     preferences: { type: Schema.Types.Mixed }

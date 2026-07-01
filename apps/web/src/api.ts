@@ -2,6 +2,7 @@ import type {
   AiceDecisionObject,
   AuthResponse,
   AuthSessionSummary,
+  AuthUserProfile,
   GoogleLoginRequest,
   LogoutInput,
   OtpChallengeResponse,
@@ -15,7 +16,8 @@ import type {
   RefreshSessionInput,
   ReportSnapshot,
   ScanRequest,
-  SpecCoverageItem
+  SpecCoverageItem,
+  TenantBranding
 } from "@systolab/shared";
 
 const API_URL = import.meta.env.VITE_API_URL ?? "";
@@ -38,6 +40,90 @@ export interface AdminLoginResponse {
   expiresIn: number;
 }
 
+
+export type PortalTenantRole = "owner" | "member" | "guest";
+export type PortalWorkspaceRole = "owner" | "editor" | "viewer";
+
+export interface PortalTenantSummary {
+  tenantSlug: string;
+  tenantId: string;
+  role: PortalTenantRole;
+  portalRole: "owner" | "agency_admin" | "team_member" | "client" | "viewer";
+  permissions: string[];
+  branding: TenantBranding;
+}
+
+export interface PortalProjectSummary {
+  workspaceId: string;
+  tenantSlug: string;
+  role: PortalWorkspaceRole;
+  projectName: string;
+  targetUrl: string;
+  businessType?: string;
+  targetCountry?: string;
+  targetLocation?: string;
+  competitorUrls: string[];
+  gbpUrl?: string;
+  monitoringConfig: { cadence: "manual" | "daily" | "weekly" | "monthly"; enabled: boolean };
+  clientAccessEnabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  latestReport?: PortalReportSummary;
+}
+
+export interface PortalReportSummary {
+  snapshotId: string;
+  createdAt: string;
+  status: string;
+  targetUrl: string;
+  oss: number | null;
+  visualStateLabel: string;
+  businessRiskStatus: string;
+  evidenceCoveragePercent: number;
+  confidenceLabel: string;
+  reportUrl: string;
+  pdfUrl: string;
+}
+
+export interface PortalMeResponse {
+  user: AuthUserProfile;
+  tenants: PortalTenantSummary[];
+  projects: PortalProjectSummary[];
+}
+
+export interface CreatePortalProjectInput {
+  tenantSlug: string;
+  targetUrl: string;
+  projectName?: string;
+  businessType?: string;
+  targetCountry?: string;
+  targetLocation?: string;
+  competitorUrls?: string[];
+  gbpUrl?: string;
+  monitoringConfig?: { cadence?: "manual" | "daily" | "weekly" | "monthly"; enabled?: boolean };
+  clientAccessEnabled?: boolean;
+}
+
+export interface PortalUsageOverview {
+  tenantSlug: string;
+  periodKey: string;
+  limits: Record<string, number | boolean>;
+  usage: Record<string, unknown> | null;
+  history: Array<Record<string, unknown>>;
+  scanLimit: { allowed: boolean; used: number; limit: number };
+  apiCallLimit: { allowed: boolean; used: number; limit: number };
+}
+
+export interface PortalBillingPlan {
+  planId: string;
+  tier: string;
+  name: string;
+  description: string;
+  priceCentsPerMonth: number;
+  priceCentsPerYear?: number;
+  limits: Record<string, number | boolean>;
+  features: string[];
+}
 export interface CreateScanResponse {
   jobId: string;
   status: string;
@@ -196,6 +282,90 @@ export async function recordEditEvent(request: {
   return postJson("/api/intelligence/edit/events", request);
 }
 
+
+export async function getPortalMe(): Promise<PortalMeResponse> {
+  const response = await fetch(`${API_URL}/api/me`, { headers: storedAuthHeader() });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function createTenant(slug: string, publicName: string): Promise<{ tenant: Record<string, unknown>; membership: Record<string, unknown> }> {
+  return postJson("/api/tenants", { slug, publicName }, readStoredAccessToken());
+}
+
+export async function listProjects(tenantSlug?: string): Promise<{ items: PortalProjectSummary[] }> {
+  const suffix = tenantSlug ? `?tenantSlug=${encodeURIComponent(tenantSlug)}` : "";
+  const response = await fetch(`${API_URL}/api/projects${suffix}`, { headers: storedAuthHeader() });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function createProject(request: CreatePortalProjectInput): Promise<{ project: PortalProjectSummary }> {
+  return postJson("/api/projects", request, readStoredAccessToken());
+}
+
+export async function getProject(workspaceId: string): Promise<{ project: PortalProjectSummary }> {
+  const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(workspaceId)}`, { headers: storedAuthHeader() });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function updateProject(workspaceId: string, request: Partial<CreatePortalProjectInput>): Promise<{ project: PortalProjectSummary }> {
+  const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(workspaceId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    body: JSON.stringify(request)
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function getProjectReports(workspaceId: string): Promise<{ items: PortalReportSummary[] }> {
+  const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(workspaceId)}/reports`, { headers: storedAuthHeader() });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function runProjectScan(workspaceId: string, request: { mode?: "fast_scan" | "full_audit"; includeSeo?: boolean; competitorUrls?: string[]; gbpUrl?: string }): Promise<CreateScanResponse & { usage?: { used: number; limit: number; allowed: boolean } }> {
+  return postJson(`/api/projects/${encodeURIComponent(workspaceId)}/scans`, request, readStoredAccessToken());
+}
+
+export async function getUsageOverview(tenantSlug: string): Promise<PortalUsageOverview> {
+  const response = await fetch(`${API_URL}/api/usage?tenantSlug=${encodeURIComponent(tenantSlug)}`, { headers: storedAuthHeader() });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function getBillingPlans(): Promise<{ items: PortalBillingPlan[] }> {
+  const response = await fetch(`${API_URL}/api/billing/plans`);
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function getBillingOverview(tenantSlug: string): Promise<{ plans: PortalBillingPlan[]; subscription: Record<string, unknown> | null; usage: PortalUsageOverview }> {
+  const response = await fetch(`${API_URL}/api/billing?tenantSlug=${encodeURIComponent(tenantSlug)}`, { headers: storedAuthHeader() });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function resolveWhiteLabel(input: { slug?: string; domain?: string }): Promise<{ found: boolean; branding: TenantBranding }> {
+  const params = new URLSearchParams();
+  if (input.slug) params.set("slug", input.slug);
+  if (input.domain) params.set("domain", input.domain);
+  const response = await fetch(`${API_URL}/api/white-label/resolve?${params.toString()}`);
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function updateWhiteLabelBranding(tenantSlug: string, branding: Partial<TenantBranding>): Promise<{ branding: TenantBranding }> {
+  const response = await fetch(`${API_URL}/api/white-label/${encodeURIComponent(tenantSlug)}/branding`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    body: JSON.stringify(branding)
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
 export async function googleAuth(request: GoogleLoginRequest): Promise<AuthResponse> {
   return postJson("/api/auth/google", request);
 }
@@ -268,6 +438,15 @@ function adminBearerHeaders(session: AdminSession, destructive = false): Record<
   return headers;
 }
 
+
+function readStoredAccessToken(): string | undefined {
+  try {
+    const payload = JSON.parse(localStorage.getItem("systolab.auth") ?? "{}") as { tokens?: { accessToken?: string } };
+    return payload.tokens?.accessToken;
+  } catch {
+    return undefined;
+  }
+}
 function storedAuthHeader(): Record<string, string> {
   try {
     const payload = JSON.parse(localStorage.getItem("systolab.auth") ?? "{}") as { tokens?: { accessToken?: string } };

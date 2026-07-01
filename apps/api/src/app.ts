@@ -22,7 +22,12 @@ import { internalIireRouter } from "./routes/internalIire.js";
 import { internalPlatformRouter } from "./routes/internalPlatform.js";
 import { invitationsRouter } from "./routes/invitations.js";
 import artifactsRouter from "./routes/artifacts.js";
+import { billingRouter } from "./routes/billing.js";
+import { meRouter } from "./routes/me.js";
 import { metricsRouter } from "./routes/metrics.js";
+import { projectsRouter } from "./routes/projects.js";
+import { usageRouter } from "./routes/usage.js";
+import { whiteLabelRouter } from "./routes/whiteLabel.js";
 import { publicApiRouter } from "./routes/publicApi.js";
 import { reportsRouter } from "./routes/reports.js";
 import { scansRouter } from "./routes/scans.js";
@@ -104,6 +109,11 @@ export function createApp(): express.Express {
   app.use("/api/coverage", coverageRouter);
   app.use("/api/intelligence", intelligenceRouter);
   app.use("/api/agency", agencyRouter);
+  app.use("/api/me", meRouter);
+  app.use("/api/projects", projectsRouter);
+  app.use("/api/usage", usageRouter);
+  app.use("/api/billing", billingRouter);
+  app.use("/api/white-label", whiteLabelRouter);
 
   app.use("/api/tenants", tenantsRouter);
   app.use("/api/workspaces", workspacesRouter);

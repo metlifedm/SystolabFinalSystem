@@ -132,16 +132,34 @@ describe("content-unavailable customer report mapping", () => {
     expect(json).not.toMatch(/canonicalIssueId|globalOutputContract|systolab\.output_contract|CI-001|evidenceIds|recommendationIds|rawSignalTelemetry|validationTrace|selectorPath|rawDomSnapshot/i);
   });
 
-  it("adds executive narrative, health snapshot, SEO questions, and recommendation implementation detail", () => {
+  it("adds the customer decision brief layer, SEO questions, and recommendation implementation detail", () => {
     const payload = buildCustomerReportPayload(makeScoredReport()) as Record<string, unknown>;
     const narrative = payload["customerExecutiveNarrative"] as string;
-    const health = payload["customerBusinessHealthSnapshot"] as Array<{ area: string; status: string }>;
+    const snapshot = payload["customerBusinessDecisionSnapshot"] as Array<{ area: string; status: string }>;
+    const healthAlias = payload["customerBusinessHealthSnapshot"] as Array<{ area: string; status: string }>;
+    const hesitations = payload["customerHesitationAreas"] as unknown[];
+    const competitorNarrative = payload["customerCompetitorNarrative"] as { summary: string; momentum: string; costOfDelay: string };
+    const topPriority = payload["customerTopPriority"] as { recommendedPriority: string; whyItMatters: string; expectedBusinessBenefit: string; effort: string };
+    const outcomes = payload["customerExpectedBusinessOutcomes"] as Array<{ improvement: string; expectedOutcome: string }>;
+    const initiatives = payload["customerBusinessInitiatives"] as Array<{ title: string; actions: string[] }>;
     const seoQuestions = payload["customerSeoBusinessQuestions"] as Array<{ question: string; businessMeaning: string }>;
     const engine = payload["recommendationEngine"] as { recommendations: Array<{ action: string; businessExplanation: string; technicalTasks: string[] }> };
     const json = JSON.stringify(payload);
 
     expect(narrative).toContain("foundation for customer trust and conversion");
-    expect(health.map((item) => item.area)).toEqual(expect.arrayContaining(["Customer Acquisition", "Customer Trust", "Customer Decision Support", "Competitive Position", "Local Presence", "Revenue Opportunity", "Priority"]));
+    expect(snapshot.map((item) => item.area)).toEqual(expect.arrayContaining(["Business Readiness", "Customer Decision Confidence", "Competitive Position", "Revenue Opportunity", "Priority Focus"]));
+    expect(healthAlias).toEqual(snapshot);
+    expect(hesitations.length).toBeGreaterThan(0);
+    expect(competitorNarrative.summary).toContain("validated pages analysed");
+    expect(["Stable", "Watch Closely", "Losing Ground", "High Competitive Pressure"]).toContain(competitorNarrative.momentum);
+    expect(competitorNarrative.costOfDelay).toContain("decision gaps");
+    expect(topPriority.recommendedPriority).toBeTruthy();
+    expect(topPriority.whyItMatters).toContain("key decision point");
+    expect(topPriority.expectedBusinessBenefit).toBeTruthy();
+    expect(topPriority.effort).toBeTruthy();
+    expect(outcomes.map((item) => item.improvement)).toEqual(expect.arrayContaining(["Customer decision path", "Trust signals", "Local presence", "Customer question coverage"]));
+    expect(initiatives.map((item) => item.title)).toEqual(expect.arrayContaining(["Business Initiative 1 - Increase Customer Enquiries", "Business Initiative 2 - Build Customer Confidence", "Business Initiative 3 - Increase Discoverability"]));
+    expect(initiatives.every((item) => item.actions.length > 0)).toBe(true);
     expect(seoQuestions.map((item) => item.question)).toEqual(expect.arrayContaining(["Can customers find your business?", "Which SEO improvements will create the greatest business impact?"]));
     expect(engine.recommendations[0]?.action).toContain("Improve viewport, resource weight, and mobile contact/action paths.");
     expect(engine.recommendations[0]?.businessExplanation).toContain("mobile visitors");
@@ -150,6 +168,17 @@ describe("content-unavailable customer report mapping", () => {
     expect(json).not.toContain("Which Visibility improvements");
   });
 
+  it("uses business-first language for primary CTA recommendations", () => {
+    const report = makeScoredReport();
+    if (!report.recommendationEngine?.recommendations[0]) throw new Error("Fixture recommendation missing");
+    report.recommendationEngine.recommendations[0].action = "Focus first on: primary CTA presence.";
+
+    const payload = buildCustomerReportPayload(report) as Record<string, unknown>;
+    const engine = payload["recommendationEngine"] as { recommendations: Array<{ businessExplanation: string; technicalTasks: string[] }> };
+
+    expect(engine.recommendations[0]?.businessExplanation).toBe("Help visitors immediately understand how to contact your business or request a quote.");
+    expect(engine.recommendations[0]?.technicalTasks.join(" ")).toContain("primary action paths");
+  });
   it("deduplicates repeated business decisions into fewer stronger decisions", () => {
     const report = makeScoredReport();
     report.globalOutputContract = {

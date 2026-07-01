@@ -65,11 +65,13 @@ import {
 } from "./api.js";
 import type { AdminSession } from "./api.js";
 import { AdminDashboard } from "./AdminDashboard.js";
+import { UniversalPortal, isPortalRoute } from "./UniversalPortal.js";
 import { firebaseAuth, googleProvider, isFirebaseConfigured } from "./firebase.js";
 
 export function App() {
   if (window.location.pathname.startsWith("/internal/reports/")) return <InternalReportPage />;
   if (window.location.pathname.startsWith("/admin")) return <AdminDashboard />;
+  if (isPortalRoute(window.location.pathname)) return <UniversalPortal />;
 
   const [report, setReport] = useState<ReportSnapshot | null>(null);
   const [coverage, setCoverage] = useState<SpecCoverageItem[]>([]);
@@ -338,7 +340,7 @@ function AuthConsole() {
         <div className="auth-profile-bar">
           <div className="auth-profile-identity">
             <span className="auth-profile-name">{user.displayName || user.email || user.phone || "Verified user"}</span>
-            <span className="auth-profile-sub">{user.email ?? user.phone} Â· {user.providers.join(", ")}</span>
+            <span className="auth-profile-sub">{user.email ?? user.phone} Ã‚Â· {user.providers.join(", ")}</span>
           </div>
           <div className="auth-profile-actions">
             {tokens && (
@@ -467,7 +469,7 @@ function AuthConsole() {
           <div className="auth-expandable-form">
             <p className="auth-otp-hint">
               Code sent to <strong>{otpChallenge?.maskedDestination}</strong>
-              {otpChallenge?.simulatedDelivery.code && <span className="auth-dev-code"> Â· dev: {otpChallenge.simulatedDelivery.code}</span>}
+              {otpChallenge?.simulatedDelivery.code && <span className="auth-dev-code"> Ã‚Â· dev: {otpChallenge.simulatedDelivery.code}</span>}
             </p>
             <label className="auth-form-field">
               <span className="auth-field-label">One-Time Code</span>
@@ -597,7 +599,7 @@ function AuthConsole() {
           <div className="auth-expandable-form">
             <p className="auth-otp-hint">
               Reset link sent to <strong>{resetChallenge?.maskedDestination}</strong>
-              {resetChallenge?.simulatedDelivery.token && <span className="auth-dev-code"> Â· dev: {resetChallenge.simulatedDelivery.token}</span>}
+              {resetChallenge?.simulatedDelivery.token && <span className="auth-dev-code"> Ã‚Â· dev: {resetChallenge.simulatedDelivery.token}</span>}
             </p>
             <label className="auth-form-field">
               <span className="auth-field-label">Reset Token</span>
@@ -869,7 +871,26 @@ interface CustomerBusinessReport {
   verdict: string;
   verdictExplanation: string;
   executiveNarrative: string;
+  businessDecisionSnapshot: Array<{ area: string; status: string; meaning: string }>;
   businessHealthSnapshot: Array<{ area: string; status: string; meaning: string }>;
+  hesitationAreas: Array<{ area: string; whatIsHappening: string; whyItMatters: string; action: string; confidence: string }>;
+  competitorNarrative: {
+    title: string;
+    summary: string;
+    momentum: string;
+    costOfDelay: string;
+    limitations: string[];
+  };
+  topPriority: {
+    recommendedPriority: string;
+    whyItMatters: string;
+    expectedBusinessBenefit: string;
+    confidence: string;
+    effort: string;
+    firstAction: string;
+  };
+  expectedBusinessOutcomes: Array<{ improvement: string; expectedOutcome: string; confidence: string }>;
+  businessInitiatives: Array<{ title: string; outcome: string; actions: string[]; confidence: string }>;
   seoBusinessQuestions: Array<{ question: string; answer: string; businessMeaning: string; action: string; confidence: string }>;
   highestRoiAction: {
     action: string;
@@ -1038,25 +1059,13 @@ function CustomerBusinessReportView({ report, style }: { report: ReportSnapshot;
       </section>
 
       <CustomerExecutiveNarrativeSection narrative={customer.executiveNarrative} />
-      <CustomerBusinessHealthSnapshotSection snapshot={customer.businessHealthSnapshot} />
-
-      <section className="report-section highest-roi-card">
-        <div className="section-title">
-          <TrendingUp size={18} />
-          <h2>Highest ROI Action</h2>
-        </div>
-        <div className="roi-action-grid">
-          <div>
-            <span className="panel-kicker">If you fix only one thing this week</span>
-            <h3>{customer.highestRoiAction.action}</h3>
-            <p>{customer.highestRoiAction.whyItMatters}</p>
-          </div>
-          <div className="roi-action-meta">
-            <Metric label="Action Window" value={customer.highestRoiAction.window} />
-            <Metric label="Confidence" value={customer.highestRoiAction.confidence} />
-          </div>
-        </div>
-      </section>
+      <CustomerBusinessDecisionSnapshotSection snapshot={customer.businessDecisionSnapshot} />
+      <CustomerHesitationAreasSection areas={customer.hesitationAreas} />
+      <CustomerCompetitorNarrativeSection narrative={customer.competitorNarrative} />
+      <CustomerRevenueLeakageSection leakage={customer.revenueLeakage} />
+      <CustomerTopPrioritySection priority={customer.topPriority} />
+      <CustomerExpectedBusinessOutcomesSection outcomes={customer.expectedBusinessOutcomes} />
+      <CustomerBusinessInitiativesSection initiatives={customer.businessInitiatives} />
 
       <CustomerBusinessDecisionSummary summary={customer.businessDecisionSummary} />
       <CustomerDecisionTimelineSection timeline={customer.decisionTimeline} />
@@ -1084,8 +1093,6 @@ function CustomerBusinessReportView({ report, style }: { report: ReportSnapshot;
           ))}
         </div>
       </section>
-
-      <CustomerRevenueLeakageSection leakage={customer.revenueLeakage} />
 
       <section className="report-section">
         <div className="section-title">
@@ -1212,14 +1219,14 @@ function CustomerBusinessReportView({ report, style }: { report: ReportSnapshot;
       <section className="report-section">
         <div className="section-title">
           <CheckCircle2 size={18} />
-          <h2>Recommended Actions</h2>
+          <h2>Supporting Recommendation Detail</h2>
         </div>
         <div className="data-table compact customer-actions-table">
           {customer.recommendedActions.map((action) => (
             <div className="table-row action-with-details" key={action.title}>
               <span>{action.title}</span>
               <strong>{action.businessExplanation}</strong>
-              <small>{action.reason} Confidence: {action.confidence}.</small>
+              <small>Evidence basis: {customerRecommendationEvidenceNote(action.reason)} Confidence: {action.confidence}.</small>
               <details className="evidence-implementation-panel">
                 <summary>Evidence & Implementation</summary>
                 <p>{action.action}</p>
@@ -1257,9 +1264,10 @@ function CustomerBusinessReportView({ report, style }: { report: ReportSnapshot;
 
       <details className="report-section customer-evidence-details">
         <summary>
-          <span>Supporting Findings</span>
+          <span>Supporting Evidence (Optional)</span>
           <strong>{customer.evidenceItems.length} supporting finding{customer.evidenceItems.length === 1 ? "" : "s"}</strong>
         </summary>
+        <p className="muted">Explore the observations that support each business conclusion. This section is intended for technical teams and implementation partners who want additional context behind the recommendations.</p>
         <div className="data-table compact">
           {customer.evidenceItems.map((item, index) => (
             <div className="table-row" key={item.id}>
@@ -1287,13 +1295,13 @@ function CustomerExecutiveNarrativeSection({ narrative }: { narrative: string })
   );
 }
 
-function CustomerBusinessHealthSnapshotSection({ snapshot }: { snapshot: CustomerBusinessReport["businessHealthSnapshot"] }) {
+function CustomerBusinessDecisionSnapshotSection({ snapshot }: { snapshot: CustomerBusinessReport["businessDecisionSnapshot"] }) {
   if (!snapshot.length) return null;
   return (
     <section className="report-section">
       <div className="section-title">
         <Gauge size={18} />
-        <h2>Business Health Snapshot</h2>
+        <h2>Business Decision Snapshot</h2>
       </div>
       <div className="customer-intelligence-grid business-health-grid">
         {snapshot.map((item) => (
@@ -1301,6 +1309,117 @@ function CustomerBusinessHealthSnapshotSection({ snapshot }: { snapshot: Custome
             <span>{item.area}</span>
             <strong>{item.status}</strong>
             <p>{item.meaning}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CustomerHesitationAreasSection({ areas }: { areas: CustomerBusinessReport["hesitationAreas"] }) {
+  if (!areas.length) return null;
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <AlertTriangle size={18} />
+        <h2>Where Customers Hesitate</h2>
+      </div>
+      <div className="customer-intelligence-grid">
+        {areas.map((item) => (
+          <div className="customer-intelligence-card" key={`${item.area}-${item.whatIsHappening}`}>
+            <span>{item.area}</span>
+            <strong>{item.whatIsHappening}</strong>
+            <p>{item.whyItMatters}</p>
+            <small>{item.action}</small>
+            <em>{item.confidence}</em>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CustomerCompetitorNarrativeSection({ narrative }: { narrative: CustomerBusinessReport["competitorNarrative"] }) {
+  if (!narrative.summary.trim()) return null;
+  return (
+    <section className="report-section competitor-narrative-card">
+      <div className="section-title">
+        <ShieldCheck size={18} />
+        <h2>{narrative.title || "Why Customers May Choose Competitors"}</h2>
+      </div>
+      <p className="decision-summary">{narrative.summary}</p>
+      <div className="meta-strip">
+        <Metric label="Competitive Momentum" value={narrative.momentum} />
+        <Metric label="Cost Of Delay" value={narrative.costOfDelay} />
+      </div>
+      {narrative.limitations.map((item) => <p className="muted" key={item}>{item}</p>)}
+    </section>
+  );
+}
+
+function CustomerTopPrioritySection({ priority }: { priority: CustomerBusinessReport["topPriority"] }) {
+  return (
+    <section className="report-section highest-roi-card">
+      <div className="section-title">
+        <TrendingUp size={18} />
+        <h2>Business Priority This Week</h2>
+      </div>
+      <div className="roi-action-grid">
+        <div>
+          <span className="panel-kicker">What To Fix First</span>
+          <h3>{priority.recommendedPriority}</h3>
+          <p>{priority.firstAction}</p>
+          <h4>Why This Is Your Top Priority</h4>
+          <p>{priority.whyItMatters}</p>
+          <strong>{priority.expectedBusinessBenefit}</strong>
+        </div>
+        <div className="roi-action-meta">
+          <Metric label="Confidence" value={priority.confidence} />
+          <Metric label="Effort" value={priority.effort} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function CustomerExpectedBusinessOutcomesSection({ outcomes }: { outcomes: CustomerBusinessReport["expectedBusinessOutcomes"] }) {
+  if (!outcomes.length) return null;
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <BarChart3 size={18} />
+        <h2>Expected Business Outcomes</h2>
+      </div>
+      <div className="data-table compact customer-actions-table">
+        {outcomes.map((item) => (
+          <div className="table-row" key={item.improvement}>
+            <span>{item.improvement}</span>
+            <strong>{item.expectedOutcome}</strong>
+            <small>{item.confidence}</small>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CustomerBusinessInitiativesSection({ initiatives }: { initiatives: CustomerBusinessReport["businessInitiatives"] }) {
+  if (!initiatives.length) return null;
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <ListChecks size={18} />
+        <h2>Business Initiatives</h2>
+      </div>
+      <div className="customer-intelligence-grid business-initiative-grid">
+        {initiatives.map((initiative) => (
+          <div className="customer-intelligence-card" key={initiative.title}>
+            <span>{initiative.title}</span>
+            <strong>{initiative.outcome}</strong>
+            <ul className="initiative-action-list">
+              {initiative.actions.map((action) => <li key={action}>{action}</li>)}
+            </ul>
+            <em>{initiative.confidence}</em>
           </div>
         ))}
       </div>
@@ -1764,7 +1883,13 @@ function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessRe
     verdict: customerVerdict(score, weakest),
     verdictExplanation: customerVerdictExplanation(report, weakest, strongest),
     executiveNarrative: buildCustomerExecutiveNarrative(report, score, weakest, strongest, competitorGaps),
-    businessHealthSnapshot: buildBusinessHealthSnapshot(report, score, weakest, competitorGaps),
+    businessDecisionSnapshot: buildBusinessDecisionSnapshot(report, score, weakest, competitorGaps),
+    businessHealthSnapshot: buildBusinessDecisionSnapshot(report, score, weakest, competitorGaps),
+    hesitationAreas: buildCustomerHesitationAreas(report),
+    competitorNarrative: buildCustomerCompetitorNarrative(report),
+    topPriority: buildCustomerTopPriority(report, highest, weakest, confidenceScore),
+    expectedBusinessOutcomes: buildCustomerExpectedBusinessOutcomes(report),
+    businessInitiatives: buildCustomerBusinessInitiatives(report, recommendations),
     seoBusinessQuestions: buildSeoBusinessQuestions(report),
     decisionTimeline: buildCustomerDecisionTimeline(report),
     highestRoiAction: {
@@ -1827,35 +1952,153 @@ function buildCustomerExecutiveNarrative(
   return `Your business presents a ${foundation} foundation for customer trust and conversion. ${strongestText} The largest opportunity is improving ${weakLabel} so visitors reach key information and act with less friction. ${competitorText}`;
 }
 
-function buildBusinessHealthSnapshot(
+function buildBusinessDecisionSnapshot(
   report: ReportSnapshot,
   score: number | null,
   weakest: ReportSnapshot["dimensions"][number] | undefined,
   competitorGaps: CustomerBusinessReport["competitorGaps"]
-): CustomerBusinessReport["businessHealthSnapshot"] {
-  const payload = (report as unknown as { customerBusinessHealthSnapshot?: CustomerBusinessReport["businessHealthSnapshot"] }).customerBusinessHealthSnapshot;
+): CustomerBusinessReport["businessDecisionSnapshot"] {
+  const payload = (report as unknown as {
+    customerBusinessDecisionSnapshot?: CustomerBusinessReport["businessDecisionSnapshot"];
+    customerBusinessHealthSnapshot?: CustomerBusinessReport["businessDecisionSnapshot"];
+  }).customerBusinessDecisionSnapshot ?? (report as unknown as { customerBusinessHealthSnapshot?: CustomerBusinessReport["businessDecisionSnapshot"] }).customerBusinessHealthSnapshot;
   if (Array.isArray(payload) && payload.length) return payload.map((item) => ({ ...item, area: customerSafeText(item.area), status: customerSafeText(item.status), meaning: customerSafeText(item.meaning) }));
-  const acquisition = scoreForDimension(report, "visibilityStructure");
-  const trust = scoreForDimension(report, "trust");
-  const decisionSupport = averageNullable([scoreForDimension(report, "informationClarity"), scoreForDimension(report, "conversionReadiness"), scoreForDimension(report, "mobileExperience")]);
-  const localVisibility = buildCustomerLocalVisibility(report);
-  const localPresence = firstNullable([
-    scoreForDimension(report, "localVisibility"),
-    report.gbpIdentity?.identityConsistencyScore,
-    numberFromText(localVisibility.localVisibilityScore),
-    numberFromText(localVisibility.gbpScore)
-  ]);
-  const revenueStatus = score === null ? "Not Assessed" : score >= 55 ? "Moderate" : "High";
+
+  const decisionConfidence = averageNullable([scoreForDimension(report, "trust"), scoreForDimension(report, "informationClarity"), scoreForDimension(report, "conversionReadiness"), scoreForDimension(report, "mobileExperience")]);
+  const revenue = buildCustomerRevenueLeakage(report);
   const priorityLabel = weakest ? `Improve ${businessDimensionLabel(weakest.label)}` : "Improve Decision Support";
   return [
-    { area: "Customer Acquisition", status: healthStatusForScore(acquisition), meaning: "How easily customers can discover and understand the business from search and website structure." },
-    { area: "Customer Trust", status: healthStatusForScore(trust), meaning: "How much visible proof supports confidence before a visitor contacts, books, or buys." },
-    { area: "Customer Decision Support", status: healthStatusForScore(decisionSupport), meaning: "How well the website answers questions and reduces hesitation before action." },
-    { area: "Competitive Position", status: competitorGaps.length ? "Needs Improvement" : "Competitive", meaning: competitorGaps.length ? "Compared competitors show stronger decision support in at least one validated area." : "No validated competitor advantage was found from the available comparison evidence." },
-    { area: "Local Presence", status: healthStatusForScore(localPresence), meaning: "How clearly local profile, reviews, service-area, citation, and contact signals support nearby customers." },
-    { area: "Revenue Opportunity", status: revenueStatus, meaning: "The practical opportunity indicated by current evidence-bound customer friction, not a guaranteed revenue claim." },
-    { area: "Priority", status: priorityLabel, meaning: "The first business area to improve based on the weakest validated customer decision signal." }
+    { area: "Business Readiness", status: healthStatusForScore(score), meaning: "How ready the website appears to support customer trust, understanding, and action based on validated scan evidence." },
+    { area: "Customer Decision Confidence", status: healthStatusForScore(decisionConfidence), meaning: "How confidently a visitor can understand the offer, trust the business, and choose the next step." },
+    { area: "Competitive Position", status: competitorGaps.length ? competitiveMomentumForGapCount(competitorGaps.length) : "Competitive", meaning: competitorGaps.length ? "Validated competitor evidence suggests stronger decision support in selected areas." : "No validated competitor advantage was found from the available comparison evidence." },
+    { area: "Revenue Opportunity", status: revenue.valueContext, meaning: "The practical opportunity indicated by current customer friction, not a guaranteed revenue claim." },
+    { area: "Priority Focus", status: priorityLabel, meaning: "The first business area to improve based on the weakest validated customer decision signal." }
   ];
+}
+
+function buildCustomerHesitationAreas(report: ReportSnapshot): CustomerBusinessReport["hesitationAreas"] {
+  const payload = (report as unknown as { customerHesitationAreas?: CustomerBusinessReport["hesitationAreas"] }).customerHesitationAreas;
+  if (Array.isArray(payload) && payload.length) return payload.map((item) => ({
+    area: customerSafeText(item.area),
+    whatIsHappening: customerSafeText(item.whatIsHappening),
+    whyItMatters: customerSafeText(item.whyItMatters),
+    action: customerSafeText(item.action),
+    confidence: customerSafeText(item.confidence)
+  }));
+
+  const weak = (report.dimensions ?? [])
+    .filter((dimension) => dimension.score < 76)
+    .sort((a, b) => a.score - b.score)
+    .slice(0, 4)
+    .map((dimension) => ({
+      area: businessDimensionLabel(dimension.label),
+      whatIsHappening: `${businessDimensionLabel(dimension.label)} is ${dimension.score}/100 in the validated scan evidence.`,
+      whyItMatters: customerImpactForDimension(dimension.key),
+      action: actionForDimensionKey(dimension.key),
+      confidence: `${dimension.confidenceScore}% ${dimension.confidenceLevel}`
+    }));
+  return weak.length ? weak : [{
+    area: "Customer Decision Path",
+    whatIsHappening: "No major hesitation area passed the reporting threshold in this scan.",
+    whyItMatters: "The validated evidence suggests the current decision path is broadly usable.",
+    action: "Maintain proof, clarity, contact visibility, and customer-answer coverage while monitoring competitors.",
+    confidence: customerEvidenceStrengthLabel(report)
+  }];
+}
+
+function buildCustomerCompetitorNarrative(report: ReportSnapshot): CustomerBusinessReport["competitorNarrative"] {
+  const payload = (report as unknown as { customerCompetitorNarrative?: Partial<CustomerBusinessReport["competitorNarrative"]> }).customerCompetitorNarrative;
+  if (payload?.summary) {
+    return {
+      title: customerSafeText(payload.title ?? "Why Customers May Choose Competitors"),
+      summary: customerSafeText(payload.summary),
+      momentum: customerSafeText(payload.momentum ?? "Not assessed"),
+      costOfDelay: customerSafeText(payload.costOfDelay ?? "No evidence-bound cost of delay was generated."),
+      limitations: textArray(payload.limitations)
+    };
+  }
+  const gaps = buildCustomerCompetitorContentComparison(report).contentGaps;
+  return {
+    title: "Why Customers May Choose Competitors",
+    summary: gaps.length
+      ? "Based on the validated pages analysed, competitors may present stronger trust signals, answer more customer questions, or make services easier to evaluate. These differences may encourage potential customers to compare alternatives before contacting your business."
+      : "This scan did not validate a specific competitor advantage beyond the available score-level comparison.",
+    momentum: competitiveMomentumForGapCount(gaps.length),
+    costOfDelay: gaps.length
+      ? "While these decision gaps remain unresolved, potential customers may continue comparing alternatives before contacting your business. Competitors may strengthen their customer experience and visibility over time, making it harder to improve your relative competitive position."
+      : "No evidence-bound cost of delay was generated for competitor movement in this scan.",
+    limitations: gaps.length ? buildCustomerCompetitorContentComparison(report).limitations : ["Add competitor URLs and allow full content collection to compare FAQs, process detail, pricing cues, trust proof, and educational depth."]
+  };
+}
+
+function buildCustomerTopPriority(
+  report: ReportSnapshot,
+  highest: { action: string; reason: string; score: number; priority?: string } | undefined,
+  weakest: ReportSnapshot["dimensions"][number] | undefined,
+  confidenceScore: number
+): CustomerBusinessReport["topPriority"] {
+  const payload = (report as unknown as { customerTopPriority?: Partial<CustomerBusinessReport["topPriority"]> }).customerTopPriority;
+  if (payload?.recommendedPriority) {
+    return {
+      recommendedPriority: customerSafeText(payload.recommendedPriority),
+      whyItMatters: customerSafeText(payload.whyItMatters ?? "This is the highest-confidence next improvement from current evidence."),
+      expectedBusinessBenefit: customerSafeText(payload.expectedBusinessBenefit ?? "The customer decision path becomes clearer and easier to act on."),
+      confidence: customerSafeText(payload.confidence ?? `${Math.round(confidenceScore)}%`),
+      effort: customerSafeText(payload.effort ?? "Medium"),
+      firstAction: customerSafeText(payload.firstAction ?? "Complete the highest-confidence action first, then re-scan to validate improvement.")
+    };
+  }
+  const action = highest?.action ?? (weakest ? actionForDimensionKey(weakest.key) : "Improve the clearest customer decision gap first.");
+  return {
+    recommendedPriority: customerSafeText(action),
+    whyItMatters: "Improving this area is expected to reduce customer hesitation at a key decision point. Based on validated evidence, it is the improvement most likely to strengthen customer confidence or next-step clarity first.",
+    expectedBusinessBenefit: expectedOutcomeForAction(action),
+    confidence: `${Math.max(0, Math.min(100, Math.round(highest?.score ?? confidenceScore)))}%`,
+    effort: effortForAction(action),
+    firstAction: firstActionForRecommendation(action)
+  };
+}
+
+function buildCustomerExpectedBusinessOutcomes(report: ReportSnapshot): CustomerBusinessReport["expectedBusinessOutcomes"] {
+  const payload = (report as unknown as { customerExpectedBusinessOutcomes?: CustomerBusinessReport["expectedBusinessOutcomes"] }).customerExpectedBusinessOutcomes;
+  if (Array.isArray(payload) && payload.length) return payload.map((item) => ({
+    improvement: customerSafeText(item.improvement),
+    expectedOutcome: customerSafeText(item.expectedOutcome),
+    confidence: customerSafeText(item.confidence)
+  }));
+  const confidence = customerEvidenceStrengthLabel(report);
+  return [
+    { improvement: "Customer decision path", expectedOutcome: "More visitors understand your offer and are more likely to enquire.", confidence },
+    { improvement: "Trust signals", expectedOutcome: "More customers feel confident contacting your business.", confidence },
+    { improvement: "Local presence", expectedOutcome: "Better visibility among nearby customers searching for your services.", confidence },
+    { improvement: "Customer question coverage", expectedOutcome: "Fewer unanswered objections during the buying process.", confidence }
+  ];
+}
+
+function buildCustomerBusinessInitiatives(
+  report: ReportSnapshot,
+  recommendations: Array<{ action: string; reason: string; score: number; priority?: string }>
+): CustomerBusinessReport["businessInitiatives"] {
+  const payload = (report as unknown as { customerBusinessInitiatives?: CustomerBusinessReport["businessInitiatives"] }).customerBusinessInitiatives;
+  if (Array.isArray(payload) && payload.length) return payload.map((item) => ({
+    title: customerSafeText(item.title),
+    outcome: customerSafeText(item.outcome),
+    actions: textArray(item.actions),
+    confidence: customerSafeText(item.confidence)
+  }));
+  const actions = recommendations.map((recommendation) => recommendation.action).filter(Boolean);
+  const fallback = actions.length ? actions : [report.actionFirstPanel?.fallbackAction ?? "Improve the weakest validated customer decision area first."];
+  const buckets = [
+    { title: "Business Initiative 1 - Increase Customer Enquiries", outcome: "Clarify the offer, improve contact visibility, and simplify the next step.", actions: actions.filter((action) => initiativeBucket(action) === "enquiries") },
+    { title: "Business Initiative 2 - Build Customer Confidence", outcome: "Add stronger trust proof, credibility signals, and answers to common customer concerns.", actions: actions.filter((action) => initiativeBucket(action) === "confidence") },
+    { title: "Business Initiative 3 - Increase Discoverability", outcome: "Improve visibility structure, customer-answer coverage, and local presence.", actions: actions.filter((action) => initiativeBucket(action) === "discoverability") }
+  ];
+  return buckets.map((bucket, index) => ({
+    title: bucket.title,
+    outcome: bucket.outcome,
+    actions: (bucket.actions.length ? bucket.actions : [fallback[index % fallback.length]]).map(customerSafeText).slice(0, 4),
+    confidence: customerEvidenceStrengthLabel(report)
+  }));
 }
 
 function buildSeoBusinessQuestions(report: ReportSnapshot): CustomerBusinessReport["seoBusinessQuestions"] {
@@ -2190,6 +2433,46 @@ function textArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(customerSafeText).filter(Boolean) : [];
 }
 
+function competitiveMomentumForGapCount(gapCount: number): string {
+  if (gapCount <= 0) return "Stable";
+  if (gapCount === 1) return "Watch Closely";
+  if (gapCount <= 3) return "Losing Ground";
+  return "High Competitive Pressure";
+}
+
+function expectedOutcomeForAction(action: string): string {
+  const text = action.toLowerCase();
+  if (/primary cta|cta presence|call to action|contact visibility|request a quote/.test(text)) return "Visitors can more quickly understand how to contact your business or request a quote.";
+  if (/viewport|resource|mobile|speed|responsive/.test(text)) return "Mobile visitors can understand the offer and reach the next step with less abandonment risk.";
+  if (/trust|review|testimonial|proof|credib|guarantee|certif/.test(text)) return "More customers may feel confident contacting the business before comparing alternatives.";
+  if (/question|faq|answer|pricing|cost|process|objection/.test(text)) return "Fewer customers need to leave the site to answer buying-stage questions.";
+  if (/visibility|search|local|schema|entity|citation|discover/.test(text)) return "Customers can find and understand the right pages more easily.";
+  return "The customer decision path becomes clearer and easier to act on.";
+}
+
+function effortForAction(action: string): string {
+  const text = action.toLowerCase();
+  if (/schema|entity|citation|local|resource|speed|technical|render|responsive/.test(text)) return "Medium";
+  if (/redesign|architecture|migration|checkout|booking/.test(text)) return "High";
+  return "Low";
+}
+
+function firstActionForRecommendation(action: string): string {
+  const text = action.toLowerCase();
+  if (/primary cta|cta presence|call to action|contact visibility|request a quote/.test(text)) return "Make the main contact or quote action visible near the first customer decision point.";
+  if (/trust|review|testimonial|proof|credib/.test(text)) return "Place the strongest proof near high-intent pages and contact paths.";
+  if (/question|faq|answer|pricing|cost|process/.test(text)) return "Add clear answers for the highest-intent customer questions first.";
+  if (/visibility|search|local|schema|entity|citation/.test(text)) return "Start with the visibility signals that also help customers understand the business.";
+  return "Complete the highest-confidence action first, then re-scan to validate improvement.";
+}
+
+function initiativeBucket(action: string): "enquiries" | "confidence" | "discoverability" {
+  const text = action.toLowerCase();
+  if (/trust|review|testimonial|proof|credib|guarantee|certif|case stud|question|faq|answer|pricing|cost|process|objection/.test(text)) return "confidence";
+  if (/visibility|search|local|schema|entity|citation|discover|topic|internal link/.test(text)) return "discoverability";
+  return "enquiries";
+}
+
 function actionForDimensionKey(key: string): string {
   if (key === "trust") return "Add stronger proof, reviews, testimonials, certifications, guarantees, and credibility cues.";
   if (key === "conversionReadiness") return "Clarify the primary action path and remove friction before form, booking, contact, or purchase.";
@@ -2201,8 +2484,20 @@ function actionForDimensionKey(key: string): string {
 function joinCustomerList(items: string[]): string {
   return items.length ? items.map(customerSafeText).join(" ") : "Not validated in this scan.";
 }
+function customerRecommendationEvidenceNote(reason: string): string {
+  const safe = customerSafeText(reason);
+  if (!safe) return "Validated evidence supports this recommendation.";
+  if (/revenue|opportunity|recoverable|monthly|value units?|estimate|leakage/i.test(safe)) {
+    return "Validated evidence supports this recommendation; the structural opportunity estimate is summarized in the Executive Summary and Revenue Opportunity sections.";
+  }
+  return safe;
+}
+
 function businessExplanationForAction(action: string, reason: string): string {
   const text = `${action} ${reason}`.toLowerCase();
+  if (/primary cta|cta presence|call to action|contact visibility|request a quote/.test(text)) {
+    return "Help visitors immediately understand how to contact your business or request a quote.";
+  }
   if (/viewport|resource|mobile|contact|cta|action path|speed|responsive/.test(text)) {
     return "Make it easier for mobile visitors to quickly understand your offer and contact your business. This reduces abandonment among high-intent visitors.";
   }

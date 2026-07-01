@@ -120,7 +120,13 @@ export function buildCustomerReportPayload(report: ReportSnapshot): Record<strin
     freshness: stripInternalFields(report.freshness),
     customerAssessment: buildCustomerAssessment(report, contentUnavailable),
     customerExecutiveNarrative: buildCustomerExecutiveNarrative(report, contentUnavailable),
-    customerBusinessHealthSnapshot: buildCustomerBusinessHealthSnapshot(report, contentUnavailable),
+    customerBusinessDecisionSnapshot: buildCustomerBusinessDecisionSnapshot(report, contentUnavailable),
+    customerBusinessHealthSnapshot: buildCustomerBusinessDecisionSnapshot(report, contentUnavailable),
+    customerHesitationAreas: buildCustomerHesitationAreas(report, contentUnavailable),
+    customerCompetitorNarrative: buildCustomerCompetitorNarrative(report, contentUnavailable),
+    customerTopPriority: buildCustomerTopPriority(report, contentUnavailable),
+    customerExpectedBusinessOutcomes: buildCustomerExpectedBusinessOutcomes(report, contentUnavailable),
+    customerBusinessInitiatives: buildCustomerBusinessInitiatives(report, contentUnavailable),
     customerSeoBusinessQuestions: buildCustomerSeoBusinessQuestions(report, contentUnavailable),
     customerEvidenceItems: buildCustomerEvidenceItems(report, contentUnavailable),
     customerIntelligenceSummaries: contentUnavailable ? [] : buildCustomerIntelligenceSummaries(report),
@@ -206,42 +212,170 @@ function buildCustomerExecutiveNarrative(report: ReportSnapshot, contentUnavaila
   return `Your business presents a ${foundation} foundation for customer trust and conversion. ${strongestText} The largest opportunity is improving ${weakLabel} so visitors reach key information and act with less friction. ${competitorText}`;
 }
 
-function buildCustomerBusinessHealthSnapshot(report: ReportSnapshot, contentUnavailable: boolean): Array<Record<string, string>> {
+function buildCustomerBusinessDecisionSnapshot(report: ReportSnapshot, contentUnavailable: boolean): Array<Record<string, string>> {
   if (contentUnavailable) {
     return [
-      { area: "Customer Acquisition", status: "Not Assessed", meaning: "Website content could not be collected." },
-      { area: "Customer Trust", status: "Not Assessed", meaning: "Trust signals could not be validated from current evidence." },
-      { area: "Customer Decision Support", status: "Not Assessed", meaning: "Customer decision support could not be evaluated." },
+      { area: "Business Readiness", status: "Not Assessed", meaning: "Website content could not be collected, so readiness was not scored." },
+      { area: "Customer Decision Confidence", status: "Very Limited", meaning: "Trust, clarity, and action-path signals could not be validated from current evidence." },
       { area: "Competitive Position", status: "Not Assessed", meaning: "Competitor position was not inferred without customer website evidence." },
-      { area: "Local Presence", status: "Not Assessed", meaning: "Local profile, review, citation, and service-area evidence was unavailable." },
       { area: "Revenue Opportunity", status: "Not Assessed", meaning: "Revenue opportunity was not estimated without validated page evidence." },
-      { area: "Priority", status: "Review Access", meaning: "Allow content collection and re-run the assessment." }
+      { area: "Priority Focus", status: "Review Access", meaning: "Allow content collection and re-run the assessment before making business decisions." }
     ];
   }
+
   const score = typeof report.oss?.score === "number" ? report.oss.score : null;
   const weakest = (report.dimensions ?? []).slice().sort((a, b) => a.score - b.score)[0];
-  const local = buildCustomerLocalVisibility(report, false) as Record<string, unknown>;
   const competitorGaps = buildCustomerCompetitorContentComparison(report, false)["contentGaps"] as unknown[];
-  const localScore = firstNumber([
-    scoreForDimension(report, "localVisibility"),
-    report.gbpIdentity?.identityConsistencyScore,
-    numberFromText(String(local["localVisibilityScore"] ?? "")),
-    numberFromText(String(local["gbpScore"] ?? ""))
-  ]);
-  const decisionSupport = averageNullable([
+  const decisionConfidence = averageNullable([
+    scoreForDimension(report, "trust"),
     scoreForDimension(report, "informationClarity"),
     scoreForDimension(report, "conversionReadiness"),
     scoreForDimension(report, "mobileExperience")
   ]);
+  const revenue = buildCustomerRevenueLeakage(report, false) as Record<string, unknown>;
+  const priorityLabel = weakest ? `Improve ${sanitizeCustomerText(weakest.label)}` : "Improve Decision Support";
+
   return [
-    { area: "Customer Acquisition", status: healthStatusForScore(scoreForDimension(report, "visibilityStructure")), meaning: "How easily customers can discover and understand the business from search and website structure." },
-    { area: "Customer Trust", status: healthStatusForScore(scoreForDimension(report, "trust")), meaning: "How much visible proof supports confidence before a visitor contacts, books, or buys." },
-    { area: "Customer Decision Support", status: healthStatusForScore(decisionSupport), meaning: "How well the website answers questions and reduces hesitation before action." },
-    { area: "Competitive Position", status: competitorGaps.length ? "Needs Improvement" : "Competitive", meaning: competitorGaps.length ? "Compared competitors show stronger decision support in at least one validated area." : "No validated competitor advantage was found from the available comparison evidence." },
-    { area: "Local Presence", status: healthStatusForScore(localScore), meaning: "How clearly local profile, reviews, service-area, citation, and contact signals support nearby customers." },
-    { area: "Revenue Opportunity", status: score === null ? "Not Assessed" : score >= 55 ? "Moderate" : "High", meaning: "The practical opportunity indicated by current evidence-bound customer friction, not a guaranteed revenue claim." },
-    { area: "Priority", status: weakest ? `Improve ${sanitizeCustomerText(weakest.label)}` : "Improve Decision Support", meaning: "The first business area to improve based on the weakest validated customer decision signal." }
+    { area: "Business Readiness", status: healthStatusForScore(score), meaning: "How ready the website appears to support customer trust, understanding, and action based on validated scan evidence." },
+    { area: "Customer Decision Confidence", status: healthStatusForScore(decisionConfidence), meaning: "How confidently a visitor can understand the offer, trust the business, and choose the next step." },
+    { area: "Competitive Position", status: competitorGaps.length ? competitiveMomentumForGapCount(competitorGaps.length) : "Competitive", meaning: competitorGaps.length ? "Validated competitor evidence suggests stronger decision support in selected areas." : "No validated competitor advantage was found from the available comparison evidence." },
+    { area: "Revenue Opportunity", status: String(revenue["valueContext"] ?? "Evidence-bound opportunity"), meaning: "The practical opportunity indicated by current customer friction, not a guaranteed revenue claim." },
+    { area: "Priority Focus", status: priorityLabel, meaning: "The first business area to improve based on the weakest validated customer decision signal." }
   ];
+}
+
+function buildCustomerHesitationAreas(report: ReportSnapshot, contentUnavailable: boolean): Array<Record<string, string>> {
+  if (contentUnavailable) {
+    return [{
+      area: "Content Access",
+      whatIsHappening: "Website content could not be collected for analysis.",
+      whyItMatters: "SYSTOLAB cannot validate where customers hesitate without current page evidence.",
+      action: "Review access/security settings and re-run the assessment.",
+      confidence: "Very limited"
+    }];
+  }
+
+  const weakDimensions = (report.dimensions ?? [])
+    .filter((dimension) => dimension.score < 76)
+    .sort((a, b) => a.score - b.score)
+    .slice(0, 4)
+    .map((dimension) => ({
+      area: sanitizeCustomerText(dimension.label),
+      whatIsHappening: `${sanitizeCustomerText(dimension.label)} is ${dimension.score}/100 in the validated scan evidence.`,
+      whyItMatters: customerImpactForDimensionKey(dimension.key),
+      action: actionForDimensionKey(dimension.key),
+      confidence: `${dimension.confidenceScore}% ${sanitizeCustomerText(dimension.confidenceLevel)}`
+    }));
+
+  if (weakDimensions.length) return weakDimensions;
+  return [{
+    area: "Customer Decision Path",
+    whatIsHappening: "No major hesitation area passed the reporting threshold in this scan.",
+    whyItMatters: "The validated evidence suggests the current decision path is broadly usable.",
+    action: "Maintain proof, clarity, contact visibility, and customer-answer coverage while monitoring competitors.",
+    confidence: summarizeCustomerEvidenceStrength(report)
+  }];
+}
+
+function buildCustomerCompetitorNarrative(report: ReportSnapshot, contentUnavailable: boolean): Record<string, unknown> {
+  if (contentUnavailable) {
+    return {
+      title: "Why Customers May Choose Competitors",
+      summary: "Competitor advantage was not inferred because customer website content could not be collected.",
+      momentum: "Not Assessed",
+      costOfDelay: "Re-run the assessment after content collection is available before making competitive conclusions.",
+      limitations: ["Competitive momentum requires validated customer website evidence and comparable competitor evidence."]
+    };
+  }
+
+  const comparison = buildCustomerCompetitorContentComparison(report, false) as Record<string, unknown>;
+  const gaps = Array.isArray(comparison["contentGaps"]) ? comparison["contentGaps"] as Array<Record<string, unknown>> : [];
+  return {
+    title: "Why Customers May Choose Competitors",
+    summary: gaps.length
+      ? "Based on the validated pages analysed, competitors may present stronger trust signals, answer more customer questions, or make services easier to evaluate. These differences may encourage potential customers to compare alternatives before contacting your business."
+      : "This scan did not validate a specific competitor advantage beyond the available score-level comparison.",
+    momentum: competitiveMomentumForGapCount(gaps.length),
+    costOfDelay: gaps.length
+      ? "While these decision gaps remain unresolved, potential customers may continue comparing alternatives before contacting your business. Competitors may strengthen their customer experience and visibility over time, making it harder to improve your relative competitive position."
+      : "No evidence-bound cost of delay was generated for competitor movement in this scan.",
+    limitations: gaps.length ? textArray(comparison["limitations"]) : ["Add competitor URLs and allow full content collection to compare FAQs, process detail, pricing cues, trust proof, and educational depth."]
+  };
+}
+
+function buildCustomerTopPriority(report: ReportSnapshot, contentUnavailable: boolean): Record<string, string> {
+  if (contentUnavailable) {
+    return {
+      recommendedPriority: "Review access/security settings and re-run scan.",
+      whyItMatters: "Current website evidence was unavailable, so SYSTOLAB did not generate a structural business priority.",
+      expectedBusinessBenefit: "A successful re-scan can support evidence-bound prioritization.",
+      confidence: "Very limited",
+      effort: "Medium",
+      firstAction: "Confirm the website allows analysis access."
+    };
+  }
+
+  const recommendations = report.recommendationEngine?.recommendations ?? [];
+  const first = recommendations[0];
+  const weakest = (report.dimensions ?? []).slice().sort((a, b) => a.score - b.score)[0];
+  const action = sanitizeCustomerText(first?.action ?? (weakest ? actionForDimensionKey(weakest.key) : "Improve the clearest customer decision gap first."));
+  return {
+    recommendedPriority: action,
+    whyItMatters: "Improving this area is expected to reduce customer hesitation at a key decision point. Based on validated evidence, it is the improvement most likely to strengthen customer confidence or next-step clarity first.",
+    expectedBusinessBenefit: expectedOutcomeForAction(action),
+    confidence: first ? `${first.confidenceScore}%` : summarizeCustomerEvidenceStrength(report),
+    effort: effortForAction(action),
+    firstAction: firstActionForRecommendation(action)
+  };
+}
+
+function buildCustomerExpectedBusinessOutcomes(report: ReportSnapshot, contentUnavailable: boolean): Array<Record<string, string>> {
+  const confidence = contentUnavailable ? "Very limited" : summarizeCustomerEvidenceStrength(report);
+  return [
+    { improvement: "Customer decision path", expectedOutcome: contentUnavailable ? "Outcome not estimated until content is available." : "More visitors understand your offer and are more likely to enquire.", confidence },
+    { improvement: "Trust signals", expectedOutcome: contentUnavailable ? "Trust outcomes were not assessed." : "More customers feel confident contacting your business.", confidence },
+    { improvement: "Local presence", expectedOutcome: contentUnavailable ? "Local visibility was not assessed." : "Better visibility among nearby customers searching for your services.", confidence },
+    { improvement: "Customer question coverage", expectedOutcome: contentUnavailable ? "Question coverage was not assessed." : "Fewer unanswered objections during the buying process.", confidence }
+  ];
+}
+
+function buildCustomerBusinessInitiatives(report: ReportSnapshot, contentUnavailable: boolean): Array<Record<string, unknown>> {
+  if (contentUnavailable) {
+    return [{
+      title: "Business Initiative 1 - Restore Evidence Collection",
+      outcome: "Enable a full evidence-bound website and SEO assessment.",
+      actions: ["Review access/security settings.", "Allow analysis access.", "Re-run the scan."],
+      confidence: "Very limited"
+    }];
+  }
+
+  const actions = (report.recommendationEngine?.recommendations ?? [])
+    .map((recommendation) => sanitizeCustomerText(recommendation.action))
+    .filter(Boolean);
+  const buckets = [
+    {
+      title: "Business Initiative 1 - Increase Customer Enquiries",
+      outcome: "Clarify the offer, improve contact visibility, and simplify the next step.",
+      actions: actions.filter((action) => initiativeBucket(action) === "enquiries")
+    },
+    {
+      title: "Business Initiative 2 - Build Customer Confidence",
+      outcome: "Add stronger trust proof, credibility signals, and answers to common customer concerns.",
+      actions: actions.filter((action) => initiativeBucket(action) === "confidence")
+    },
+    {
+      title: "Business Initiative 3 - Increase Discoverability",
+      outcome: "Improve visibility structure, customer-answer coverage, and local presence.",
+      actions: actions.filter((action) => initiativeBucket(action) === "discoverability")
+    }
+  ];
+  const fallbackActions = actions.length ? actions : [firstRoadmapAction(report)];
+  return buckets.map((bucket, index) => ({
+    title: bucket.title,
+    outcome: bucket.outcome,
+    actions: (bucket.actions.length ? bucket.actions : [fallbackActions[index % fallbackActions.length]]).slice(0, 4),
+    confidence: summarizeCustomerEvidenceStrength(report)
+  }));
 }
 
 function buildCustomerSeoBusinessQuestions(report: ReportSnapshot, contentUnavailable: boolean): Array<Record<string, string>> {
@@ -1079,8 +1213,53 @@ function canonicalCustomerDecisionKey(value: string): string {
   return text.replace(/[^a-z0-9]+/g, " ").trim().slice(0, 80);
 }
 
+function textArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(sanitizeCustomerText).filter(Boolean) : [];
+}
+
+function competitiveMomentumForGapCount(gapCount: number): string {
+  if (gapCount <= 0) return "Stable";
+  if (gapCount === 1) return "Watch Closely";
+  if (gapCount <= 3) return "Losing Ground";
+  return "High Competitive Pressure";
+}
+
+function expectedOutcomeForAction(action: string): string {
+  const text = action.toLowerCase();
+  if (/primary cta|cta presence|call to action|contact visibility|request a quote/.test(text)) return "Visitors can more quickly understand how to contact your business or request a quote.";
+  if (/viewport|resource|mobile|speed|responsive/.test(text)) return "Mobile visitors can understand the offer and reach the next step with less abandonment risk.";
+  if (/trust|review|testimonial|proof|credib|guarantee|certif/.test(text)) return "More customers may feel confident contacting the business before comparing alternatives.";
+  if (/question|faq|answer|pricing|cost|process|objection/.test(text)) return "Fewer customers need to leave the site to answer buying-stage questions.";
+  if (/visibility|search|local|schema|entity|citation|discover/.test(text)) return "Customers can find and understand the right pages more easily.";
+  return "The customer decision path becomes clearer and easier to act on.";
+}
+
+function effortForAction(action: string): string {
+  const text = action.toLowerCase();
+  if (/schema|entity|citation|local|resource|speed|technical|render|responsive/.test(text)) return "Medium";
+  if (/redesign|architecture|migration|checkout|booking/.test(text)) return "High";
+  return "Low";
+}
+
+function firstActionForRecommendation(action: string): string {
+  const text = action.toLowerCase();
+  if (/primary cta|cta presence|call to action|contact visibility|request a quote/.test(text)) return "Make the main contact or quote action visible near the first customer decision point.";
+  if (/trust|review|testimonial|proof|credib/.test(text)) return "Place the strongest proof near high-intent pages and contact paths.";
+  if (/question|faq|answer|pricing|cost|process/.test(text)) return "Add clear answers for the highest-intent customer questions first.";
+  if (/visibility|search|local|schema|entity|citation/.test(text)) return "Start with the visibility signals that also help customers understand the business.";
+  return "Complete the highest-confidence action first, then re-scan to validate improvement.";
+}
+
+function initiativeBucket(action: string): "enquiries" | "confidence" | "discoverability" {
+  const text = action.toLowerCase();
+  if (/trust|review|testimonial|proof|credib|guarantee|certif|case stud|question|faq|answer|pricing|cost|process|objection/.test(text)) return "confidence";
+  if (/visibility|search|local|schema|entity|citation|discover|topic|internal link/.test(text)) return "discoverability";
+  return "enquiries";
+}
+
 function businessExplanationForAction(action: string, reason: string): string {
   const text = `${action} ${reason}`.toLowerCase();
+  if (/primary cta|cta presence|call to action|contact visibility|request a quote/.test(text)) return "Help visitors immediately understand how to contact your business or request a quote.";
   if (/viewport|resource|mobile|contact|cta|action path|speed|responsive/.test(text)) return "Make it easier for mobile visitors to quickly understand your offer and contact your business. This reduces abandonment among high-intent visitors.";
   if (/trust|review|testimonial|proof|credib|guarantee|certif/.test(text)) return "Give visitors stronger reasons to trust the business before they compare alternatives or decide to contact you.";
   if (/competitor|compare|comparison|alternative|versus/.test(text)) return "Close the information gap that may make competitors feel safer or easier to choose during customer comparison.";
