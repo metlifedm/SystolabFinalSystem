@@ -4096,6 +4096,14 @@ pre {
   border-color: var(--brand, #1f6b5b);
 }
 
+
+.brand-preview-logo {
+  width: min(180px, 100%);
+  max-height: 72px;
+  object-fit: contain;
+  display: block;
+  margin-bottom: 14px;
+}
 .brand-preview button {
   min-height: 42px;
   border: 0;

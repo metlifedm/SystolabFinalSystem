@@ -1,7 +1,8 @@
-﻿import type { Request, Response } from "express";
+import type { Request, Response } from "express";
 import { Router } from "express";
 import { asyncHandler } from "../middleware/asyncHandler.js";
 import { authOptional } from "../middleware/authOptional.js";
+import { authRequired } from "../middleware/authRequired.js";
 import { scanRateLimit, scanStatusRateLimit } from "../middleware/rateLimits.js";
 import { getPlatformJob, getScanQueueMetrics, listScanJobs } from "../services/platformControlPlaneService.js";
 import { isScanWorkerRunning } from "../services/scanWorker.js";
@@ -12,7 +13,7 @@ export const scansRouter = Router();
 scansRouter.use(authOptional);
 
 // POST / - enqueue scan (async, returns 202 + jobId)
-scansRouter.post("/", scanRateLimit, asyncHandler(createScan));
+scansRouter.post("/", scanRateLimit, authRequired, asyncHandler(createScan));
 
 // GET /queue/metrics - queue depth and worker health
 scansRouter.get("/queue/metrics", scanStatusRateLimit, asyncHandler(async (_req: Request, res: Response) => {

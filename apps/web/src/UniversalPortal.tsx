@@ -1,9 +1,8 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type ChangeEvent, type CSSProperties, type ReactNode } from "react";
 import type { AuthIdentifierType, AuthResponse, AuthSessionSummary, AuthTokenPair, AuthUserProfile, TenantBranding } from "@systolab/shared";
-import { CheckCircle2, KeyRound, Layers, LogOut, Search, ShieldCheck } from "lucide-react";
+import { CheckCircle2, KeyRound, Layers, LogOut, ShieldCheck } from "lucide-react";
 import {
   createProject,
-  createScan,
   createTenant,
   downloadReportPdf,
   getBillingOverview,
@@ -32,6 +31,8 @@ type PortalPath =
   | "/docs"
   | "/help"
   | "/demo"
+  | "/testimonials"
+  | "/contact"
   | "/login"
   | "/signup"
   | "/dashboard"
@@ -47,7 +48,7 @@ type PortalPath =
   | "/account"
   | "/security";
 
-const publicPortalRoutes = new Set(["/", "/features", "/pricing", "/docs", "/help", "/demo", "/login", "/signup"]);
+const publicPortalRoutes = new Set(["/", "/features", "/pricing", "/docs", "/help", "/demo", "/white-label", "/testimonials", "/contact", "/login", "/signup"]);
 
 export function isPortalRoute(pathname: string): boolean {
   const path = normalizePortalPath(pathname);
@@ -149,6 +150,9 @@ function renderPortalPage(path: string, ctx: { auth: StoredPortalAuth | null; po
   if (path === "/docs") return <PortalDocs />;
   if (path === "/help") return <PortalHelp />;
   if (path === "/demo") return <PortalDemo navigate={ctx.navigate} />;
+  if (path === "/white-label" && !ctx.auth) return <PortalWhiteLabelMarketing navigate={ctx.navigate} />;
+  if (path === "/testimonials") return <PortalTestimonials navigate={ctx.navigate} />;
+  if (path === "/contact") return <PortalContact navigate={ctx.navigate} />;
   if (path === "/dashboard") return <PortalDashboard portal={ctx.portal} usage={ctx.usage} refresh={ctx.refreshPortal} navigate={ctx.navigate} />;
   if (path === "/projects") return <PortalProjects portal={ctx.portal} refresh={ctx.refreshPortal} navigate={ctx.navigate} />;
   if (path.startsWith("/projects/")) return <PortalProjectDetail workspaceId={path.split("/")[2] ?? ""} navigate={ctx.navigate} />;
@@ -158,55 +162,41 @@ function renderPortalPage(path: string, ctx: { auth: StoredPortalAuth | null; po
   if (path === "/account" || path === "/security") return <PortalAccountSecurity auth={ctx.auth} security={path === "/security"} />;
   return <PortalOperationsPage path={path as PortalPath} projects={ctx.portal?.projects ?? []} navigate={ctx.navigate} />;
 }
-
 function PortalTopNav({ auth, path, navigate, signOut }: { auth: StoredPortalAuth | null; path: string; navigate: (path: string) => void; signOut: () => void }) {
   const items: Array<[string, string]> = auth
-    ? [["/dashboard", "Dashboard"], ["/projects", "Projects"], ["/reports", "Reports"], ["/billing", "Billing"], ["/white-label", "White-Label"]]
-    : [["/features", "Features"], ["/pricing", "Pricing"], ["/docs", "Docs"], ["/help", "Help"], ["/demo", "Live Demo"]];
+    ? [["/dashboard", "Dashboard"], ["/projects", "Projects"], ["/reports", "Reports"], ["/billing", "Billing"], ["/white-label", "White Label"]]
+    : [["/features", "Features"], ["/pricing", "Pricing"], ["/demo", "Live Demo"], ["/docs", "Docs"], ["/white-label", "White Label"], ["/contact", "Contact"]];
   return (
     <header className="portal-nav">
       <button className="portal-brand" onClick={() => navigate(auth ? "/dashboard" : "/")}><img src="/systolab-icon.png" alt="SYSTOLAB" /><span>SYSTOLAB Cloud</span></button>
       <nav>{items.map(([href, label]) => <button key={href} className={path === href ? "active" : ""} onClick={() => navigate(href)}>{label}</button>)}</nav>
       <div className="portal-nav-actions">
-        {auth ? <><button className="portal-secondary" onClick={() => navigate("/account")}>{auth.user.displayName || auth.user.email || "Account"}</button><button className="portal-icon-button" onClick={signOut}><LogOut size={16} />Sign out</button></> : <><button className="portal-secondary" onClick={() => navigate("/login")}>Sign in</button><button className="portal-primary" onClick={() => navigate("/signup")}>Start free</button></>}
+        {auth ? <><button className="portal-secondary" onClick={() => navigate("/account")}>{auth.user.displayName || auth.user.email || "Account"}</button><button className="portal-icon-button" onClick={signOut}><LogOut size={16} />Sign out</button></> : <><button className="portal-secondary" onClick={() => navigate("/login")}>Sign in</button><button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button></>}
       </div>
     </header>
   );
 }
-
 function PortalLanding({ navigate }: { navigate: (path: string) => void }) {
-  const [targetUrl, setTargetUrl] = useState("");
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  async function startSnapshot() {
-    setStatus(""); setError(""); setLoading(true);
-    try {
-      const job = await createScan({ targetUrl, mode: "fast_scan", includeSeo: true });
-      setStatus(`Snapshot queued for ${safeHostLabel(job.targetUrl)}. Job ${job.jobId} is processing.`);
-    } catch (scanError) {
-      setError(scanError instanceof Error ? scanError.message : "Unable to start snapshot.");
-    } finally {
-      setLoading(false);
-    }
-  }
   return (
     <main className="portal-landing">
       <section className="portal-hero">
         <div className="portal-hero-copy">
-          <span className="portal-eyebrow">Validated business, website, and SEO intelligence</span>
-          <h1>Make Better Business Decisions With Validated Intelligence</h1>
-          <p>SYSTOLAB turns website evidence, search visibility, competitor movement, and recommendation outcomes into clear decisions for business owners, agencies, and clients.</p>
-          <div className="portal-url-bar"><Search size={18} /><input value={targetUrl} onChange={(event) => setTargetUrl(event.target.value)} placeholder="https://yourbusiness.com" /><button disabled={!targetUrl || loading} onClick={startSnapshot}>{loading ? "Queuing" : "Generate Free Business Snapshot"}</button></div>
-          {status && <div className="portal-status inline">{status}</div>}{error && <div className="portal-alert inline">{error}</div>}
-          <div className="portal-hero-actions"><button className="portal-primary" onClick={() => navigate("/signup")}>Create account</button><button className="portal-secondary" onClick={() => navigate("/demo")}>View live demo</button></div>
+          <span className="portal-eyebrow">Executive Business Decision Intelligence</span>
+          <h1>Make Better Business Decisions With Validated Website, SEO, Local, and Competitor Intelligence</h1>
+          <p>SYSTOLAB helps organizations turn website evidence, search visibility, competitor movement, revenue signals, and recommendation outcomes into clear executive decisions.</p>
+          <div className="portal-hero-actions"><button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button><button className="portal-secondary" onClick={() => navigate("/demo")}>View live demo</button></div>
+          <p className="portal-muted">Includes 5 complimentary Business Intelligence Reports after account creation.</p>
         </div>
         <div className="portal-hero-panel">
-          <div className="health-snapshot compact"><HealthRow label="Customer Acquisition" value="Validated" /><HealthRow label="Customer Trust" value="Evidence-led" /><HealthRow label="Decision Support" value="Prioritized" /><HealthRow label="Competitive Position" value="Tracked" /><HealthRow label="Revenue Opportunity" value="Attribution-ready" /></div>
-          <div className="portal-signal-grid"><MetricTile label="Evidence Coverage" value="Per scan" /><MetricTile label="Projects" value="Multi-tenant" /><MetricTile label="Reports" value="PDF / JSON" /><MetricTile label="API" value="SYSTOLAB-owned" /></div>
+          <div className="health-snapshot compact"><HealthRow label="Customer Acquisition" value="Website + SEO" /><HealthRow label="Customer Trust" value="Evidence-led" /><HealthRow label="Decision Support" value="Prioritized" /><HealthRow label="Competitive Position" value="Explained" /><HealthRow label="Revenue Opportunity" value="Attribution-ready" /></div>
+          <div className="portal-signal-grid"><MetricTile label="Account" value="Required" /><MetricTile label="Organization" value="MetifeDM LLC" /><MetricTile label="Projects" value="Client websites" /><MetricTile label="Reports" value="PDF / JSON" /></div>
         </div>
       </section>
       <section className="portal-band three-col">{featureCards.slice(0, 3).map((item) => <PortalInfoCard key={item.title} {...item} />)}</section>
+      <section className="portal-band two-col">
+        <PortalInfoCard title="White Label For Agencies" body="Create an organization, enable white-label branding, upload your logo, set brand colors, configure support identity, and deliver client reports under your brand." />
+        <PortalInfoCard title="One Customer Journey" body="Start Free, verify your account, create an organization, add websites, run reports, invite teammates, and manage billing from one portal." />
+      </section>
     </main>
   );
 }
@@ -238,7 +228,7 @@ function PortalAuthPage({ mode, onAuth }: { mode: "login" | "signup"; onAuth: (r
 
   return (
     <main className="portal-auth-layout">
-      <section className="portal-auth-copy"><span className="portal-eyebrow">Universal authentication</span><h1>{mode === "signup" ? "Create your SYSTOLAB Cloud account" : "Sign in to SYSTOLAB Cloud"}</h1><p>Use Google-first login, password, or self-contained OTP verification. Sessions, devices, and audit records are managed by the SYSTOLAB backend.</p><div className="portal-auth-proof"><span><ShieldCheck size={16} />Secure sessions</span><span><KeyRound size={16} />OTP throttling</span><span><Layers size={16} />Tenant access</span></div></section>
+      <section className="portal-auth-copy"><span className="portal-eyebrow">Universal authentication</span><h1>{mode === "signup" ? "Create your SYSTOLAB Cloud account" : "Sign in to SYSTOLAB Cloud"}</h1><p>Use Google-first login, password, or self-contained OTP verification. Sessions, devices, and audit records are managed by the SYSTOLAB backend.</p><div className="portal-auth-proof"><span><ShieldCheck size={16} />Secure sessions</span><span><KeyRound size={16} />OTP throttling</span><span><Layers size={16} />Organization access</span></div></section>
       <section className="portal-auth-card">
         <div className="portal-auth-tabs"><button className={authMode === "google" ? "active" : ""} onClick={() => setAuthMode("google")}>Google</button><button className={authMode === "password" ? "active" : ""} onClick={() => setAuthMode("password")}>Password</button><button className={authMode === "otp" ? "active" : ""} onClick={() => setAuthMode("otp")}>OTP</button></div>
         <div className="portal-form-grid">
@@ -259,43 +249,46 @@ function PortalAuthPage({ mode, onAuth }: { mode: "login" | "signup"; onAuth: (r
 }
 
 function PortalDashboard({ portal, usage, refresh, navigate }: { portal: PortalMeResponse | null; usage: PortalUsageOverview | null; refresh: () => Promise<void>; navigate: (path: string) => void }) {
-  const tenant = portal?.tenants[0] ?? null;
+  const organization = portal?.tenants[0] ?? null;
   const projects = portal?.projects ?? [];
   const latest = projects.find((project) => project.latestReport)?.latestReport;
+  const organizationName = organization?.branding.publicName ?? organization?.tenantSlug ?? "No organization yet";
   return (
     <main className="portal-main">
-      <PortalPageHeader eyebrow="Dashboard" title="Welcome back. What business decision would you like to make today?" actions={<button className="portal-primary" onClick={() => navigate("/projects")}>New project</button>} />
-      {!tenant && <CreateTenantCard refresh={refresh} />}
+      <PortalPageHeader eyebrow="Executive Dashboard" title={`Welcome back${portal?.user.displayName ? `, ${portal.user.displayName.split(" ")[0]}` : ""}.`} actions={<button className="portal-primary" onClick={() => navigate(organization ? "/projects" : "/dashboard")}>{organization ? "+ Add Website" : "Create Organization"}</button>} />
+      {!organization && <CreateOrganizationCard refresh={refresh} />}
       <section className="portal-dashboard-grid">
-        <div className="portal-panel wide"><h2>Business Health Snapshot</h2><div className="health-snapshot"><HealthRow label="Customer Acquisition" value={latest?.oss === null ? "Not scored" : latest ? "Tracked" : "Ready"} /><HealthRow label="Customer Trust" value={latest?.businessRiskStatus ?? "Awaiting scan"} /><HealthRow label="Customer Decision Support" value={latest ? latest.visualStateLabel : "Needs first report"} /><HealthRow label="Competitive Position" value={projects.some((project) => project.competitorUrls.length) ? "Competitors configured" : "Add competitors"} /><HealthRow label="Local Presence" value={projects.some((project) => project.gbpUrl) ? "GBP linked" : "Needs GBP URL"} /><HealthRow label="Priority" value={latest ? "Review latest decisions" : "Generate first report"} /></div></div>
-        <div className="portal-panel"><h2>Usage</h2><MetricTile label="Scans this month" value={`${usage?.scanLimit.used ?? 0}/${usage?.scanLimit.limit === -1 ? "Unlimited" : usage?.scanLimit.limit ?? 0}`} /><MetricTile label="API calls" value={`${usage?.apiCallLimit.used ?? 0}/${usage?.apiCallLimit.limit === -1 ? "Unlimited" : usage?.apiCallLimit.limit ?? 0}`} /></div>
-        <div className="portal-panel wide"><h2>Projects</h2>{projects.length ? <ProjectList projects={projects} navigate={navigate} /> : <p className="portal-muted">Create a project to track scans, competitors, reports, and recommendation outcomes.</p>}</div>
+        <div className="portal-panel"><h2>Organization</h2><MetricTile label="Name" value={organizationName} /><MetricTile label="White Label" value={organization ? "Available" : "Create organization first"} /><MetricTile label="Team" value={organization ? "Ready" : "Pending"} /></div>
+        <div className="portal-panel"><h2>Usage</h2><MetricTile label="Reports this month" value={`${usage?.scanLimit.used ?? 0}/${usage?.scanLimit.limit === -1 ? "Unlimited" : usage?.scanLimit.limit ?? 0}`} /><MetricTile label="API calls" value={`${usage?.apiCallLimit.used ?? 0}/${usage?.apiCallLimit.limit === -1 ? "Unlimited" : usage?.apiCallLimit.limit ?? 0}`} /></div>
+        <div className="portal-panel wide"><h2>Business Health Snapshot</h2><div className="health-snapshot"><HealthRow label="Customer Acquisition" value={latest?.oss === null ? "Not scored" : latest ? "Tracked" : "Ready for first report"} /><HealthRow label="Customer Trust" value={latest?.businessRiskStatus ?? "Awaiting report"} /><HealthRow label="Customer Decision Support" value={latest ? latest.visualStateLabel : "Needs first report"} /><HealthRow label="Competitive Position" value={projects.some((project) => project.competitorUrls.length) ? "Competitors configured" : "Add competitors"} /><HealthRow label="Local Presence" value={projects.some((project) => project.gbpUrl) ? "GBP linked" : "Needs GBP URL"} /><HealthRow label="Priority" value={latest ? "Review latest decisions" : "Run first report"} /></div></div>
+        <div className="portal-panel wide"><h2>Projects</h2>{projects.length ? <ProjectList projects={projects} navigate={navigate} /> : <p className="portal-muted">Add a website to create your first project and generate a business intelligence report.</p>}</div>
+        <div className="portal-panel"><h2>Recent Reports</h2><MetricTile label="Latest" value={latest ? latest.visualStateLabel : "No reports yet"} /><MetricTile label="OSS" value={latest?.oss === null || latest?.oss === undefined ? "Not scored" : `${latest.oss}/100`} /></div>
+        <div className="portal-panel"><h2>Recommendations</h2><p className="portal-muted">Recommendations appear after your first report and are organized by business impact, evidence strength, and priority.</p></div>
       </section>
     </main>
   );
 }
-
-function CreateTenantCard({ refresh }: { refresh: () => Promise<void> }) {
+function CreateOrganizationCard({ refresh }: { refresh: () => Promise<void> }) {
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   return (
-    <section className="portal-panel portal-first-run"><div><span className="portal-eyebrow">First workspace</span><h2>Create your SYSTOLAB tenant</h2><p>This becomes the secure organization boundary for projects, users, billing, API keys, and white-label settings.</p></div><div className="portal-inline-form"><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Business or agency name" /><input value={slug} onChange={(event) => setSlug(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))} placeholder="tenant-slug" /><button className="portal-primary" disabled={!slug || !name} onClick={async () => { setStatus(""); setError(""); try { await createTenant(slug, name); setStatus("Tenant created."); await refresh(); } catch (tenantError) { setError(tenantError instanceof Error ? tenantError.message : "Unable to create tenant."); } }}>Create tenant</button></div>{status && <div className="portal-status inline">{status}</div>}{error && <div className="portal-alert inline">{error}</div>}</section>
+    <section className="portal-panel portal-first-run"><div><span className="portal-eyebrow">First organization</span><h2>Create your organization</h2><p>This becomes the secure home for projects, reports, team access, billing, API keys, referrals, and white-label settings.</p></div><div className="portal-inline-form"><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Organization name, e.g. MetifeDM LLC" /><input value={slug} onChange={(event) => setSlug(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))} placeholder="organization-slug" /><button className="portal-primary" disabled={!slug || !name} onClick={async () => { setStatus(""); setError(""); try { await createTenant(slug, name); setStatus("Organization created."); await refresh(); } catch (organizationError) { setError(organizationError instanceof Error ? organizationError.message : "Unable to create organization."); } }}>Create organization</button></div>{status && <div className="portal-status inline">{status}</div>}{error && <div className="portal-alert inline">{error}</div>}</section>
   );
 }
-
 function PortalProjects({ portal, refresh, navigate }: { portal: PortalMeResponse | null; refresh: () => Promise<void>; navigate: (path: string) => void }) {
-  return <main className="portal-main"><PortalPageHeader eyebrow="Projects" title="Website, SEO, GBP, and competitor intelligence projects" /><section className="portal-dashboard-grid"><ProjectCreatePanel tenants={portal?.tenants ?? []} refresh={refresh} /><div className="portal-panel wide"><h2>All projects</h2><ProjectList projects={portal?.projects ?? []} navigate={navigate} /></div></section></main>;
+  return <main className="portal-main"><PortalPageHeader eyebrow="Projects" title="Client websites, competitors, local visibility, and reports" /><section className="portal-dashboard-grid"><ProjectCreatePanel organizations={portal?.tenants ?? []} refresh={refresh} /><div className="portal-panel wide"><h2>Client Websites</h2><ProjectList projects={portal?.projects ?? []} navigate={navigate} /></div></section></main>;
 }
 
-function ProjectCreatePanel({ tenants, refresh }: { tenants: PortalTenantSummary[]; refresh: () => Promise<void> }) {
+function ProjectCreatePanel({ organizations, refresh }: { organizations: PortalTenantSummary[]; refresh: () => Promise<void> }) {
   const [form, setForm] = useState({ targetUrl: "", projectName: "", businessType: "", targetCountry: "", targetLocation: "", competitorUrls: "", gbpUrl: "" });
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
-  const tenantSlug = tenants[0]?.tenantSlug ?? "";
+  const tenantSlug = organizations[0]?.tenantSlug ?? "";
+  if (!tenantSlug) return <div className="portal-panel"><h2>Add Website</h2><p className="portal-muted">Create an organization before adding websites and reports.</p></div>;
   return (
-    <div className="portal-panel"><h2>Create project</h2><div className="portal-form-grid"><label><span>Website URL</span><input value={form.targetUrl} onChange={(e) => setForm({ ...form, targetUrl: e.target.value })} placeholder="https://example.com" /></label><label><span>Project name</span><input value={form.projectName} onChange={(e) => setForm({ ...form, projectName: e.target.value })} placeholder="Client or business name" /></label><label><span>Business type</span><input value={form.businessType} onChange={(e) => setForm({ ...form, businessType: e.target.value })} placeholder="Dentist, SaaS, law firm" /></label><label><span>Location</span><input value={form.targetLocation} onChange={(e) => setForm({ ...form, targetLocation: e.target.value })} placeholder="City / market" /></label><label><span>Country</span><input value={form.targetCountry} onChange={(e) => setForm({ ...form, targetCountry: e.target.value })} placeholder="US, IN, UK" /></label><label><span>GBP URL</span><input value={form.gbpUrl} onChange={(e) => setForm({ ...form, gbpUrl: e.target.value })} placeholder="Optional Google profile URL" /></label><label className="full"><span>Competitors</span><textarea value={form.competitorUrls} onChange={(e) => setForm({ ...form, competitorUrls: e.target.value })} placeholder="One competitor URL per line" /></label></div><button className="portal-primary full" disabled={!tenantSlug || !form.targetUrl} onClick={async () => { setStatus(""); setError(""); try { await createProject({ tenantSlug, targetUrl: form.targetUrl, projectName: form.projectName, businessType: form.businessType, targetCountry: form.targetCountry, targetLocation: form.targetLocation, gbpUrl: form.gbpUrl, competitorUrls: form.competitorUrls.split(/\n|,/).map((item) => item.trim()).filter(Boolean), monitoringConfig: { cadence: "weekly", enabled: false } }); setStatus("Project created."); await refresh(); } catch (projectError) { setError(projectError instanceof Error ? projectError.message : "Unable to create project."); } }}>Create intelligence project</button>{status && <div className="portal-status inline">{status}</div>}{error && <div className="portal-alert inline">{error}</div>}</div>
+    <div className="portal-panel"><h2>+ Add Website</h2><div className="portal-form-grid"><label><span>Website URL</span><input value={form.targetUrl} onChange={(e) => setForm({ ...form, targetUrl: e.target.value })} placeholder="https://example.com" /></label><label><span>Project name</span><input value={form.projectName} onChange={(e) => setForm({ ...form, projectName: e.target.value })} placeholder="Client or business name" /></label><label><span>Business type</span><input value={form.businessType} onChange={(e) => setForm({ ...form, businessType: e.target.value })} placeholder="Dentist, SaaS, law firm" /></label><label><span>Location</span><input value={form.targetLocation} onChange={(e) => setForm({ ...form, targetLocation: e.target.value })} placeholder="City / market" /></label><label><span>Country</span><input value={form.targetCountry} onChange={(e) => setForm({ ...form, targetCountry: e.target.value })} placeholder="US, IN, UK" /></label><label><span>GBP URL</span><input value={form.gbpUrl} onChange={(e) => setForm({ ...form, gbpUrl: e.target.value })} placeholder="Optional Google profile URL" /></label><label className="full"><span>Competitors</span><textarea value={form.competitorUrls} onChange={(e) => setForm({ ...form, competitorUrls: e.target.value })} placeholder="One competitor URL per line" /></label></div><button className="portal-primary full" disabled={!form.targetUrl} onClick={async () => { setStatus(""); setError(""); try { await createProject({ tenantSlug, targetUrl: form.targetUrl, projectName: form.projectName, businessType: form.businessType, targetCountry: form.targetCountry, targetLocation: form.targetLocation, gbpUrl: form.gbpUrl, competitorUrls: form.competitorUrls.split(/\n|,/).map((item) => item.trim()).filter(Boolean), monitoringConfig: { cadence: "weekly", enabled: false } }); setStatus("Website project created."); await refresh(); } catch (projectError) { setError(projectError instanceof Error ? projectError.message : "Unable to create project."); } }}>Create project</button>{status && <div className="portal-status inline">{status}</div>}{error && <div className="portal-alert inline">{error}</div>}</div>
   );
 }
 function PortalProjectDetail({ workspaceId, navigate }: { workspaceId: string; navigate: (path: string) => void }) {
@@ -357,20 +350,37 @@ function savePortalBlob(blob: Blob, filename: string) {
 function PortalBilling({ tenant, plans }: { tenant: PortalTenantSummary | null; plans: PortalBillingPlan[] }) {
   const [overview, setOverview] = useState<{ plans: PortalBillingPlan[]; subscription: Record<string, unknown> | null; usage: PortalUsageOverview } | null>(null);
   useEffect(() => { if (tenant) getBillingOverview(tenant.tenantSlug).then(setOverview).catch(() => setOverview(null)); }, [tenant?.tenantSlug]);
-  return <main className="portal-main"><PortalPageHeader eyebrow="Billing" title="Plan, usage, limits, and API capacity" /><section className="portal-band pricing-grid">{(overview?.plans ?? plans).map((plan) => <PricingCard key={plan.planId} plan={plan} />)}</section><section className="portal-panel"><h2>Current usage</h2><div className="portal-signal-grid"><MetricTile label="Tenant" value={tenant?.tenantSlug ?? "No tenant"} /><MetricTile label="Scans" value={`${overview?.usage.scanLimit.used ?? 0}/${overview?.usage.scanLimit.limit ?? 0}`} /><MetricTile label="API calls" value={`${overview?.usage.apiCallLimit.used ?? 0}/${overview?.usage.apiCallLimit.limit ?? 0}`} /></div></section></main>;
+  return <main className="portal-main"><PortalPageHeader eyebrow="Billing" title="Plan, usage, limits, and API capacity" /><section className="portal-band pricing-grid">{(overview?.plans ?? plans).map((plan) => <PricingCard key={plan.planId} plan={plan} />)}</section><section className="portal-panel"><h2>Current usage</h2><div className="portal-signal-grid"><MetricTile label="Organization" value={tenant?.branding.publicName ?? tenant?.tenantSlug ?? "No organization"} /><MetricTile label="Reports" value={`${overview?.usage.scanLimit.used ?? 0}/${overview?.usage.scanLimit.limit ?? 0}`} /><MetricTile label="API calls" value={`${overview?.usage.apiCallLimit.used ?? 0}/${overview?.usage.apiCallLimit.limit ?? 0}`} /></div></section></main>;
 }
-
 function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | null; refresh: () => Promise<void> }) {
   const [branding, setBranding] = useState<TenantBranding | null>(() => tenant?.branding ?? null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   useEffect(() => setBranding(tenant?.branding ?? null), [tenant?.tenantSlug]);
-  if (!tenant || !branding) return <main className="portal-main"><PortalPageHeader eyebrow="White-Label" title="Create a tenant first" /></main>;
+
+  function handleLogoUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setError("");
+    if (!file.type.startsWith("image/")) {
+      setError("Upload an image file for the logo.");
+      return;
+    }
+    if (file.size > 750_000) {
+      setError("Logo must be 750 KB or smaller for reliable self-contained storage.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => setBranding((current) => current ? { ...current, logoUrl: String(reader.result ?? "") } : current);
+    reader.onerror = () => setError("Unable to read logo image.");
+    reader.readAsDataURL(file);
+  }
+
+  if (!tenant || !branding) return <main className="portal-main"><PortalPageHeader eyebrow="White Label" title="Create an organization first" /></main>;
   return (
-    <main className="portal-main"><PortalPageHeader eyebrow="White-Label" title="Partner-controlled branding and client portal identity" /><section className="portal-dashboard-grid"><div className="portal-panel"><h2>Brand settings</h2><div className="portal-form-grid"><label><span>Public name</span><input value={branding.publicName} onChange={(e) => setBranding({ ...branding, publicName: e.target.value })} /></label><label><span>Logo URL</span><input value={branding.logoUrl ?? ""} onChange={(e) => setBranding({ ...branding, logoUrl: e.target.value })} /></label><label><span>Primary color</span><input value={branding.primaryColor} onChange={(e) => setBranding({ ...branding, primaryColor: e.target.value })} /></label><label><span>Accent color</span><input value={branding.accentColor} onChange={(e) => setBranding({ ...branding, accentColor: e.target.value })} /></label><label><span>Support email</span><input value={branding.supportEmail ?? ""} onChange={(e) => setBranding({ ...branding, supportEmail: e.target.value })} /></label><label><span>Custom domain</span><input value={branding.customDomain ?? ""} onChange={(e) => setBranding({ ...branding, customDomain: e.target.value })} /></label><label className="full"><span>Dashboard welcome</span><textarea value={branding.dashboardWelcomeMessage ?? ""} onChange={(e) => setBranding({ ...branding, dashboardWelcomeMessage: e.target.value })} /></label></div><button className="portal-primary full" onClick={async () => { setStatus(""); setError(""); try { await updateWhiteLabelBranding(tenant.tenantSlug, branding); setStatus("Branding updated."); await refresh(); } catch (brandingError) { setError(brandingError instanceof Error ? brandingError.message : "Unable to update branding."); } }}>Save white-label settings</button>{status && <div className="portal-status inline">{status}</div>}{error && <div className="portal-alert inline">{error}</div>}</div><div className="portal-panel brand-preview" style={{ "--brand": branding.primaryColor, "--accent": branding.accentColor } as CSSProperties}><h2>{branding.publicName}</h2><p>{branding.dashboardWelcomeMessage || "Your client portal, reports, exports, support identity, and custom domain inherit this brand."}</p><button>{branding.reportTitle}</button></div></section></main>
+    <main className="portal-main"><PortalPageHeader eyebrow="White Label" title="Agency branding and client portal identity" /><section className="portal-dashboard-grid"><div className="portal-panel"><h2>Brand settings</h2><div className="portal-form-grid"><label><span>Public name</span><input value={branding.publicName} onChange={(e) => setBranding({ ...branding, publicName: e.target.value })} /></label><label><span>Upload logo</span><input type="file" accept="image/*" onChange={handleLogoUpload} /></label><label><span>Logo URL</span><input value={branding.logoUrl ?? ""} onChange={(e) => setBranding({ ...branding, logoUrl: e.target.value })} placeholder="Upload or paste logo URL" /></label><label><span>Primary color</span><input type="color" value={branding.primaryColor} onChange={(e) => setBranding({ ...branding, primaryColor: e.target.value })} /></label><label><span>Accent color</span><input type="color" value={branding.accentColor} onChange={(e) => setBranding({ ...branding, accentColor: e.target.value })} /></label><label><span>Support email</span><input value={branding.supportEmail ?? ""} onChange={(e) => setBranding({ ...branding, supportEmail: e.target.value })} /></label><label><span>Custom domain</span><input value={branding.customDomain ?? ""} onChange={(e) => setBranding({ ...branding, customDomain: e.target.value })} /></label><label className="full"><span>Dashboard welcome</span><textarea value={branding.dashboardWelcomeMessage ?? ""} onChange={(e) => setBranding({ ...branding, dashboardWelcomeMessage: e.target.value })} /></label></div><button className="portal-primary full" onClick={async () => { setStatus(""); setError(""); try { await updateWhiteLabelBranding(tenant.tenantSlug, branding); setStatus("White-label settings saved."); await refresh(); } catch (brandingError) { setError(brandingError instanceof Error ? brandingError.message : "Unable to update branding."); } }}>Save white-label settings</button>{status && <div className="portal-status inline">{status}</div>}{error && <div className="portal-alert inline">{error}</div>}</div><div className="portal-panel brand-preview" style={{ "--brand": branding.primaryColor, "--accent": branding.accentColor } as CSSProperties}>{branding.logoUrl && <img className="brand-preview-logo" src={branding.logoUrl} alt={`${branding.publicName} logo`} />}<h2>{branding.publicName}</h2><p>{branding.dashboardWelcomeMessage || "Your client portal, reports, exports, support identity, and custom domain inherit this brand."}</p><button>{branding.reportTitle}</button></div></section></main>
   );
 }
-
 function PortalAccountSecurity({ auth, security }: { auth: StoredPortalAuth | null; security: boolean }) {
   return <main className="portal-main"><PortalPageHeader eyebrow={security ? "Security" : "Account"} title={security ? "Sessions, devices, and authentication controls" : "Profile and authentication identity"} /><section className="portal-dashboard-grid"><div className="portal-panel"><h2>{auth?.user.displayName || auth?.user.email || "SYSTOLAB user"}</h2><MetricTile label="Email" value={auth?.user.email ?? "Not linked"} /><MetricTile label="Phone" value={auth?.user.phone ?? "Not linked"} /><MetricTile label="Lifecycle" value={auth?.user.lifecycleState ?? "Unknown"} /></div><div className="portal-panel"><h2>Session</h2><MetricTile label="Device" value={auth?.session.deviceLabel ?? "Current browser"} /><MetricTile label="Provider" value={auth?.session.provider ?? "Unknown"} /><MetricTile label="Expires" value={auth?.session.expiresAt ? new Date(auth.session.expiresAt).toLocaleString() : "Unknown"} /></div></section></main>;
 }
@@ -380,13 +390,24 @@ function PortalOperationsPage({ path, projects, navigate }: { path: PortalPath; 
     "/monitoring": { eyebrow: "Monitoring", title: "Scheduled scans, changes, and alert readiness", intro: "Track score movement, competitor movement, report freshness, and evidence coverage across projects.", items: [{ title: "Cadence", body: "Daily, weekly, and monthly monitoring settings are stored per project." }, { title: "Alerts", body: "Dashboard alerts can surface score drops, competitor improvements, and monitoring due states." }] },
     "/competitors": { eyebrow: "Competitors", title: "Competitor intelligence by project", intro: "Compare client websites against competitors and explain why competitors may be winning decisions.", items: [{ title: "Configured competitors", body: `${projects.reduce((sum, project) => sum + project.competitorUrls.length, 0)} competitor URLs across active projects.` }, { title: "Business implication", body: "Reports explain information gaps, trust gaps, and decision-support gaps, not just score differences." }] },
     "/recommendations": { eyebrow: "Recommendations", title: "Recommendation sequencing and outcome tracking", intro: "Prioritize what to fix now, this month, and monitor later based on validated evidence.", items: [{ title: "Outcome loop", body: "Recommendations map to reports, rescans, deltas, and business outcome attribution in the backend." }, { title: "Implementation view", body: "Developer-facing tasks stay available without diluting the executive summary." }] },
-    "/team": { eyebrow: "Team", title: "Roles, users, and access boundaries", intro: "Owner, member, guest, editor, and viewer permissions isolate tenant and project data.", items: [{ title: "Tenant roles", body: "Owners manage billing, team, API keys, and white-label settings." }, { title: "Project roles", body: "Project owners and editors can run scans; viewers can read reports." }] },
+    "/team": { eyebrow: "Team", title: "Roles, users, and access boundaries", intro: "Owner, member, guest, editor, and viewer permissions isolate organization and project data.", items: [{ title: "Organization roles", body: "Owners manage billing, team, API keys, and white-label settings." }, { title: "Project roles", body: "Project owners and editors can run scans; viewers can read reports." }] },
     "/clients": { eyebrow: "Client Portal", title: "Client-safe reporting and white-label delivery", intro: "Clients can receive project dashboards, decision reports, exports, and progress history.", items: [{ title: "Client access", body: "Each project can enable or disable client visibility." }, { title: "Exports", body: "Reports link to customer-safe PDF exports and web views." }] }
   };
   const meta = labels[path] ?? labels["/monitoring"]!;
   return <main className="portal-main"><PortalPageHeader eyebrow={meta.eyebrow} title={meta.title} actions={<button className="portal-secondary" onClick={() => navigate("/projects")}>Open projects</button>} /><section className="portal-panel wide"><p>{meta.intro}</p></section><section className="portal-band two-col">{meta.items.map((item) => <PortalInfoCard key={item.title} title={item.title} body={item.body} />)}</section></main>;
 }
 
+function PortalWhiteLabelMarketing({ navigate }: { navigate: (path: string) => void }) {
+  return <main className="portal-main public"><PortalPageHeader eyebrow="White Label" title="Agency-branded client portals and reports" actions={<button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button>} /><section className="portal-band three-col"><PortalInfoCard title="Upload Logo" body="Use your agency identity across the portal, report pages, and customer-safe PDF exports." /><PortalInfoCard title="Brand Colors" body="Set primary and accent colors so the client experience feels owned by your organization." /><PortalInfoCard title="Client Portal" body="Create projects for client websites and deliver reports from a branded workspace." /></section></main>;
+}
+
+function PortalTestimonials({ navigate }: { navigate: (path: string) => void }) {
+  return <main className="portal-main public"><PortalPageHeader eyebrow="Testimonials" title="Built for agencies, operators, and decision makers" actions={<button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button>} /><section className="portal-band three-col"><PortalInfoCard title="Agency Owner" body="SYSTOLAB turns audits into business conversations clients understand." /><PortalInfoCard title="Growth Team" body="The report explains what to fix first and why it matters commercially." /><PortalInfoCard title="Consultant" body="White-label delivery makes the platform feel like part of our own service stack." /></section></main>;
+}
+
+function PortalContact({ navigate }: { navigate: (path: string) => void }) {
+  return <main className="portal-main public"><PortalPageHeader eyebrow="Contact" title="Talk to SYSTOLAB" actions={<button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button>} /><section className="portal-band two-col"><PortalInfoCard title="Sales" body="Create an account to evaluate complimentary reports, white-label branding, projects, and client delivery." /><PortalInfoCard title="Support" body="Use the Help Center for scan setup, report reading, white-label configuration, and account guidance." /></section></main>;
+}
 function PortalPricing({ plans, navigate }: { plans: PortalBillingPlan[]; navigate: (path: string) => void }) {
   return <main className="portal-main public"><PortalPageHeader eyebrow="Pricing" title="Plans for owners, agencies, partners, and enterprise teams" /><section className="portal-band pricing-grid">{plans.map((plan) => <PricingCard key={plan.planId} plan={plan} />)}</section><button className="portal-primary" onClick={() => navigate("/signup")}>Start free</button></main>;
 }
@@ -400,11 +421,11 @@ function PortalStaticPage({ eyebrow, title, items }: { eyebrow: string; title: s
 }
 
 function PortalDocs() {
-  return <PortalStaticPage eyebrow="Documentation" title="SYSTOLAB-owned API, portal, and report workflow" items={[{ title: "Authentication", body: "JWT sessions, refresh tokens, OTP, password, device tracking, and Google-first login are handled by the backend." }, { title: "Projects", body: "Projects connect website, SEO, GBP, competitors, monitoring, reports, and client delivery." }, { title: "API", body: "The public SYSTOLAB API supports scan creation and customer-safe report retrieval without paid third-party APIs." }]} />;
+  return <PortalStaticPage eyebrow="Documentation" title="SYSTOLAB-owned API, portal, and report workflow" items={[{ title: "Authentication", body: "JWT sessions, refresh tokens, OTP, password, device tracking, and Google-first login are handled by the backend." }, { title: "Projects", body: "Projects connect website, SEO, GBP, competitors, monitoring, reports, and client delivery." }, { title: "API", body: "The SYSTOLAB API supports authenticated scan creation and customer-safe report retrieval without paid third-party APIs." }]} />;
 }
 
 function PortalHelp() {
-  return <PortalStaticPage eyebrow="Help Center" title="Support for owners, agencies, and client users" items={[{ title: "Run a scan", body: "Create a project, add competitors and GBP URL, then run a full website and SEO scan." }, { title: "Read reports", body: "Start with the executive narrative, health snapshot, competitor explanation, and prioritized recommendations." }, { title: "White-label", body: "Set brand colors, logo, support identity, report labels, and custom domain from the portal." }]} />;
+  return <PortalStaticPage eyebrow="Help Center" title="Support for owners, agencies, and client users" items={[{ title: "Run a scan", body: "Create an organization, add a website project, add competitors and GBP URL, then run a full website and SEO report." }, { title: "Read reports", body: "Start with the executive narrative, health snapshot, competitor explanation, and prioritized recommendations." }, { title: "White-label", body: "Set brand colors, logo, support identity, report labels, and custom domain from the portal." }]} />;
 }
 
 function PortalDemo({ navigate }: { navigate: (path: string) => void }) {
@@ -457,7 +478,7 @@ const featureCards = [
   { title: "Business Decision Reports", body: "Website and SEO findings are translated into executive decisions, health snapshots, competitor implications, and next actions." },
   { title: "Universal Authentication", body: "Google-first login, password, OTP, sessions, device tracking, and audit logs live inside the SYSTOLAB backend." },
   { title: "White-Label Portals", body: "Partners can configure brand identity, report labels, custom domains, support identity, and client-safe dashboards." },
-  { title: "Project Intelligence", body: "Each project stores website, GBP, competitors, location, monitoring cadence, reports, and history." },
+  { title: "Project Intelligence", body: "Each project stores website, GBP, competitors, location, monitoring cadence, reports, and history inside an organization." },
   { title: "Usage and Billing Controls", body: "Free, Pro, Agency, and Enterprise style limits are enforced through scan and API usage tracking." },
   { title: "SYSTOLAB API", body: "A first-party API lets approved users create scans and retrieve reports without third-party paid data dependencies." }
 ];

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
 import { createApp } from "./app.js";
-import { makeId } from "./utils/crypto.js";
+import { makeId, sha256 } from "./utils/crypto.js";
 import {
   enqueuePlatformJob,
   getPlatformJob,
@@ -10,6 +10,25 @@ import {
 } from "./services/platformControlPlaneService.js";
 import { isScanWorkerRunning, runScanWorkerCycle, startScanWorker, stopScanWorker } from "./services/scanWorker.js";
 import { assertPublicHttpUrl, isBlockedNetworkAddress, normalizeUrl } from "./services/truth-engine/network.js";
+import { registerPassword, verifyOtp } from "./services/authService.js";
+type AuthCtx = Parameters<typeof registerPassword>[1];
+
+function authCtx(seed: string): AuthCtx {
+  return {
+    ipHash: sha256(`scan-ip-${seed}`),
+    deviceFingerprintHash: sha256(`scan-fp-${seed}`),
+    deviceId: `scan-dev-${seed}`,
+    deviceLabel: "Scan Fixture Browser",
+    userAgent: "vitest/scan-fixture"
+  };
+}
+
+async function createScanAccessToken(seed: string): Promise<string> {
+  const ctx = authCtx(seed);
+  const reg = await registerPassword({ identifierType: "email", identifier: `scan-${seed}@example.com`, password: "Secure!Pass1234", displayName: "Scan User" }, ctx);
+  const verified = await verifyOtp({ challengeId: reg.otpChallenge.challengeId, code: reg.otpChallenge.simulatedDelivery.code! }, ctx);
+  return verified.tokens!.accessToken;
+}
 
 describe("scan job â€” enqueue and retrieve", () => {
   it("enqueuePlatformJob creates a scan job in queued status", async () => {
@@ -99,7 +118,7 @@ describe("scan job â€” enqueue and retrieve", () => {
     }
   });
 
-  it("returns 400 for unresolvable scan targets without crashing the API", async () => {
+  it("requires authentication before creating a scan", async () => {
     const app = createApp();
     const server = await listenOnRandomPort(app);
     const address = server.address() as AddressInfo;
@@ -109,6 +128,28 @@ describe("scan job â€” enqueue and retrieve", () => {
       const response = await fetch(`${baseUrl}/api/scans`, {
         method: "POST",
         headers: { "content-type": "application/json" },
+        body: JSON.stringify({ targetUrl: "https://example.com", mode: "fast_scan" })
+      });
+      const payload = await response.json() as { error?: { message?: string; status?: number } };
+
+      expect(response.status).toBe(401);
+      expect(payload.error?.message).toBe("Bearer access token is required.");
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("returns 400 for authenticated unresolvable scan targets without crashing the API", async () => {
+    const app = createApp();
+    const server = await listenOnRandomPort(app);
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const token = await createScanAccessToken(makeId("scan"));
+
+    try {
+      const response = await fetch(`${baseUrl}/api/scans`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
         body: JSON.stringify({ targetUrl: "https://definitely-not-real-systolab-host.invalid", mode: "fast_scan" })
       });
       const payload = await response.json() as { error?: { message?: string; status?: number } };
