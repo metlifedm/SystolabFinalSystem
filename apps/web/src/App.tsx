@@ -54,7 +54,7 @@ import {
   googleAuth,
   loginPassword,
   logoutAuth,
-  pdfUrl,
+  downloadReportPdf,
   recordEditEvent,
   refreshAuthSession,
   registerPassword,
@@ -206,6 +206,24 @@ function sendEditEvent(
 
 function Header({ report }: { report: ReportSnapshot | null }) {
   const title = report?.tenantBranding?.reportTitle ?? "SYSTOLAB Revenue Health Diagnosis";
+  const [pdfDownloading, setPdfDownloading] = useState(false);
+  const [pdfError, setPdfError] = useState("");
+
+  async function downloadPdf() {
+    if (!report) return;
+    setPdfError("");
+    setPdfDownloading(true);
+    try {
+      const blob = await downloadReportPdf(report.snapshotId);
+      saveBlob(blob, `${report.snapshotId}.pdf`);
+      await sendEditEvent("report_downloaded", report);
+    } catch (error) {
+      setPdfError(error instanceof Error ? error.message : "PDF download failed.");
+    } finally {
+      setPdfDownloading(false);
+    }
+  }
+
   return (
     <header className="topbar">
       <div className="brand">
@@ -216,21 +234,27 @@ function Header({ report }: { report: ReportSnapshot | null }) {
         </div>
       </div>
       {report && (
-        <a
-          className="icon-button text-button"
-          href={pdfUrl(report.snapshotId)}
-          target="_blank"
-          rel="noreferrer"
-          onClick={() => void sendEditEvent("report_downloaded", report)}
-        >
-          <Download size={18} />
-          Full PDF
-        </a>
+        <div className="header-actions">
+          {pdfError && <span className="status-line error compact">{pdfError}</span>}
+          <button className="icon-button text-button" type="button" disabled={pdfDownloading} onClick={() => void downloadPdf()}>
+            <Download size={18} />
+            {pdfDownloading ? "Preparing PDF" : "Full PDF"}
+          </button>
+        </div>
       )}
     </header>
   );
 }
-
+function saveBlob(blob: Blob, filename: string) {
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+}
 function GoogleIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" style={{ flexShrink: 0 }}>

@@ -195,6 +195,17 @@ export function pdfUrl(snapshotId: string): string {
   return `${API_URL}/api/reports/${encodeURIComponent(snapshotId)}/pdf`;
 }
 
+export async function downloadReportPdf(snapshotId: string): Promise<Blob> {
+  if (!snapshotId || snapshotId === "undefined" || snapshotId === "null") {
+    throw new Error("Invalid snapshot ID.");
+  }
+  const response = await fetch(`${API_URL}/api/reports/${encodeURIComponent(snapshotId)}/pdf`, {
+    headers: storedAuthHeader()
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.blob();
+}
+
 export async function getSpecCoverage(): Promise<SpecCoverageItem[]> {
   const response = await fetch(`${API_URL}/api/coverage`);
   if (!response.ok) throw new Error(await readError(response));

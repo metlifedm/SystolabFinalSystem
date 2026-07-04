@@ -5,6 +5,7 @@ import {
   createProject,
   createScan,
   createTenant,
+  downloadReportPdf,
   getBillingOverview,
   getBillingPlans,
   getPortalMe,
@@ -324,10 +325,35 @@ function PortalReports({ projects, navigate }: { projects: PortalProjectSummary[
 }
 
 function ReportList({ reports }: { reports: PortalReportSummary[] }) {
-  if (!reports.length) return <p className="portal-muted">No reports available yet.</p>;
-  return <div className="portal-table">{reports.map((report) => <div key={report.snapshotId} className="portal-table-row static"><span><strong>{safeHostLabel(report.targetUrl)}</strong><small>{new Date(report.createdAt).toLocaleString()}</small></span><span>{report.visualStateLabel}</span><span>{report.oss === null ? "Not scored" : `${report.oss}/100`}</span><a className="portal-secondary" href={report.reportUrl}>Open</a><a className="portal-secondary" href={report.pdfUrl} target="_blank" rel="noreferrer">PDF</a></div>)}</div>;
-}
+  const [downloadingId, setDownloadingId] = useState("");
+  const [error, setError] = useState("");
 
+  async function downloadPdf(report: PortalReportSummary) {
+    setError("");
+    setDownloadingId(report.snapshotId);
+    try {
+      const blob = await downloadReportPdf(report.snapshotId);
+      savePortalBlob(blob, `${report.snapshotId}.pdf`);
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : "PDF download failed.");
+    } finally {
+      setDownloadingId("");
+    }
+  }
+
+  if (!reports.length) return <p className="portal-muted">No reports available yet.</p>;
+  return <><div className="portal-table">{reports.map((report) => <div key={report.snapshotId} className="portal-table-row static"><span><strong>{safeHostLabel(report.targetUrl)}</strong><small>{new Date(report.createdAt).toLocaleString()}</small></span><span>{report.visualStateLabel}</span><span>{report.oss === null ? "Not scored" : `${report.oss}/100`}</span><a className="portal-secondary" href={report.reportUrl}>Open</a><button className="portal-secondary" type="button" disabled={downloadingId === report.snapshotId} onClick={() => void downloadPdf(report)}>{downloadingId === report.snapshotId ? "Preparing" : "PDF"}</button></div>)}</div>{error && <div className="portal-alert inline">{error}</div>}</>;
+}
+function savePortalBlob(blob: Blob, filename: string) {
+  const href = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(href);
+}
 function PortalBilling({ tenant, plans }: { tenant: PortalTenantSummary | null; plans: PortalBillingPlan[] }) {
   const [overview, setOverview] = useState<{ plans: PortalBillingPlan[]; subscription: Record<string, unknown> | null; usage: PortalUsageOverview } | null>(null);
   useEffect(() => { if (tenant) getBillingOverview(tenant.tenantSlug).then(setOverview).catch(() => setOverview(null)); }, [tenant?.tenantSlug]);
