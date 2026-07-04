@@ -27,6 +27,8 @@ import {
   Zap
 } from "lucide-react";
 import {
+  adminAuthStatus,
+  adminBootstrap,
   adminLogin,
   adminLogout,
   downloadOperationsPdf,
@@ -195,6 +197,12 @@ export function AdminDashboard() {
   const [session, setSession] = useState<AdminSession | null>(readAdminSession);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [setupRequired, setSetupRequired] = useState(false);
+  const [storageMode, setStorageMode] = useState<"memory" | "persistent" | "unknown">("unknown");
+  const [ownerKey, setOwnerKey] = useState("");
+  const [bootstrapEmail, setBootstrapEmail] = useState("");
+  const [bootstrapPassword, setBootstrapPassword] = useState("");
+  const [bootstrapConfirm, setBootstrapConfirm] = useState("");
   const [bundle, setBundle] = useState<AdminBundle>(EMPTY_BUNDLE);
   const [activeTab, setActiveTab] = useState<AdminTab>("executive");
   const [loading, setLoading] = useState(false);
@@ -208,6 +216,16 @@ export function AdminDashboard() {
   useEffect(() => {
     if (!session) return;
     void refresh();
+  }, [session]);
+
+  useEffect(() => {
+    if (session) return;
+    adminAuthStatus()
+      .then((result) => {
+        setSetupRequired(result.setupRequired);
+        setStorageMode(result.storageMode);
+      })
+      .catch(() => undefined);
   }, [session]);
 
   useEffect(() => {
@@ -227,7 +245,8 @@ export function AdminDashboard() {
       localStorage.setItem("systolab.admin", JSON.stringify(newSession));
       setPassword("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      const baseMessage = err instanceof Error ? err.message : "Login failed";
+      setError(setupRequired ? `${baseMessage} First owner setup is required because no admin owner exists in the current store.` : baseMessage);
     } finally {
       setLoading(false);
     }
@@ -240,6 +259,31 @@ export function AdminDashboard() {
     localStorage.removeItem("systolab.admin");
     setSession(null);
     setBundle(EMPTY_BUNDLE);
+  }
+
+  async function handleBootstrapOwner() {
+    if (!ownerKey || !bootstrapEmail || !bootstrapPassword) return;
+    if (bootstrapPassword !== bootstrapConfirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      await adminBootstrap(ownerKey, bootstrapEmail, bootstrapPassword);
+      const result = await adminLogin(bootstrapEmail, bootstrapPassword);
+      const newSession: AdminSession = { token: result.token, role: result.role, email: result.email, adminUserId: result.adminUserId };
+      setSession(newSession);
+      localStorage.setItem("systolab.admin", JSON.stringify(newSession));
+      setSetupRequired(false);
+      setOwnerKey("");
+      setBootstrapPassword("");
+      setBootstrapConfirm("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to create owner account");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function refresh(silent = false) {
@@ -302,18 +346,54 @@ export function AdminDashboard() {
             <p className="admin-login-copy">Owner and Manager access for platform observability, governance, security, intelligence quality, and autonomous module discovery.</p>
           </div>
           <div className="admin-login-form">
-            <label className="field">
-              <span>Admin email</span>
-              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@example.com" autoComplete="username" />
-            </label>
-            <label className="field">
-              <span>Password</span>
-              <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="••••••••••••" autoComplete="current-password" onKeyDown={(e) => { if (e.key === "Enter") void handleLogin(); }} />
-            </label>
-            <button className="primary-button" type="button" disabled={!email || !password || loading} onClick={() => void handleLogin()}>
-              <KeyRound size={17} />
-              {loading ? "Signing in..." : "Sign In"}
-            </button>
+            {setupRequired ? (
+              <>
+                <div className="admin-status">
+                  First owner setup is required{storageMode === "memory" ? " because the API is using the in-memory development store." : "."}
+                </div>
+                <label className="field">
+                  <span>Owner bootstrap key</span>
+                  <input type="password" value={ownerKey} onChange={(event) => setOwnerKey(event.target.value)} placeholder="SYSTOLAB_OWNER_ADMIN_KEY" autoComplete="off" />
+                </label>
+                <label className="field">
+                  <span>Owner email</span>
+                  <input type="email" value={bootstrapEmail} onChange={(event) => setBootstrapEmail(event.target.value)} placeholder="owner@example.com" autoComplete="username" />
+                </label>
+                <label className="field">
+                  <span>Owner password</span>
+                  <input type="password" value={bootstrapPassword} onChange={(event) => setBootstrapPassword(event.target.value)} placeholder="Minimum 12 characters" autoComplete="new-password" />
+                </label>
+                <label className="field">
+                  <span>Confirm password</span>
+                  <input type="password" value={bootstrapConfirm} onChange={(event) => setBootstrapConfirm(event.target.value)} placeholder="Repeat password" autoComplete="new-password" onKeyDown={(e) => { if (e.key === "Enter") void handleBootstrapOwner(); }} />
+                </label>
+                <button className="primary-button" type="button" disabled={!ownerKey || !bootstrapEmail || !bootstrapPassword || !bootstrapConfirm || loading} onClick={() => void handleBootstrapOwner()}>
+                  <KeyRound size={17} />
+                  {loading ? "Creating owner..." : "Create Owner & Sign In"}
+                </button>
+                <button className="secondary-button" type="button" onClick={() => setSetupRequired(false)}>
+                  I already have an owner account
+                </button>
+              </>
+            ) : (
+              <>
+                <label className="field">
+                  <span>Admin email</span>
+                  <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@example.com" autoComplete="username" />
+                </label>
+                <label className="field">
+                  <span>Password</span>
+                  <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="************" autoComplete="current-password" onKeyDown={(e) => { if (e.key === "Enter") void handleLogin(); }} />
+                </label>
+                <button className="primary-button" type="button" disabled={!email || !password || loading} onClick={() => void handleLogin()}>
+                  <KeyRound size={17} />
+                  {loading ? "Signing in..." : "Sign In"}
+                </button>
+                <button className="secondary-button" type="button" onClick={() => setSetupRequired(true)}>
+                  Create first owner account
+                </button>
+              </>
+            )}
             {error && <div className="error-line">{error}</div>}
           </div>
         </section>

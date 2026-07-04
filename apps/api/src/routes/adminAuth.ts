@@ -7,6 +7,7 @@ import { requireAdminSession } from "../middleware/adminAuth.js";
 import type { AdminRole } from "../models/AdminUser.js";
 import {
   AdminAuthError,
+  adminOwnerExists,
   bootstrapOwner,
   createAdminUser,
   deactivateAdminUser,
@@ -30,6 +31,14 @@ const loginLimiter = rateLimit({
 
 // ── POST /login ────────────────────────────────────────────────────────────────
 
+adminAuthRouter.get("/status", async (_req: Request, res: Response) => {
+  try {
+    const ownerExists = await adminOwnerExists();
+    res.json({ ownerExists, setupRequired: !ownerExists, storageMode: env.memoryStore ? "memory" : "persistent" });
+  } catch (error) {
+    handleError(error, res);
+  }
+});
 adminAuthRouter.post("/login", loginLimiter, async (req: Request, res: Response) => {
   const { email, password } = req.body as { email?: string; password?: string };
   if (!email || !password) {

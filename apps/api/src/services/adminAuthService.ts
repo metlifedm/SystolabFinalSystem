@@ -290,6 +290,11 @@ export async function listAdminUsers(): Promise<AdminUserDocument[]> {
   return AdminUser.find({}).sort({ createdAt: 1 });
 }
 
+export async function adminOwnerExists(): Promise<boolean> {
+  if (!isMongoConnected()) return [..._memAdminUsers.values()].some((user) => user.role === "owner" && user.isActive);
+  return (await AdminUser.countDocuments({ role: "owner", isActive: true })) > 0;
+}
+
 export async function deactivateAdminUser(
   targetAdminUserId: string,
   actorAdminUserId = "system",

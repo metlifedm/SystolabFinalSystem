@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { makeId, sha256 } from "./utils/crypto.js";
 import {
   AdminAuthError,
+  adminOwnerExists,
   bootstrapOwner,
   createAdminUser,
   deactivateAdminUser,
@@ -27,6 +28,11 @@ describe("admin auth — login and session", () => {
     const owner = await bootstrapOwner("OwnerPassword!Secure123");
     expect(owner.role).toBe("owner");
     expect(owner.isActive).toBe(true);
+  });
+
+  it("adminOwnerExists reports active owner availability", async () => {
+    await bootstrapOwner("OwnerPassword!Secure123");
+    await expect(adminOwnerExists()).resolves.toBe(true);
   });
 
   it("bootstrapOwner is idempotent — calling twice returns the existing owner", async () => {

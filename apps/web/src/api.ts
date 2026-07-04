@@ -40,6 +40,11 @@ export interface AdminLoginResponse {
   expiresIn: number;
 }
 
+export interface AdminAuthStatusResponse {
+  ownerExists: boolean;
+  setupRequired: boolean;
+  storageMode: "memory" | "persistent";
+}
 
 export type PortalTenantRole = "owner" | "member" | "guest";
 export type PortalWorkspaceRole = "owner" | "editor" | "viewer";
@@ -201,6 +206,11 @@ export async function getSpecCoverage(): Promise<SpecCoverageItem[]> {
 
 export async function adminLogin(email: string, password: string): Promise<AdminLoginResponse> {
   return postJson("/api/admin/auth/login", { email, password });
+}
+export async function adminAuthStatus(): Promise<AdminAuthStatusResponse> {
+  const response = await fetch(`${API_URL}/api/admin/auth/status`);
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
 }
 
 export async function adminLogout(token: string): Promise<{ message: string }> {
