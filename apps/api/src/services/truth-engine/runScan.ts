@@ -271,6 +271,7 @@ export async function runSystolabScan(
     targetUrl: primary.normalizedUrl.toString(),
     mode: request.mode,
     tenantBranding,
+    clientInformation: buildClientReportInformation(request, primary.normalizedUrl.toString(), reportCreatedAt),
     scanCoverage: primary.coverage,
     dataInputs: buildDataInputs(request),
     executiveClarity,
@@ -3808,6 +3809,30 @@ function titleCaseStatus(status: string): string {
     .join(" ");
 }
 
+function buildClientReportInformation(
+  request: ScanRequest,
+  finalUrl: string,
+  createdAt: string
+): ReportSnapshot["clientInformation"] | undefined {
+  const source = request.clientInformation ?? {};
+  const clean = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
+  const competitorUrls = Array.isArray(source.competitorUrls) && source.competitorUrls.length ? source.competitorUrls : request.competitorUrls;
+  const info = {
+    clientCompanyName: clean(source.clientCompanyName),
+    websiteUrl: clean(source.websiteUrl) ?? finalUrl,
+    industry: clean(source.industry) ?? clean(request.industryType),
+    businessType: clean(source.businessType) ?? clean(request.industryType),
+    country: clean(source.country),
+    city: clean(source.city),
+    serviceArea: clean(source.serviceArea),
+    competitorUrls: competitorUrls?.filter((url) => typeof url === "string" && url.trim().length > 0).slice(0, 10),
+    contactPerson: clean(source.contactPerson),
+    clientLogoUrl: clean(source.clientLogoUrl),
+    scanDate: clean(source.scanDate) ?? createdAt
+  };
+  const cleaned = Object.fromEntries(Object.entries(info).filter(([, value]) => value !== undefined && (!Array.isArray(value) || value.length > 0))) as ReportSnapshot["clientInformation"];
+  return cleaned && Object.keys(cleaned).length > 0 ? cleaned : undefined;
+}
 function buildDataInputs(request: ScanRequest): DataInputStatus[] {
   return [
     { source: "Website URL", status: "Provided" },

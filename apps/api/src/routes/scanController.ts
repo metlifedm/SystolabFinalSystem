@@ -24,6 +24,7 @@ export async function createScan(req: Request, res: Response): Promise<void> {
       competitorUrls: scanRequest.competitorUrls ?? [],
       monthlyLeadVolume: scanRequest.monthlyLeadVolume,
       industryType: scanRequest.industryType,
+      clientInformation: scanRequest.clientInformation,
       userId: req.auth?.user.userId ?? undefined
     }
   });
@@ -83,10 +84,35 @@ function parseScanRequest(body: unknown): ScanRequest {
     competitorUrls,
     monthlyLeadVolume: typeof input.monthlyLeadVolume === "number" ? input.monthlyLeadVolume : undefined,
     industryType: typeof input.industryType === "string" && input.industryType.trim() ? input.industryType.trim() : undefined,
-    tenantSlug: typeof input.tenantSlug === "string" ? input.tenantSlug : undefined
+    tenantSlug: typeof input.tenantSlug === "string" ? input.tenantSlug : undefined,
+    clientInformation: parseClientInformation(input.clientInformation, input.targetUrl, competitorUrls, input.industryType)
   };
 }
 
+function parseClientInformation(
+  value: unknown,
+  targetUrl: string,
+  competitorUrls: string[],
+  industryType: unknown
+): ScanRequest["clientInformation"] | undefined {
+  const input = (value && typeof value === "object" ? value : {}) as NonNullable<ScanRequest["clientInformation"]>;
+  const clean = (item: unknown) => (typeof item === "string" && item.trim() ? item.trim() : undefined);
+  const info = {
+    clientCompanyName: clean(input.clientCompanyName),
+    websiteUrl: clean(input.websiteUrl) ?? targetUrl,
+    industry: clean(input.industry) ?? clean(industryType),
+    businessType: clean(input.businessType) ?? clean(industryType),
+    country: clean(input.country),
+    city: clean(input.city),
+    serviceArea: clean(input.serviceArea),
+    competitorUrls: Array.isArray(input.competitorUrls) ? input.competitorUrls.filter((url): url is string => typeof url === "string" && url.trim().length > 0).slice(0, 5) : competitorUrls,
+    contactPerson: clean(input.contactPerson),
+    clientLogoUrl: clean(input.clientLogoUrl),
+    scanDate: clean(input.scanDate)
+  };
+  const cleaned = Object.fromEntries(Object.entries(info).filter(([, entry]) => entry !== undefined && (!Array.isArray(entry) || entry.length > 0))) as ScanRequest["clientInformation"];
+  return cleaned && Object.keys(cleaned).length > 0 ? cleaned : undefined;
+}
 async function validateScanRequestUrls(scanRequest: ScanRequest): Promise<void> {
   await assertPublicHttpUrl(scanRequest.targetUrl);
   await Promise.all((scanRequest.competitorUrls ?? []).map((url) => assertPublicHttpUrl(url)));

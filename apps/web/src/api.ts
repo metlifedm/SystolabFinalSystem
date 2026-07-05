@@ -63,6 +63,11 @@ export interface PortalProjectSummary {
   tenantSlug: string;
   role: PortalWorkspaceRole;
   projectName: string;
+  clientCompanyName?: string;
+  contactPerson?: string;
+  clientLogoUrl?: string;
+  city?: string;
+  serviceArea?: string;
   targetUrl: string;
   businessType?: string;
   targetCountry?: string;
@@ -100,6 +105,11 @@ export interface CreatePortalProjectInput {
   tenantSlug: string;
   targetUrl: string;
   projectName?: string;
+  clientCompanyName?: string;
+  contactPerson?: string;
+  clientLogoUrl?: string;
+  city?: string;
+  serviceArea?: string;
   businessType?: string;
   targetCountry?: string;
   targetLocation?: string;

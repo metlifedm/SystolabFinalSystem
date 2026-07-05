@@ -282,13 +282,70 @@ function PortalProjects({ portal, refresh, navigate }: { portal: PortalMeRespons
 }
 
 function ProjectCreatePanel({ organizations, refresh }: { organizations: PortalTenantSummary[]; refresh: () => Promise<void> }) {
-  const [form, setForm] = useState({ targetUrl: "", projectName: "", businessType: "", targetCountry: "", targetLocation: "", competitorUrls: "", gbpUrl: "" });
+  const [form, setForm] = useState({
+    targetUrl: "",
+    projectName: "",
+    clientCompanyName: "",
+    contactPerson: "",
+    clientLogoUrl: "",
+    businessType: "",
+    targetCountry: "",
+    targetLocation: "",
+    city: "",
+    serviceArea: "",
+    competitorUrls: "",
+    gbpUrl: ""
+  });
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const tenantSlug = organizations[0]?.tenantSlug ?? "";
   if (!tenantSlug) return <div className="portal-panel"><h2>Add Website</h2><p className="portal-muted">Create an organization before adding websites and reports.</p></div>;
+  const competitorUrls = form.competitorUrls.split(/\n|,/).map((item) => item.trim()).filter(Boolean);
   return (
-    <div className="portal-panel"><h2>+ Add Website</h2><div className="portal-form-grid"><label><span>Website URL</span><input value={form.targetUrl} onChange={(e) => setForm({ ...form, targetUrl: e.target.value })} placeholder="https://example.com" /></label><label><span>Project name</span><input value={form.projectName} onChange={(e) => setForm({ ...form, projectName: e.target.value })} placeholder="Client or business name" /></label><label><span>Business type</span><input value={form.businessType} onChange={(e) => setForm({ ...form, businessType: e.target.value })} placeholder="Dentist, SaaS, law firm" /></label><label><span>Location</span><input value={form.targetLocation} onChange={(e) => setForm({ ...form, targetLocation: e.target.value })} placeholder="City / market" /></label><label><span>Country</span><input value={form.targetCountry} onChange={(e) => setForm({ ...form, targetCountry: e.target.value })} placeholder="US, IN, UK" /></label><label><span>GBP URL</span><input value={form.gbpUrl} onChange={(e) => setForm({ ...form, gbpUrl: e.target.value })} placeholder="Optional Google profile URL" /></label><label className="full"><span>Competitors</span><textarea value={form.competitorUrls} onChange={(e) => setForm({ ...form, competitorUrls: e.target.value })} placeholder="One competitor URL per line" /></label></div><button className="portal-primary full" disabled={!form.targetUrl} onClick={async () => { setStatus(""); setError(""); try { await createProject({ tenantSlug, targetUrl: form.targetUrl, projectName: form.projectName, businessType: form.businessType, targetCountry: form.targetCountry, targetLocation: form.targetLocation, gbpUrl: form.gbpUrl, competitorUrls: form.competitorUrls.split(/\n|,/).map((item) => item.trim()).filter(Boolean), monitoringConfig: { cadence: "weekly", enabled: false } }); setStatus("Website project created."); await refresh(); } catch (projectError) { setError(projectError instanceof Error ? projectError.message : "Unable to create project."); } }}>Create project</button>{status && <div className="portal-status inline">{status}</div>}{error && <div className="portal-alert inline">{error}</div>}</div>
+    <div className="portal-panel wide">
+      <h2>+ Add Website</h2>
+      <div className="portal-form-grid">
+        <label><span>Website URL</span><input value={form.targetUrl} onChange={(e) => setForm({ ...form, targetUrl: e.target.value })} placeholder="https://example.com" /></label>
+        <label><span>Project name</span><input value={form.projectName} onChange={(e) => setForm({ ...form, projectName: e.target.value })} placeholder="Client or business name" /></label>
+        <label><span>Client company</span><input value={form.clientCompanyName} onChange={(e) => setForm({ ...form, clientCompanyName: e.target.value })} placeholder="XYZ Company" /></label>
+        <label><span>Contact person</span><input value={form.contactPerson} onChange={(e) => setForm({ ...form, contactPerson: e.target.value })} placeholder="Client contact" /></label>
+        <label><span>Business type</span><input value={form.businessType} onChange={(e) => setForm({ ...form, businessType: e.target.value })} placeholder="Dentist, SaaS, law firm" /></label>
+        <label><span>Country</span><input value={form.targetCountry} onChange={(e) => setForm({ ...form, targetCountry: e.target.value })} placeholder="US, IN, UK" /></label>
+        <label><span>City</span><input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value, targetLocation: e.target.value })} placeholder="City / market" /></label>
+        <label><span>Service area</span><input value={form.serviceArea} onChange={(e) => setForm({ ...form, serviceArea: e.target.value })} placeholder="Metro area, regions, branches" /></label>
+        <label><span>Client logo URL</span><input value={form.clientLogoUrl} onChange={(e) => setForm({ ...form, clientLogoUrl: e.target.value })} placeholder="Optional image URL" /></label>
+        <label><span>GBP URL</span><input value={form.gbpUrl} onChange={(e) => setForm({ ...form, gbpUrl: e.target.value })} placeholder="Optional Google profile URL" /></label>
+        <label className="full"><span>Competitors</span><textarea value={form.competitorUrls} onChange={(e) => setForm({ ...form, competitorUrls: e.target.value })} placeholder="One competitor URL per line" /></label>
+      </div>
+      <button className="portal-primary full" disabled={!form.targetUrl} onClick={async () => {
+        setStatus("");
+        setError("");
+        try {
+          await createProject({
+            tenantSlug,
+            targetUrl: form.targetUrl,
+            projectName: form.projectName,
+            clientCompanyName: form.clientCompanyName,
+            contactPerson: form.contactPerson,
+            clientLogoUrl: form.clientLogoUrl,
+            businessType: form.businessType,
+            targetCountry: form.targetCountry,
+            targetLocation: form.targetLocation || form.city,
+            city: form.city,
+            serviceArea: form.serviceArea,
+            gbpUrl: form.gbpUrl,
+            competitorUrls,
+            monitoringConfig: { cadence: "weekly", enabled: false }
+          });
+          setStatus("Website project created.");
+          await refresh();
+        } catch (projectError) {
+          setError(projectError instanceof Error ? projectError.message : "Unable to create project.");
+        }
+      }}>Create project</button>
+      {status && <div className="portal-status inline">{status}</div>}
+      {error && <div className="portal-alert inline">{error}</div>}
+    </div>
   );
 }
 function PortalProjectDetail({ workspaceId, navigate }: { workspaceId: string; navigate: (path: string) => void }) {
@@ -303,10 +360,39 @@ function PortalProjectDetail({ workspaceId, navigate }: { workspaceId: string; n
   }, [workspaceId]);
   if (!project) return <main className="portal-main"><PortalPageHeader eyebrow="Project" title="Loading project" /><div className="portal-alert">{error || "Loading..."}</div></main>;
   return (
-    <main className="portal-main"><PortalPageHeader eyebrow="Project" title={project.projectName} actions={<button className="portal-secondary" onClick={() => navigate("/projects")}>Back to projects</button>} /><section className="portal-dashboard-grid"><div className="portal-panel wide"><h2>{safeHostLabel(project.targetUrl)}</h2><div className="portal-signal-grid"><MetricTile label="Business type" value={project.businessType ?? "Not set"} /><MetricTile label="Location" value={project.targetLocation ?? "Not set"} /><MetricTile label="Competitors" value={String(project.competitorUrls.length)} /><MetricTile label="Monitoring" value={project.monitoringConfig.enabled ? project.monitoringConfig.cadence : "Manual"} /></div><button className="portal-primary" onClick={async () => { setStatus(""); setError(""); try { const job = await runProjectScan(project.workspaceId, { mode: "full_audit", includeSeo: true }); setStatus(`Scan queued. Job ${job.jobId}.`); } catch (scanError) { setError(scanError instanceof Error ? scanError.message : "Unable to run project scan."); } }}>Run full website + SEO scan</button>{status && <div className="portal-status inline">{status}</div>}{error && <div className="portal-alert inline">{error}</div>}</div><div className="portal-panel wide"><h2>Reports</h2><ReportList reports={reports} /></div></section></main>
+    <main className="portal-main">
+      <PortalPageHeader eyebrow="Project" title={project.projectName} actions={<button className="portal-secondary" onClick={() => navigate("/projects")}>Back to projects</button>} />
+      <section className="portal-dashboard-grid">
+        <div className="portal-panel wide">
+          <h2>{safeHostLabel(project.targetUrl)}</h2>
+          <div className="portal-signal-grid">
+            <MetricTile label="Client" value={project.clientCompanyName ?? project.projectName} />
+            <MetricTile label="Contact" value={project.contactPerson ?? "Not set"} />
+            <MetricTile label="Business type" value={project.businessType ?? "Not set"} />
+            <MetricTile label="City" value={project.city ?? project.targetLocation ?? "Not set"} />
+            <MetricTile label="Service area" value={project.serviceArea ?? project.targetLocation ?? "Not set"} />
+            <MetricTile label="Country" value={project.targetCountry ?? "Not set"} />
+            <MetricTile label="Competitors" value={String(project.competitorUrls.length)} />
+            <MetricTile label="Monitoring" value={project.monitoringConfig.enabled ? project.monitoringConfig.cadence : "Manual"} />
+          </div>
+          <button className="portal-primary" onClick={async () => {
+            setStatus("");
+            setError("");
+            try {
+              const job = await runProjectScan(project.workspaceId, { mode: "full_audit", includeSeo: true });
+              setStatus(`Scan queued. Job ${job.jobId}.`);
+            } catch (scanError) {
+              setError(scanError instanceof Error ? scanError.message : "Unable to run project scan.");
+            }
+          }}>Run full website + SEO scan</button>
+          {status && <div className="portal-status inline">{status}</div>}
+          {error && <div className="portal-alert inline">{error}</div>}
+        </div>
+        <div className="portal-panel wide"><h2>Reports</h2><ReportList reports={reports} /></div>
+      </section>
+    </main>
   );
 }
-
 function ProjectList({ projects, navigate }: { projects: PortalProjectSummary[]; navigate: (path: string) => void }) {
   if (!projects.length) return <p className="portal-muted">No projects yet.</p>;
   return <div className="portal-table">{projects.map((project) => <button key={project.workspaceId} className="portal-table-row" onClick={() => navigate(`/projects/${project.workspaceId}`)}><span><strong>{project.projectName}</strong><small>{safeHostLabel(project.targetUrl)}</small></span><span>{project.latestReport?.visualStateLabel ?? "No report yet"}</span><span>{project.latestReport?.oss === null || project.latestReport?.oss === undefined ? "Not scored" : `${project.latestReport.oss}/100`}</span></button>)}</div>;
@@ -358,27 +444,117 @@ function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | n
   const [error, setError] = useState("");
   useEffect(() => setBranding(tenant?.branding ?? null), [tenant?.tenantSlug]);
 
-  function handleLogoUpload(event: ChangeEvent<HTMLInputElement>) {
+  function readImageUpload(event: ChangeEvent<HTMLInputElement>, field: "logoUrl" | "faviconUrl" | "digitalSignature") {
     const file = event.target.files?.[0];
     if (!file) return;
     setError("");
     if (!file.type.startsWith("image/")) {
-      setError("Upload an image file for the logo.");
+      setError("Upload an image file.");
       return;
     }
     if (file.size > 750_000) {
-      setError("Logo must be 750 KB or smaller for reliable self-contained storage.");
+      setError("Image must be 750 KB or smaller for reliable self-contained storage.");
       return;
     }
     const reader = new FileReader();
-    reader.onload = () => setBranding((current) => current ? { ...current, logoUrl: String(reader.result ?? "") } : current);
-    reader.onerror = () => setError("Unable to read logo image.");
+    reader.onload = () => setBranding((current) => current ? { ...current, [field]: String(reader.result ?? "") } : current);
+    reader.onerror = () => setError("Unable to read image file.");
     reader.readAsDataURL(file);
   }
 
+  const parseLines = (value: string) => value.split(/\n|,/).map((item) => item.trim()).filter(Boolean);
+  const listText = (items?: string[]) => (items ?? []).join("\n");
+
   if (!tenant || !branding) return <main className="portal-main"><PortalPageHeader eyebrow="White Label" title="Create an organization first" /></main>;
+  const services = branding.serviceOfferings?.length ? branding.serviceOfferings : ["SEO", "Website Development", "Google Ads", "CRO", "Local SEO", "AI Search Optimization"];
+  const poweredByMode = branding.poweredByMode ?? "systolab_standard";
+
   return (
-    <main className="portal-main"><PortalPageHeader eyebrow="White Label" title="Agency branding and client portal identity" /><section className="portal-dashboard-grid"><div className="portal-panel"><h2>Brand settings</h2><div className="portal-form-grid"><label><span>Public name</span><input value={branding.publicName} onChange={(e) => setBranding({ ...branding, publicName: e.target.value })} /></label><label><span>Upload logo</span><input type="file" accept="image/*" onChange={handleLogoUpload} /></label><label><span>Logo URL</span><input value={branding.logoUrl ?? ""} onChange={(e) => setBranding({ ...branding, logoUrl: e.target.value })} placeholder="Upload or paste logo URL" /></label><label><span>Primary color</span><input type="color" value={branding.primaryColor} onChange={(e) => setBranding({ ...branding, primaryColor: e.target.value })} /></label><label><span>Accent color</span><input type="color" value={branding.accentColor} onChange={(e) => setBranding({ ...branding, accentColor: e.target.value })} /></label><label><span>Support email</span><input value={branding.supportEmail ?? ""} onChange={(e) => setBranding({ ...branding, supportEmail: e.target.value })} /></label><label><span>Custom domain</span><input value={branding.customDomain ?? ""} onChange={(e) => setBranding({ ...branding, customDomain: e.target.value })} /></label><label className="full"><span>Dashboard welcome</span><textarea value={branding.dashboardWelcomeMessage ?? ""} onChange={(e) => setBranding({ ...branding, dashboardWelcomeMessage: e.target.value })} /></label></div><button className="portal-primary full" onClick={async () => { setStatus(""); setError(""); try { await updateWhiteLabelBranding(tenant.tenantSlug, branding); setStatus("White-label settings saved."); await refresh(); } catch (brandingError) { setError(brandingError instanceof Error ? brandingError.message : "Unable to update branding."); } }}>Save white-label settings</button>{status && <div className="portal-status inline">{status}</div>}{error && <div className="portal-alert inline">{error}</div>}</div><div className="portal-panel brand-preview" style={{ "--brand": branding.primaryColor, "--accent": branding.accentColor } as CSSProperties}>{branding.logoUrl && <img className="brand-preview-logo" src={branding.logoUrl} alt={`${branding.publicName} logo`} />}<h2>{branding.publicName}</h2><p>{branding.dashboardWelcomeMessage || "Your client portal, reports, exports, support identity, and custom domain inherit this brand."}</p><button>{branding.reportTitle}</button></div></section></main>
+    <main className="portal-main">
+      <PortalPageHeader eyebrow="White Label" title="Agency branding and report identity" />
+      <section className="portal-dashboard-grid">
+        <div className="portal-panel wide">
+          <h2>Partner Information</h2>
+          <div className="portal-form-grid">
+            <label><span>Company name</span><input value={branding.publicName} onChange={(e) => setBranding({ ...branding, publicName: e.target.value })} /></label>
+            <label><span>Website</span><input value={branding.websiteUrl ?? ""} onChange={(e) => setBranding({ ...branding, websiteUrl: e.target.value })} placeholder="https://agency.com" /></label>
+            <label><span>Support email</span><input value={branding.supportEmail ?? ""} onChange={(e) => setBranding({ ...branding, supportEmail: e.target.value })} placeholder="support@agency.com" /></label>
+            <label><span>Phone number</span><input value={branding.phoneNumber ?? ""} onChange={(e) => setBranding({ ...branding, phoneNumber: e.target.value })} placeholder="+1 xxx xxx xxxx" /></label>
+            <label className="full"><span>Office address</span><textarea value={branding.officeAddress ?? ""} onChange={(e) => setBranding({ ...branding, officeAddress: e.target.value })} placeholder="Office address shown in report contact section" /></label>
+            <label><span>Consultant name</span><input value={branding.consultantName ?? ""} onChange={(e) => setBranding({ ...branding, consultantName: e.target.value })} placeholder="Account manager" /></label>
+            <label><span>Custom domain</span><input value={branding.customDomain ?? ""} onChange={(e) => setBranding({ ...branding, customDomain: e.target.value })} placeholder="reports.agency.com" /></label>
+          </div>
+        </div>
+
+        <div className="portal-panel wide">
+          <h2>Brand Assets</h2>
+          <div className="portal-form-grid">
+            <label><span>Upload logo</span><input type="file" accept="image/*" onChange={(event) => readImageUpload(event, "logoUrl")} /></label>
+            <label><span>Logo URL</span><input value={branding.logoUrl ?? ""} onChange={(e) => setBranding({ ...branding, logoUrl: e.target.value })} placeholder="Upload or paste logo URL" /></label>
+            <label><span>Upload favicon</span><input type="file" accept="image/*" onChange={(event) => readImageUpload(event, "faviconUrl")} /></label>
+            <label><span>Favicon URL</span><input value={branding.faviconUrl ?? ""} onChange={(e) => setBranding({ ...branding, faviconUrl: e.target.value })} placeholder="Optional favicon" /></label>
+            <label><span>Primary color</span><input type="color" value={branding.primaryColor} onChange={(e) => setBranding({ ...branding, primaryColor: e.target.value })} /></label>
+            <label><span>Secondary color</span><input type="color" value={branding.secondaryColor ?? "#17201d"} onChange={(e) => setBranding({ ...branding, secondaryColor: e.target.value })} /></label>
+            <label><span>Accent color</span><input type="color" value={branding.accentColor} onChange={(e) => setBranding({ ...branding, accentColor: e.target.value })} /></label>
+            <label><span>Font family</span><input value={branding.typography ?? ""} onChange={(e) => setBranding({ ...branding, typography: e.target.value })} placeholder="Inter, Arial, system" /></label>
+            <label><span>Cover design</span><select value={branding.coverPageDesign ?? "executive"} onChange={(e) => setBranding({ ...branding, coverPageDesign: e.target.value as TenantBranding["coverPageDesign"] })}><option value="executive">Executive</option><option value="classic">Classic</option><option value="minimal">Minimal</option></select></label>
+            <label><span>Powered by mode</span><select value={poweredByMode} onChange={(e) => setBranding({ ...branding, poweredByMode: e.target.value as TenantBranding["poweredByMode"] })}><option value="full_white_label">Full White Label</option><option value="co_branded">Co-Branded</option><option value="systolab_standard">SYSTOLAB Standard</option></select></label>
+          </div>
+        </div>
+
+        <div className="portal-panel wide">
+          <h2>Report Copy & Contact</h2>
+          <div className="portal-form-grid">
+            <label><span>Report title</span><input value={branding.reportTitle ?? ""} onChange={(e) => setBranding({ ...branding, reportTitle: e.target.value })} placeholder="Website Growth & Decision Intelligence Report" /></label>
+            <label><span>QR code URL</span><input value={branding.qrCodeUrl ?? ""} onChange={(e) => setBranding({ ...branding, qrCodeUrl: e.target.value })} placeholder="Optional consultation QR image URL" /></label>
+            <label><span>WhatsApp link</span><input value={branding.whatsappLink ?? ""} onChange={(e) => setBranding({ ...branding, whatsappLink: e.target.value })} placeholder="https://wa.me/..." /></label>
+            <label><span>Calendar booking link</span><input value={branding.calendarBookingLink ?? ""} onChange={(e) => setBranding({ ...branding, calendarBookingLink: e.target.value })} placeholder="Booking URL" /></label>
+            <label className="full"><span>Custom welcome message</span><textarea value={branding.dashboardWelcomeMessage ?? ""} onChange={(e) => setBranding({ ...branding, dashboardWelcomeMessage: e.target.value })} placeholder="Shown in portal preview and report cover context" /></label>
+            <label className="full"><span>Report footer text</span><textarea value={branding.reportFooter ?? ""} onChange={(e) => setBranding({ ...branding, reportFooter: e.target.value })} placeholder="Shown in PDF footer and contact page" /></label>
+            <label className="full"><span>Custom disclaimer</span><textarea value={branding.disclaimerText ?? ""} onChange={(e) => setBranding({ ...branding, disclaimerText: e.target.value })} placeholder="Custom report disclaimer" /></label>
+            <label><span>Upload digital signature</span><input type="file" accept="image/*" onChange={(event) => readImageUpload(event, "digitalSignature")} /></label>
+            <label><span>Digital signature URL</span><input value={branding.digitalSignature ?? ""} onChange={(e) => setBranding({ ...branding, digitalSignature: e.target.value })} placeholder="Optional signature image" /></label>
+          </div>
+        </div>
+
+        <div className="portal-panel wide">
+          <h2>Optional Business Details</h2>
+          <div className="portal-form-grid">
+            <label><span>Business registration</span><input value={branding.businessRegistration ?? ""} onChange={(e) => setBranding({ ...branding, businessRegistration: e.target.value })} /></label>
+            <label><span>License number</span><input value={branding.licenseNumber ?? ""} onChange={(e) => setBranding({ ...branding, licenseNumber: e.target.value })} /></label>
+            <label className="full"><span>Social media links</span><textarea value={listText(branding.socialLinks)} onChange={(e) => setBranding({ ...branding, socialLinks: parseLines(e.target.value) })} placeholder="One social profile per line" /></label>
+            <label className="full"><span>Services shown on final page</span><textarea value={listText(services)} onChange={(e) => setBranding({ ...branding, serviceOfferings: parseLines(e.target.value) })} placeholder="SEO\nWebsite Development\nGoogle Ads" /></label>
+          </div>
+          <button className="portal-primary full" onClick={async () => {
+            setStatus("");
+            setError("");
+            try {
+              await updateWhiteLabelBranding(tenant.tenantSlug, branding);
+              setStatus("White-label settings saved.");
+              await refresh();
+            } catch (brandingError) {
+              setError(brandingError instanceof Error ? brandingError.message : "Unable to update branding.");
+            }
+          }}>Save white-label settings</button>
+          {status && <div className="portal-status inline">{status}</div>}
+          {error && <div className="portal-alert inline">{error}</div>}
+        </div>
+
+        <div className="portal-panel brand-preview" style={{ "--brand": branding.primaryColor, "--accent": branding.accentColor } as CSSProperties}>
+          {branding.logoUrl && <img className="brand-preview-logo" src={branding.logoUrl} alt={`${branding.publicName} logo`} />}
+          <h2>{branding.publicName}</h2>
+          <p>{branding.dashboardWelcomeMessage || "Your client portal, reports, exports, support identity, and custom domain inherit this brand."}</p>
+          <div className="brand-preview-lines">
+            <span>{branding.websiteUrl || "Website not set"}</span>
+            <span>{branding.supportEmail || "Support email not set"}</span>
+            <span>{branding.phoneNumber || "Phone not set"}</span>
+            <span>{branding.consultantName ? `Consultant: ${branding.consultantName}` : "Consultant not set"}</span>
+            <span>{poweredByMode === "full_white_label" ? "No SYSTOLAB branding" : poweredByMode === "co_branded" ? "Powered by SYSTOLAB footer" : "SYSTOLAB standard branding"}</span>
+          </div>
+          <button>{branding.reportTitle || "Website Growth & Decision Intelligence Report"}</button>
+        </div>
+      </section>
+    </main>
   );
 }
 function PortalAccountSecurity({ auth, security }: { auth: StoredPortalAuth | null; security: boolean }) {

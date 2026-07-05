@@ -122,6 +122,26 @@ export async function runScanWorkerCycle(): Promise<ScanWorkerCycleResult> {
   };
 }
 
+function parseClientInformationPayload(value: unknown): ScanRequest["clientInformation"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const input = value as NonNullable<ScanRequest["clientInformation"]>;
+  const clean = (item: unknown) => (typeof item === "string" && item.trim() ? item.trim() : undefined);
+  const info = {
+    clientCompanyName: clean(input.clientCompanyName),
+    websiteUrl: clean(input.websiteUrl),
+    industry: clean(input.industry),
+    businessType: clean(input.businessType),
+    country: clean(input.country),
+    city: clean(input.city),
+    serviceArea: clean(input.serviceArea),
+    competitorUrls: Array.isArray(input.competitorUrls) ? input.competitorUrls.filter((url): url is string => typeof url === "string" && url.trim().length > 0).slice(0, 10) : undefined,
+    contactPerson: clean(input.contactPerson),
+    clientLogoUrl: clean(input.clientLogoUrl),
+    scanDate: clean(input.scanDate)
+  };
+  const cleaned = Object.fromEntries(Object.entries(info).filter(([, entry]) => entry !== undefined && (!Array.isArray(entry) || entry.length > 0))) as ScanRequest["clientInformation"];
+  return cleaned && Object.keys(cleaned).length > 0 ? cleaned : undefined;
+}
 async function executeOneScanJob(job: Awaited<ReturnType<typeof markJobRunning>>): Promise<Record<string, unknown>> {
   if (!job) throw new Error("Job claim returned null.");
   const { jobId, payload } = job;
@@ -141,7 +161,8 @@ async function executeOneScanJob(job: Awaited<ReturnType<typeof markJobRunning>>
     competitorUrls,
     monthlyLeadVolume: typeof payload.monthlyLeadVolume === "number" ? payload.monthlyLeadVolume : undefined,
     industryType: typeof payload.industryType === "string" && payload.industryType ? payload.industryType : undefined,
-    tenantSlug
+    tenantSlug,
+    clientInformation: parseClientInformationPayload(payload.clientInformation)
   };
 
   // Progress: 10% — fetching branding + scan history

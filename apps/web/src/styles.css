@@ -3807,6 +3807,7 @@ pre {
 .portal-url-bar input,
 .portal-form-grid input,
 .portal-form-grid textarea,
+.portal-form-grid select,
 .portal-inline-form input {
   width: 100%;
   min-width: 0;
@@ -4096,6 +4097,14 @@ pre {
   border-color: var(--brand, #1f6b5b);
 }
 
+
+.brand-preview-lines {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+  color: #52605a;
+  font-size: 0.9rem;
+}
 
 .brand-preview-logo {
   width: min(180px, 100%);

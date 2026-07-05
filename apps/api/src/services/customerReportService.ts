@@ -86,6 +86,7 @@ export function buildCustomerReportPayload(report: ReportSnapshot): Record<strin
     targetUrl: report.targetUrl,
     mode: report.mode,
     tenantBranding: report.tenantBranding,
+    clientInformation: report.clientInformation,
     scanCoverage: contentUnavailable ? unavailableScanCoverage() : sanitizeScanCoverage(report),
     executiveClarity: stripInternalFields(report.executiveClarity),
     verdictCard: stripInternalFields(report.verdictCard),

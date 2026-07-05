@@ -168,6 +168,21 @@ export interface TenantBranding {
   publicName: string;
   logoUrl?: string;
   faviconUrl?: string;
+  websiteUrl?: string;
+  phoneNumber?: string;
+  officeAddress?: string;
+  businessRegistration?: string;
+  licenseNumber?: string;
+  socialLinks?: string[];
+  consultantName?: string;
+  disclaimerText?: string;
+  coverPageDesign?: "classic" | "executive" | "minimal";
+  qrCodeUrl?: string;
+  whatsappLink?: string;
+  calendarBookingLink?: string;
+  digitalSignature?: string;
+  serviceOfferings?: string[];
+  poweredByMode?: "full_white_label" | "co_branded" | "systolab_standard";
   primaryColor: string;
   secondaryColor?: string;
   accentColor: string;
@@ -188,6 +203,20 @@ export interface TenantBranding {
   customDomain?: string;
 }
 
+export interface ClientReportInformation {
+  clientCompanyName?: string;
+  websiteUrl?: string;
+  industry?: string;
+  businessType?: string;
+  country?: string;
+  city?: string;
+  serviceArea?: string;
+  competitorUrls?: string[];
+  contactPerson?: string;
+  clientLogoUrl?: string;
+  scanDate?: string;
+}
+
 export interface ScanRequest {
   targetUrl: string;
   mode: ScanMode;
@@ -197,6 +226,7 @@ export interface ScanRequest {
   monthlyLeadVolume?: number;
   industryType?: string;
   tenantSlug?: string;
+  clientInformation?: ClientReportInformation;
 }
 
 export interface ScanCoverage {
@@ -1349,6 +1379,7 @@ export interface ReportSnapshot {
   targetUrl: string;
   mode: ScanMode;
   tenantBranding: TenantBranding;
+  clientInformation?: ClientReportInformation;
   scanCoverage: ScanCoverage;
   dataInputs: DataInputStatus[];
   executiveClarity: Record<

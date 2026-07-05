@@ -13,6 +13,11 @@ export interface WorkspaceDocument extends mongoose.Document {
   ownerUserId?: string;
   targetUrl: string;
   projectName?: string;
+  clientCompanyName?: string;
+  contactPerson?: string;
+  clientLogoUrl?: string;
+  city?: string;
+  serviceArea?: string;
   businessType?: string;
   targetCountry?: string;
   targetLocation?: string;
@@ -34,6 +39,11 @@ const WorkspaceSchema = new Schema<WorkspaceDocument>(
     ownerUserId: { type: String, index: true },
     targetUrl: { type: String, required: true, index: true },
     projectName: { type: String },
+    clientCompanyName: { type: String },
+    contactPerson: { type: String },
+    clientLogoUrl: { type: String },
+    city: { type: String, index: true },
+    serviceArea: { type: String },
     businessType: { type: String, index: true },
     targetCountry: { type: String, index: true },
     targetLocation: { type: String, index: true },

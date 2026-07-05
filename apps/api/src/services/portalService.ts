@@ -39,6 +39,11 @@ export interface ProjectInput {
   tenantSlug: string;
   targetUrl: string;
   projectName?: string;
+  clientCompanyName?: string;
+  contactPerson?: string;
+  clientLogoUrl?: string;
+  city?: string;
+  serviceArea?: string;
   businessType?: string;
   targetCountry?: string;
   targetLocation?: string;
@@ -56,6 +61,11 @@ export interface PortalProjectSummary {
   tenantSlug: string;
   role: WorkspaceRole;
   projectName: string;
+  clientCompanyName?: string;
+  contactPerson?: string;
+  clientLogoUrl?: string;
+  city?: string;
+  serviceArea?: string;
   targetUrl: string;
   businessType?: string;
   targetCountry?: string;
@@ -160,7 +170,12 @@ export async function createProjectForTenant(userId: string, input: ProjectInput
   if (!tenant) throw new MembershipError("Tenant not found.", 404);
   const { workspace, membership } = await createWorkspace(String(tenant._id), tenant.slug, userId, input.targetUrl, input.businessType);
   const updated = await updateWorkspace(workspace.workspaceId, {
-    projectName: cleanString(input.projectName) ?? deriveProjectName(input.targetUrl),
+    projectName: cleanString(input.projectName) ?? cleanString(input.clientCompanyName) ?? deriveProjectName(input.targetUrl),
+    clientCompanyName: cleanString(input.clientCompanyName) ?? cleanString(input.projectName),
+    contactPerson: cleanString(input.contactPerson),
+    clientLogoUrl: cleanString(input.clientLogoUrl),
+    city: cleanString(input.city) ?? cleanString(input.targetLocation),
+    serviceArea: cleanString(input.serviceArea) ?? cleanString(input.targetLocation),
     businessType: cleanString(input.businessType),
     industry: cleanString(input.businessType),
     targetCountry: cleanString(input.targetCountry),
@@ -189,6 +204,11 @@ export async function updateProjectForMember(
 ): Promise<PortalProjectSummary> {
   const allowedUpdates = {
     projectName: cleanString(updates.projectName),
+    clientCompanyName: cleanString(updates.clientCompanyName),
+    contactPerson: cleanString(updates.contactPerson),
+    clientLogoUrl: cleanString(updates.clientLogoUrl),
+    city: cleanString(updates.city),
+    serviceArea: cleanString(updates.serviceArea),
     businessType: cleanString(updates.businessType),
     industry: cleanString(updates.businessType),
     targetCountry: cleanString(updates.targetCountry),
@@ -245,6 +265,18 @@ export async function runProjectScan(
       competitorUrls: normalizeUrlList(options.competitorUrls ?? workspace.competitorUrls ?? []),
       gbpUrl: cleanString(options.gbpUrl ?? workspace.gbpUrl),
       industryType: workspace.businessType ?? workspace.industry,
+      clientInformation: removeUndefined({
+        clientCompanyName: cleanString(workspace.clientCompanyName) ?? cleanString(workspace.projectName) ?? deriveProjectName(workspace.targetUrl),
+        websiteUrl: workspace.targetUrl,
+        industry: cleanString(workspace.industry ?? workspace.businessType),
+        businessType: cleanString(workspace.businessType ?? workspace.industry),
+        country: cleanString(workspace.targetCountry),
+        city: cleanString(workspace.city ?? workspace.targetLocation),
+        serviceArea: cleanString(workspace.serviceArea ?? workspace.targetLocation),
+        competitorUrls: normalizeUrlList(options.competitorUrls ?? workspace.competitorUrls ?? []),
+        contactPerson: cleanString(workspace.contactPerson),
+        clientLogoUrl: cleanString(workspace.clientLogoUrl)
+      }),
       userId
     }
   });
@@ -314,6 +346,21 @@ export async function updateWhiteLabelBranding(
     publicName: cleanString(updates.publicName),
     logoUrl: cleanString(updates.logoUrl),
     faviconUrl: cleanString(updates.faviconUrl),
+    websiteUrl: cleanString(updates.websiteUrl),
+    phoneNumber: cleanString(updates.phoneNumber),
+    officeAddress: cleanString(updates.officeAddress),
+    businessRegistration: cleanString(updates.businessRegistration),
+    licenseNumber: cleanString(updates.licenseNumber),
+    socialLinks: updates.socialLinks ? normalizeTextList(updates.socialLinks) : undefined,
+    consultantName: cleanString(updates.consultantName),
+    disclaimerText: cleanString(updates.disclaimerText),
+    coverPageDesign: cleanCoverPageDesign(updates.coverPageDesign),
+    qrCodeUrl: cleanString(updates.qrCodeUrl),
+    whatsappLink: cleanString(updates.whatsappLink),
+    calendarBookingLink: cleanString(updates.calendarBookingLink),
+    digitalSignature: cleanString(updates.digitalSignature),
+    serviceOfferings: updates.serviceOfferings ? normalizeTextList(updates.serviceOfferings) : undefined,
+    poweredByMode: cleanPoweredByMode(updates.poweredByMode),
     primaryColor: cleanString(updates.primaryColor),
     secondaryColor: cleanString(updates.secondaryColor),
     accentColor: cleanString(updates.accentColor),
@@ -343,7 +390,12 @@ async function summarizeProject(workspace: WorkspaceDocument, role: WorkspaceRol
     workspaceId: workspace.workspaceId,
     tenantSlug: workspace.tenantSlug,
     role,
-    projectName: workspace.projectName ?? deriveProjectName(workspace.targetUrl),
+    projectName: workspace.projectName ?? workspace.clientCompanyName ?? deriveProjectName(workspace.targetUrl),
+    clientCompanyName: workspace.clientCompanyName,
+    contactPerson: workspace.contactPerson,
+    clientLogoUrl: workspace.clientLogoUrl,
+    city: workspace.city,
+    serviceArea: workspace.serviceArea,
     targetUrl: workspace.targetUrl,
     businessType: workspace.businessType ?? workspace.industry,
     targetCountry: workspace.targetCountry,
@@ -413,6 +465,19 @@ function cleanString(value: unknown): string | undefined {
 function normalizeUrlList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))].slice(0, 10);
+}
+
+function normalizeTextList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))].slice(0, 24);
+}
+
+function cleanPoweredByMode(value: unknown): TenantBranding["poweredByMode"] | undefined {
+  return value === "full_white_label" || value === "co_branded" || value === "systolab_standard" ? value : undefined;
+}
+
+function cleanCoverPageDesign(value: unknown): TenantBranding["coverPageDesign"] | undefined {
+  return value === "classic" || value === "executive" || value === "minimal" ? value : undefined;
 }
 
 function deriveProjectName(targetUrl: string): string {

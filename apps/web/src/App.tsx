@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+﻿import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type {
   AiceDecisionObject,
   AuthResponse,
@@ -746,7 +746,7 @@ function ScanConsole({ onReport }: { onReport: (report: ReportSnapshot) => void 
 
   return (
     <section className="scan-console">
-      <div className="scan-grid">
+      {/* <div className="scan-grid">
         <label className="field target-field">
           <span>Website URL</span>
           <div className="input-with-icon">
@@ -798,7 +798,7 @@ function ScanConsole({ onReport }: { onReport: (report: ReportSnapshot) => void 
         ))}
       </div>
       {scanProgress && !error && <div className="status-line">{scanProgress}</div>}
-      {error && <div className="error-line">{error}</div>}
+      {error && <div className="error-line">{error}</div>} */}
     </section>
   );
 }
