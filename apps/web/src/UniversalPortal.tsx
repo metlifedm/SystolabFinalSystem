@@ -11,6 +11,7 @@ import {
   getProject,
   getProjectReports,
   getUsageOverview,
+  getAgencyDashboard,
   googleAuth,
   loginPassword,
   logoutAuth,
@@ -20,7 +21,7 @@ import {
   updateWhiteLabelBranding,
   verifyOtp
 } from "./api.js";
-import type { PortalBillingPlan, PortalMeResponse, PortalProjectSummary, PortalReportSummary, PortalTenantSummary, PortalUsageOverview } from "./api.js";
+import type { AgencyDashboardResponse, PortalBillingPlan, PortalMeResponse, PortalProjectSummary, PortalReportSummary, PortalTenantSummary, PortalUsageOverview } from "./api.js";
 
 type StoredPortalAuth = { user: AuthUserProfile; tokens: AuthTokenPair; session: AuthSessionSummary };
 
@@ -66,6 +67,7 @@ export function UniversalPortal() {
   const [portal, setPortal] = useState<PortalMeResponse | null>(null);
   const [plans, setPlans] = useState<PortalBillingPlan[]>([]);
   const [usage, setUsage] = useState<PortalUsageOverview | null>(null);
+  const [agencyDashboard, setAgencyDashboard] = useState<AgencyDashboardResponse | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -83,6 +85,7 @@ export function UniversalPortal() {
     if (!auth?.tokens.accessToken) {
       setPortal(null);
       setUsage(null);
+      setAgencyDashboard(null);
       return;
     }
     void refreshPortal();
@@ -92,6 +95,7 @@ export function UniversalPortal() {
     const tenantSlug = portal?.tenants[0]?.tenantSlug;
     if (!tenantSlug || !auth) return;
     getUsageOverview(tenantSlug).then(setUsage).catch(() => setUsage(null));
+    getAgencyDashboard(tenantSlug).then(setAgencyDashboard).catch(() => setAgencyDashboard(null));
   }, [auth?.tokens.accessToken, portal?.tenants[0]?.tenantSlug]);
 
   function navigate(nextPath: string) {
@@ -137,12 +141,12 @@ export function UniversalPortal() {
       <PortalTopNav auth={auth} path={path} navigate={navigate} signOut={signOut} />
       {message && <div className="portal-status">{message}</div>}
       {error && <div className="portal-alert">{error}</div>}
-      {!auth && protectedRoute ? <PortalAuthPage mode="login" onAuth={applyAuth} /> : renderPortalPage(path, { auth, portal, tenant, plans, usage, navigate, refreshPortal, applyAuth })}
+      {!auth && protectedRoute ? <PortalAuthPage mode="login" onAuth={applyAuth} /> : renderPortalPage(path, { auth, portal, tenant, plans, usage, agencyDashboard, navigate, refreshPortal, applyAuth })}
     </div>
   );
 }
 
-function renderPortalPage(path: string, ctx: { auth: StoredPortalAuth | null; portal: PortalMeResponse | null; tenant: PortalTenantSummary | null; plans: PortalBillingPlan[]; usage: PortalUsageOverview | null; navigate: (path: string) => void; refreshPortal: () => Promise<void>; applyAuth: (result: AuthResponse) => void }) {
+function renderPortalPage(path: string, ctx: { auth: StoredPortalAuth | null; portal: PortalMeResponse | null; tenant: PortalTenantSummary | null; plans: PortalBillingPlan[]; usage: PortalUsageOverview | null; agencyDashboard: AgencyDashboardResponse | null; navigate: (path: string) => void; refreshPortal: () => Promise<void>; applyAuth: (result: AuthResponse) => void }) {
   if (path === "/") return <PortalLanding navigate={ctx.navigate} />;
   if (path === "/login" || path === "/signup") return <PortalAuthPage mode={path === "/signup" ? "signup" : "login"} onAuth={ctx.applyAuth} />;
   if (path === "/features") return <PortalStaticPage eyebrow="Features" title="Business Decision Intelligence" items={featureCards} />;
@@ -153,7 +157,7 @@ function renderPortalPage(path: string, ctx: { auth: StoredPortalAuth | null; po
   if (path === "/white-label" && !ctx.auth) return <PortalWhiteLabelMarketing navigate={ctx.navigate} />;
   if (path === "/testimonials") return <PortalTestimonials navigate={ctx.navigate} />;
   if (path === "/contact") return <PortalContact navigate={ctx.navigate} />;
-  if (path === "/dashboard") return <PortalDashboard portal={ctx.portal} usage={ctx.usage} refresh={ctx.refreshPortal} navigate={ctx.navigate} />;
+  if (path === "/dashboard") return <PortalDashboard portal={ctx.portal} usage={ctx.usage} agencyDashboard={ctx.agencyDashboard} refresh={ctx.refreshPortal} navigate={ctx.navigate} />;
   if (path === "/projects") return <PortalProjects portal={ctx.portal} refresh={ctx.refreshPortal} navigate={ctx.navigate} />;
   if (path.startsWith("/projects/")) return <PortalProjectDetail workspaceId={path.split("/")[2] ?? ""} navigate={ctx.navigate} />;
   if (path === "/reports") return <PortalReports projects={ctx.portal?.projects ?? []} navigate={ctx.navigate} />;
@@ -248,7 +252,7 @@ function PortalAuthPage({ mode, onAuth }: { mode: "login" | "signup"; onAuth: (r
   );
 }
 
-function PortalDashboard({ portal, usage, refresh, navigate }: { portal: PortalMeResponse | null; usage: PortalUsageOverview | null; refresh: () => Promise<void>; navigate: (path: string) => void }) {
+function PortalDashboard({ portal, usage, agencyDashboard, refresh, navigate }: { portal: PortalMeResponse | null; usage: PortalUsageOverview | null; agencyDashboard: AgencyDashboardResponse | null; refresh: () => Promise<void>; navigate: (path: string) => void }) {
   const organization = portal?.tenants[0] ?? null;
   const projects = portal?.projects ?? [];
   const latest = projects.find((project) => project.latestReport)?.latestReport;
@@ -263,6 +267,8 @@ function PortalDashboard({ portal, usage, refresh, navigate }: { portal: PortalM
         <div className="portal-panel wide"><h2>Business Health Snapshot</h2><div className="health-snapshot"><HealthRow label="Customer Acquisition" value={latest?.oss === null ? "Not scored" : latest ? "Tracked" : "Ready for first report"} /><HealthRow label="Customer Trust" value={latest?.businessRiskStatus ?? "Awaiting report"} /><HealthRow label="Customer Decision Support" value={latest ? latest.visualStateLabel : "Needs first report"} /><HealthRow label="Competitive Position" value={projects.some((project) => project.competitorUrls.length) ? "Competitors configured" : "Add competitors"} /><HealthRow label="Local Presence" value={projects.some((project) => project.gbpUrl) ? "GBP linked" : "Needs GBP URL"} /><HealthRow label="Priority" value={latest ? "Review latest decisions" : "Run first report"} /></div></div>
         <div className="portal-panel wide"><h2>Projects</h2>{projects.length ? <ProjectList projects={projects} navigate={navigate} /> : <p className="portal-muted">Add a website to create your first project and generate a business intelligence report.</p>}</div>
         <div className="portal-panel"><h2>Recent Reports</h2><MetricTile label="Latest" value={latest ? latest.visualStateLabel : "No reports yet"} /><MetricTile label="OSS" value={latest?.oss === null || latest?.oss === undefined ? "Not scored" : `${latest.oss}/100`} /></div>
+        <div className="portal-panel wide"><h2>Agency Analytics</h2><div className="portal-signal-grid"><MetricTile label="Reports generated" value={String(agencyDashboard?.analytics.reportsGenerated ?? 0)} /><MetricTile label="Leads created" value={String(agencyDashboard?.analytics.leadsCreated ?? projects.length)} /><MetricTile label="Report-to-client rate" value={`${agencyDashboard?.analytics.reportToClientConversionRate ?? 0}%`} /><MetricTile label="CRM outbox" value={agencyDashboard?.crm.enabled ? `${agencyDashboard.crm.provider} / ${agencyDashboard.crm.queuedLeadCount}` : "Disabled"} /></div><p className="portal-muted">{agencyDashboard?.analytics.mostCommonClientIssues.length ? `Common issues: ${agencyDashboard.analytics.mostCommonClientIssues.slice(0, 3).join("; ")}` : "Common client issues appear after reports are generated."}</p></div>
+        <div className="portal-panel wide"><h2>Agency Success Center</h2><div className="health-snapshot"><HealthRow label="Pitch first" value={agencyDashboard?.successCenter.servicesToPitchFirst.slice(0, 3).join(", ") || "Run reports to identify services"} /><HealthRow label="Estimated deal size" value={agencyDashboard?.successCenter.estimatedDealSize ?? "Pending report data"} /><HealthRow label="Suggested tier" value={agencyDashboard?.successCenter.suggestedPricingTier ?? "Pending report data"} /></div><p className="portal-muted">{agencyDashboard?.successCenter.personalizedSalesScript ?? "Sales script appears after reports create evidence-backed recommendations."}</p></div>
         <div className="portal-panel"><h2>Recommendations</h2><p className="portal-muted">Recommendations appear after your first report and are organized by business impact, evidence strength, and priority.</p></div>
       </section>
     </main>
@@ -421,7 +427,10 @@ function ReportList({ reports }: { reports: PortalReportSummary[] }) {
   }
 
   if (!reports.length) return <p className="portal-muted">No reports available yet.</p>;
-  return <><div className="portal-table">{reports.map((report) => <div key={report.snapshotId} className="portal-table-row static"><span><strong>{safeHostLabel(report.targetUrl)}</strong><small>{new Date(report.createdAt).toLocaleString()}</small></span><span>{report.visualStateLabel}</span><span>{report.oss === null ? "Not scored" : `${report.oss}/100`}</span><a className="portal-secondary" href={report.reportUrl}>Open</a><button className="portal-secondary" type="button" disabled={downloadingId === report.snapshotId} onClick={() => void downloadPdf(report)}>{downloadingId === report.snapshotId ? "Preparing" : "PDF"}</button></div>)}</div>{error && <div className="portal-alert inline">{error}</div>}</>;
+  return <><div className="portal-table">{reports.map((report) => {
+    const openUrl = report.brandedReportUrl || report.reportUrl;
+    return <div key={report.snapshotId} className="portal-table-row static"><span><strong>{safeHostLabel(report.targetUrl)}</strong><small>{new Date(report.createdAt).toLocaleString()}{report.expiresAt ? ` | Valid until ${new Date(report.expiresAt).toLocaleDateString()}` : ""}</small>{report.brandedReportUrl && <small>{report.brandedReportUrl}</small>}</span><span>{report.visualStateLabel}</span><span>{report.oss === null ? "Not scored" : `${report.oss}/100`}</span><a className="portal-secondary" href={openUrl}>Open</a><button className="portal-secondary" type="button" disabled={downloadingId === report.snapshotId} onClick={() => void downloadPdf(report)}>{downloadingId === report.snapshotId ? "Preparing" : "PDF"}</button></div>;
+  })}</div>{error && <div className="portal-alert inline">{error}</div>}</>;
 }
 function savePortalBlob(blob: Blob, filename: string) {
   const href = URL.createObjectURL(blob);
@@ -444,7 +453,7 @@ function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | n
   const [error, setError] = useState("");
   useEffect(() => setBranding(tenant?.branding ?? null), [tenant?.tenantSlug]);
 
-  function readImageUpload(event: ChangeEvent<HTMLInputElement>, field: "logoUrl" | "faviconUrl" | "digitalSignature") {
+  function readImageUpload(event: ChangeEvent<HTMLInputElement>, field: "logoUrl" | "faviconUrl" | "digitalSignature" | "consultantPhotoUrl") {
     const file = event.target.files?.[0];
     if (!file) return;
     setError("");
@@ -468,6 +477,10 @@ function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | n
   if (!tenant || !branding) return <main className="portal-main"><PortalPageHeader eyebrow="White Label" title="Create an organization first" /></main>;
   const services = branding.serviceOfferings?.length ? branding.serviceOfferings : ["SEO", "Website Development", "Google Ads", "CRO", "Local SEO", "AI Search Optimization"];
   const poweredByMode = branding.poweredByMode ?? "systolab_standard";
+  const crm = branding.crmIntegration ?? { enabled: false, provider: "none" as const, deliveryMode: "internal_outbox" as const };
+  const pdfSecurity = branding.pdfSecurity ?? { passwordProtected: false, downloadRestriction: "none" as const, auditDownloads: false, tamperSeal: false };
+  const followUp = branding.followUpAssets ?? {};
+  const successCenter = branding.agencySuccessCenter ?? { enabled: true, salesScriptTone: "consultative" as const };
 
   return (
     <main className="portal-main">
@@ -482,7 +495,13 @@ function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | n
             <label><span>Phone number</span><input value={branding.phoneNumber ?? ""} onChange={(e) => setBranding({ ...branding, phoneNumber: e.target.value })} placeholder="+1 xxx xxx xxxx" /></label>
             <label className="full"><span>Office address</span><textarea value={branding.officeAddress ?? ""} onChange={(e) => setBranding({ ...branding, officeAddress: e.target.value })} placeholder="Office address shown in report contact section" /></label>
             <label><span>Consultant name</span><input value={branding.consultantName ?? ""} onChange={(e) => setBranding({ ...branding, consultantName: e.target.value })} placeholder="Account manager" /></label>
-            <label><span>Custom domain</span><input value={branding.customDomain ?? ""} onChange={(e) => setBranding({ ...branding, customDomain: e.target.value })} placeholder="reports.agency.com" /></label>
+            <label><span>Consultant email</span><input value={branding.consultantEmail ?? ""} onChange={(e) => setBranding({ ...branding, consultantEmail: e.target.value })} placeholder="consultant@agency.com" /></label>
+            <label><span>Upload consultant photo</span><input type="file" accept="image/*" onChange={(event) => readImageUpload(event, "consultantPhotoUrl")} /></label>
+            <label><span>Consultant photo URL</span><input value={branding.consultantPhotoUrl ?? ""} onChange={(e) => setBranding({ ...branding, consultantPhotoUrl: e.target.value })} placeholder="Optional photo" /></label>
+            <label><span>Primary report domain</span><input value={branding.customDomain ?? ""} onChange={(e) => setBranding({ ...branding, customDomain: e.target.value })} placeholder="reports.agency.com" /></label>
+            <label className="full"><span>Allowed report domains</span><textarea value={listText(branding.customDomains)} onChange={(e) => setBranding({ ...branding, customDomains: parseLines(e.target.value) })} placeholder="reports.agency.com\naudit.agency.com\nintelligence.company.com" /></label>
+            <label><span>Domain status</span><select value={branding.customDomainStatus ?? "not_configured"} onChange={(e) => setBranding({ ...branding, customDomainStatus: e.target.value as TenantBranding["customDomainStatus"] })}><option value="not_configured">Not configured</option><option value="pending_dns">Pending DNS</option><option value="verified">Verified</option><option value="failed">Failed</option></select></label>
+            <label><span>DNS target</span><input value={branding.customDomainVerificationTarget ?? ""} onChange={(e) => setBranding({ ...branding, customDomainVerificationTarget: e.target.value })} placeholder={`${tenant.tenantSlug}.systolab.app`} /></label>
           </div>
         </div>
 
@@ -506,7 +525,20 @@ function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | n
           <h2>Report Copy & Contact</h2>
           <div className="portal-form-grid">
             <label><span>Report title</span><input value={branding.reportTitle ?? ""} onChange={(e) => setBranding({ ...branding, reportTitle: e.target.value })} placeholder="Website Growth & Decision Intelligence Report" /></label>
+            <label><span>Header text</span><input value={branding.reportHeaderText ?? ""} onChange={(e) => setBranding({ ...branding, reportHeaderText: e.target.value })} placeholder="Website Growth Assessment" /></label>
+            <label><span>Report language</span><select value={branding.reportLanguage ?? "en"} onChange={(e) => setBranding({ ...branding, reportLanguage: e.target.value as TenantBranding["reportLanguage"] })}><option value="en">English</option><option value="ar">Arabic</option><option value="fr">French</option><option value="de">German</option><option value="es">Spanish</option><option value="hi">Hindi</option></select></label>
+            <label><span>Industry template</span><select value={branding.industryTemplate ?? "general"} onChange={(e) => setBranding({ ...branding, industryTemplate: e.target.value as TenantBranding["industryTemplate"] })}><option value="general">General</option><option value="dentists">Dentists</option><option value="lawyers">Lawyers</option><option value="interior_designers">Interior Designers</option><option value="real_estate">Real Estate</option><option value="saas">SaaS</option><option value="hotels">Hotels</option><option value="ecommerce">E-commerce</option><option value="healthcare">Healthcare</option><option value="manufacturing">Manufacturing</option></select></label>
+            <label><span>Icon style</span><select value={branding.iconStyle ?? "line"} onChange={(e) => setBranding({ ...branding, iconStyle: e.target.value as TenantBranding["iconStyle"] })}><option value="line">Line</option><option value="solid">Solid</option><option value="minimal">Minimal</option></select></label>
+            <label><span>Valid days</span><input type="number" min="1" max="365" value={branding.reportValidityDays ?? 30} onChange={(e) => setBranding({ ...branding, reportValidityDays: Number(e.target.value) })} /></label>
+            <label className="full"><span>Report introduction</span><textarea value={branding.reportIntroduction ?? ""} onChange={(e) => setBranding({ ...branding, reportIntroduction: e.target.value })} placeholder="Short executive introduction shown on the cover page" /></label>
+            <label><span>Primary CTA label</span><input value={branding.primaryCtaLabel ?? ""} onChange={(e) => setBranding({ ...branding, primaryCtaLabel: e.target.value })} placeholder="Book a strategy call" /></label>
+            <label><span>Primary CTA URL</span><input value={branding.primaryCtaUrl ?? ""} onChange={(e) => setBranding({ ...branding, primaryCtaUrl: e.target.value })} placeholder="https://agency.com/book" /></label>
+            <label><span>Secondary CTA label</span><input value={branding.secondaryCtaLabel ?? ""} onChange={(e) => setBranding({ ...branding, secondaryCtaLabel: e.target.value })} placeholder="Request a proposal" /></label>
+            <label><span>Secondary CTA URL</span><input value={branding.secondaryCtaUrl ?? ""} onChange={(e) => setBranding({ ...branding, secondaryCtaUrl: e.target.value })} placeholder="https://agency.com/proposal" /></label>
+            <label className="full"><span>Validity statement</span><textarea value={branding.validityStatement ?? ""} onChange={(e) => setBranding({ ...branding, validityStatement: e.target.value })} placeholder="Recommendations based on scan date and valid for 30 days" /></label>
+            <label><span>Thank-you page title</span><input value={branding.thankYouPageTitle ?? ""} onChange={(e) => setBranding({ ...branding, thankYouPageTitle: e.target.value })} placeholder="Thank You" /></label>
             <label><span>QR code URL</span><input value={branding.qrCodeUrl ?? ""} onChange={(e) => setBranding({ ...branding, qrCodeUrl: e.target.value })} placeholder="Optional consultation QR image URL" /></label>
+            <label className="full"><span>Thank-you message</span><textarea value={branding.thankYouPageMessage ?? ""} onChange={(e) => setBranding({ ...branding, thankYouPageMessage: e.target.value })} placeholder="Final-page message for clients" /></label>
             <label><span>WhatsApp link</span><input value={branding.whatsappLink ?? ""} onChange={(e) => setBranding({ ...branding, whatsappLink: e.target.value })} placeholder="https://wa.me/..." /></label>
             <label><span>Calendar booking link</span><input value={branding.calendarBookingLink ?? ""} onChange={(e) => setBranding({ ...branding, calendarBookingLink: e.target.value })} placeholder="Booking URL" /></label>
             <label className="full"><span>Custom welcome message</span><textarea value={branding.dashboardWelcomeMessage ?? ""} onChange={(e) => setBranding({ ...branding, dashboardWelcomeMessage: e.target.value })} placeholder="Shown in portal preview and report cover context" /></label>
@@ -517,6 +549,45 @@ function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | n
           </div>
         </div>
 
+        <div className="portal-panel wide">
+          <h2>Proposal Mode</h2>
+          <div className="portal-form-grid">
+            <label><span>Enable proposal mode</span><input type="checkbox" checked={Boolean(branding.proposalModeEnabled)} onChange={(e) => setBranding({ ...branding, proposalModeEnabled: e.target.checked })} /></label>
+            <label><span>Estimated timeline</span><input value={branding.proposalTimeline ?? ""} onChange={(e) => setBranding({ ...branding, proposalTimeline: e.target.value })} placeholder="2-4 weeks" /></label>
+            <label><span>Investment range</span><input value={branding.proposalInvestmentRange ?? ""} onChange={(e) => setBranding({ ...branding, proposalInvestmentRange: e.target.value })} placeholder="Starting from $..." /></label>
+            <label><span>Expected impact</span><input value={branding.proposalExpectedImpact ?? ""} onChange={(e) => setBranding({ ...branding, proposalExpectedImpact: e.target.value })} placeholder="Reduce decision friction and improve qualified enquiries" /></label>
+            <label className="full"><span>Proposal deliverables</span><textarea value={listText(branding.proposalDeliverables)} onChange={(e) => setBranding({ ...branding, proposalDeliverables: parseLines(e.target.value) })} placeholder="Technical SEO fixes\nLanding page improvements\nLocal SEO optimization" /></label>
+          </div>
+        </div>
+
+        <div className="portal-panel wide">
+          <h2>CRM, PDF Security, And Follow-Up Assets</h2>
+          <div className="portal-form-grid">
+            <label><span>CRM enabled</span><input type="checkbox" checked={crm.enabled} onChange={(e) => setBranding({ ...branding, crmIntegration: { ...crm, enabled: e.target.checked } })} /></label>
+            <label><span>CRM provider</span><select value={crm.provider} onChange={(e) => setBranding({ ...branding, crmIntegration: { ...crm, provider: e.target.value as NonNullable<TenantBranding["crmIntegration"]>["provider"] } })}><option value="none">None</option><option value="hubspot">HubSpot</option><option value="gohighlevel">GoHighLevel</option><option value="salesforce">Salesforce</option><option value="zoho">Zoho CRM</option><option value="pipedrive">Pipedrive</option><option value="custom_webhook">Custom Webhook</option></select></label>
+            <label><span>CRM destination</span><input value={crm.destinationLabel ?? ""} onChange={(e) => setBranding({ ...branding, crmIntegration: { ...crm, destinationLabel: e.target.value } })} placeholder="Pipeline or list name" /></label>
+            <label><span>Delivery mode</span><select value={crm.deliveryMode} onChange={(e) => setBranding({ ...branding, crmIntegration: { ...crm, deliveryMode: e.target.value as NonNullable<TenantBranding["crmIntegration"]>["deliveryMode"] } })}><option value="internal_outbox">Internal outbox</option><option value="manual_export">Manual export</option></select></label>
+            <label><span>PDF password mode</span><input type="checkbox" checked={pdfSecurity.passwordProtected} onChange={(e) => setBranding({ ...branding, pdfSecurity: { ...pdfSecurity, passwordProtected: e.target.checked } })} /></label>
+            <label><span>Password hint</span><input value={pdfSecurity.passwordHint ?? ""} onChange={(e) => setBranding({ ...branding, pdfSecurity: { ...pdfSecurity, passwordHint: e.target.value } })} placeholder="Shared with client separately" /></label>
+            <label><span>Watermark text</span><input value={pdfSecurity.watermarkText ?? ""} onChange={(e) => setBranding({ ...branding, pdfSecurity: { ...pdfSecurity, watermarkText: e.target.value } })} placeholder="Confidential" /></label>
+            <label><span>Download restriction</span><select value={pdfSecurity.downloadRestriction} onChange={(e) => setBranding({ ...branding, pdfSecurity: { ...pdfSecurity, downloadRestriction: e.target.value as NonNullable<TenantBranding["pdfSecurity"]>["downloadRestriction"] } })}><option value="none">None</option><option value="authenticated_only">Authenticated only</option><option value="expires_after_validity">Expires after validity</option></select></label>
+            <label><span>Audit downloads</span><input type="checkbox" checked={pdfSecurity.auditDownloads} onChange={(e) => setBranding({ ...branding, pdfSecurity: { ...pdfSecurity, auditDownloads: e.target.checked } })} /></label>
+            <label><span>Tamper seal</span><input type="checkbox" checked={pdfSecurity.tamperSeal} onChange={(e) => setBranding({ ...branding, pdfSecurity: { ...pdfSecurity, tamperSeal: e.target.checked } })} /></label>
+            <label><span>Follow-up email subject</span><input value={followUp.emailSubject ?? ""} onChange={(e) => setBranding({ ...branding, followUpAssets: { ...followUp, emailSubject: e.target.value } })} placeholder="Your website growth report is ready" /></label>
+            <label><span>WhatsApp message</span><input value={followUp.whatsappMessage ?? ""} onChange={(e) => setBranding({ ...branding, followUpAssets: { ...followUp, whatsappMessage: e.target.value } })} placeholder="Short WhatsApp follow-up" /></label>
+            <label className="full"><span>Proposal email body</span><textarea value={followUp.proposalEmailBody ?? ""} onChange={(e) => setBranding({ ...branding, followUpAssets: { ...followUp, proposalEmailBody: e.target.value } })} placeholder="Email copy for sending the proposal" /></label>
+            <label className="full"><span>Presentation summary</span><textarea value={followUp.presentationSummary ?? ""} onChange={(e) => setBranding({ ...branding, followUpAssets: { ...followUp, presentationSummary: e.target.value } })} placeholder="Short talking points for client presentation" /></label>
+          </div>
+        </div>
+
+        <div className="portal-panel wide">
+          <h2>Agency Success Center Defaults</h2>
+          <div className="portal-form-grid">
+            <label><span>Enable Success Center</span><input type="checkbox" checked={successCenter.enabled} onChange={(e) => setBranding({ ...branding, agencySuccessCenter: { ...successCenter, enabled: e.target.checked } })} /></label>
+            <label><span>Default pricing tier</span><input value={successCenter.defaultPricingTier ?? ""} onChange={(e) => setBranding({ ...branding, agencySuccessCenter: { ...successCenter, defaultPricingTier: e.target.value } })} placeholder="Growth Package" /></label>
+            <label><span>Sales script tone</span><select value={successCenter.salesScriptTone ?? "consultative"} onChange={(e) => setBranding({ ...branding, agencySuccessCenter: { ...successCenter, salesScriptTone: e.target.value as NonNullable<TenantBranding["agencySuccessCenter"]>["salesScriptTone"] } })}><option value="consultative">Consultative</option><option value="direct">Direct</option><option value="executive">Executive</option></select></label>
+          </div>
+        </div>
         <div className="portal-panel wide">
           <h2>Optional Business Details</h2>
           <div className="portal-form-grid">

@@ -94,6 +94,9 @@ export interface PortalReportSummary {
   confidenceLabel: string;
   reportUrl: string;
   pdfUrl: string;
+  brandedReportUrl?: string;
+  brandedPdfUrl?: string;
+  expiresAt?: string;
 }
 
 export function permissionsForTenantRole(role: TenantRole): string[] {
@@ -346,6 +349,8 @@ export async function updateWhiteLabelBranding(
     publicName: cleanString(updates.publicName),
     logoUrl: cleanString(updates.logoUrl),
     faviconUrl: cleanString(updates.faviconUrl),
+    consultantPhotoUrl: cleanString(updates.consultantPhotoUrl),
+    consultantEmail: cleanString(updates.consultantEmail),
     websiteUrl: cleanString(updates.websiteUrl),
     phoneNumber: cleanString(updates.phoneNumber),
     officeAddress: cleanString(updates.officeAddress),
@@ -355,10 +360,32 @@ export async function updateWhiteLabelBranding(
     consultantName: cleanString(updates.consultantName),
     disclaimerText: cleanString(updates.disclaimerText),
     coverPageDesign: cleanCoverPageDesign(updates.coverPageDesign),
+    reportIntroduction: cleanString(updates.reportIntroduction),
+    reportHeaderText: cleanString(updates.reportHeaderText),
+    thankYouPageTitle: cleanString(updates.thankYouPageTitle),
+    thankYouPageMessage: cleanString(updates.thankYouPageMessage),
+    iconStyle: cleanIconStyle(updates.iconStyle),
     qrCodeUrl: cleanString(updates.qrCodeUrl),
     whatsappLink: cleanString(updates.whatsappLink),
     calendarBookingLink: cleanString(updates.calendarBookingLink),
     digitalSignature: cleanString(updates.digitalSignature),
+    primaryCtaLabel: cleanString(updates.primaryCtaLabel),
+    primaryCtaUrl: cleanString(updates.primaryCtaUrl),
+    secondaryCtaLabel: cleanString(updates.secondaryCtaLabel),
+    secondaryCtaUrl: cleanString(updates.secondaryCtaUrl),
+    reportValidityDays: cleanPositiveNumber(updates.reportValidityDays, 365),
+    validityStatement: cleanString(updates.validityStatement),
+    proposalModeEnabled: typeof updates.proposalModeEnabled === "boolean" ? updates.proposalModeEnabled : undefined,
+    proposalTimeline: cleanString(updates.proposalTimeline),
+    proposalInvestmentRange: cleanString(updates.proposalInvestmentRange),
+    proposalDeliverables: updates.proposalDeliverables ? normalizeTextList(updates.proposalDeliverables) : undefined,
+    proposalExpectedImpact: cleanString(updates.proposalExpectedImpact),
+    crmIntegration: cleanCrmIntegration(updates.crmIntegration),
+    pdfSecurity: cleanPdfSecurity(updates.pdfSecurity),
+    reportLanguage: cleanReportLanguage(updates.reportLanguage),
+    industryTemplate: cleanIndustryTemplate(updates.industryTemplate),
+    followUpAssets: cleanFollowUpAssets(updates.followUpAssets),
+    agencySuccessCenter: cleanAgencySuccessCenter(updates.agencySuccessCenter),
     serviceOfferings: updates.serviceOfferings ? normalizeTextList(updates.serviceOfferings) : undefined,
     poweredByMode: cleanPoweredByMode(updates.poweredByMode),
     primaryColor: cleanString(updates.primaryColor),
@@ -378,11 +405,13 @@ export async function updateWhiteLabelBranding(
     customReportLabels: updates.customReportLabels,
     poweredByLabel: cleanString(updates.poweredByLabel),
     footerLabel: cleanString(updates.footerLabel),
-    customDomain: cleanString(updates.customDomain)
+    customDomain: cleanDomain(updates.customDomain),
+    customDomains: updates.customDomains ? normalizeDomainList(updates.customDomains) : undefined,
+    customDomainStatus: cleanCustomDomainStatus(updates.customDomainStatus),
+    customDomainVerificationTarget: cleanString(updates.customDomainVerificationTarget)
   }));
   return tenantToBranding(tenant);
 }
-
 async function summarizeProject(workspace: WorkspaceDocument, role: WorkspaceRole): Promise<PortalProjectSummary> {
   const history = await findSnapshotHistoryForTarget(workspace.targetUrl, workspace.tenantSlug, 1);
   const latestReport = history[0] ? summarizeReport(history[0]) : undefined;
@@ -415,6 +444,8 @@ async function summarizeProject(workspace: WorkspaceDocument, role: WorkspaceRol
 
 function summarizeReport(report: ReportSnapshot): PortalReportSummary {
   const totalPages = report.evidenceCoverageSummary.totalPagesSampled;
+  const brandedBaseUrl = brandedReportBaseUrl(report.tenantBranding);
+  const expiresAt = reportExpiresAt(report);
   const coveredPages = report.evidenceCoverageSummary.pages.filter((page) => page.evidenceCount > 0).length;
   const evidenceCoveragePercent = totalPages > 0 ? Math.round((coveredPages / totalPages) * 100) : 0;
   const averageConfidence = report.confidenceLayer.length
@@ -431,15 +462,18 @@ function summarizeReport(report: ReportSnapshot): PortalReportSummary {
     evidenceCoveragePercent,
     confidenceLabel: confidenceLabel(averageConfidence),
     reportUrl: `/reports/${report.snapshotId}`,
-    pdfUrl: `/api/reports/${report.snapshotId}/pdf`
+    pdfUrl: `/api/reports/${report.snapshotId}/pdf`,
+    brandedReportUrl: brandedBaseUrl ? `${brandedBaseUrl}/reports/${report.snapshotId}` : undefined,
+    brandedPdfUrl: brandedBaseUrl ? `${brandedBaseUrl}/api/reports/${report.snapshotId}/pdf` : undefined,
+    expiresAt
   };
 }
-
 async function findTenantForBranding(slug?: string, domain?: string) {
   if (!isMongoConnected()) {
     return [..._memTenants.values()].find((tenant) => {
       const tenantDomain = tenant.customDomain?.toLowerCase();
-      return tenant.isActive && ((slug && tenant.slug === slug) || (domain && tenantDomain === domain));
+      const tenantDomains = normalizeDomainList([tenant.customDomain, ...(tenant.customDomains ?? [])]);
+      return tenant.isActive && ((slug && tenant.slug === slug) || (domain && tenantDomains.includes(domain)) || (domain && tenantDomain === domain));
     }) ?? null;
   }
   if (slug) {
@@ -447,7 +481,7 @@ async function findTenantForBranding(slug?: string, domain?: string) {
     if (tenant) return tenant;
   }
   if (domain) {
-    return Tenant.findOne({ customDomain: domain, isActive: true });
+    return Tenant.findOne({ isActive: true, $or: [{ customDomain: domain }, { customDomains: domain }] });
   }
   return null;
 }
@@ -472,6 +506,102 @@ function normalizeTextList(value: unknown): string[] {
   return [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))].slice(0, 24);
 }
 
+function cleanDomain(value: unknown): string | undefined {
+  const clean = cleanString(value)?.toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  if (!clean) return undefined;
+  return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(clean) ? clean : undefined;
+}
+
+function normalizeDomainList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(cleanDomain).filter((item): item is string => Boolean(item)))].slice(0, 8);
+}
+
+function cleanPositiveNumber(value: unknown, max: number): number | undefined {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return undefined;
+  return Math.min(max, Math.round(numeric));
+}
+
+function cleanIconStyle(value: unknown): TenantBranding["iconStyle"] | undefined {
+  return value === "line" || value === "solid" || value === "minimal" ? value : undefined;
+}
+
+function cleanCustomDomainStatus(value: unknown): TenantBranding["customDomainStatus"] | undefined {
+  return value === "not_configured" || value === "pending_dns" || value === "verified" || value === "failed" ? value : undefined;
+}
+
+function cleanReportLanguage(value: unknown): TenantBranding["reportLanguage"] | undefined {
+  return value === "en" || value === "ar" || value === "fr" || value === "de" || value === "es" || value === "hi" ? value : undefined;
+}
+
+function cleanIndustryTemplate(value: unknown): TenantBranding["industryTemplate"] | undefined {
+  return value === "general" || value === "dentists" || value === "lawyers" || value === "interior_designers" || value === "real_estate" || value === "saas" || value === "hotels" || value === "ecommerce" || value === "healthcare" || value === "manufacturing" ? value : undefined;
+}
+
+function cleanCrmIntegration(value: unknown): TenantBranding["crmIntegration"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const provider = ["hubspot", "gohighlevel", "salesforce", "zoho", "pipedrive", "custom_webhook", "none"].includes(String(record["provider"])) ? String(record["provider"]) as NonNullable<TenantBranding["crmIntegration"]>["provider"] : "none";
+  const deliveryMode = record["deliveryMode"] === "manual_export" ? "manual_export" : "internal_outbox";
+  return {
+    enabled: Boolean(record["enabled"]),
+    provider,
+    destinationLabel: cleanString(record["destinationLabel"]),
+    deliveryMode
+  };
+}
+
+function cleanPdfSecurity(value: unknown): TenantBranding["pdfSecurity"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const downloadRestriction = record["downloadRestriction"] === "authenticated_only" || record["downloadRestriction"] === "expires_after_validity" ? record["downloadRestriction"] : "none";
+  return {
+    passwordProtected: Boolean(record["passwordProtected"]),
+    passwordHint: cleanString(record["passwordHint"]),
+    watermarkText: cleanString(record["watermarkText"]),
+    downloadRestriction,
+    auditDownloads: Boolean(record["auditDownloads"]),
+    tamperSeal: Boolean(record["tamperSeal"])
+  };
+}
+
+function cleanFollowUpAssets(value: unknown): TenantBranding["followUpAssets"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  return removeUndefined({
+    emailSubject: cleanString(record["emailSubject"]),
+    emailBody: cleanString(record["emailBody"]),
+    proposalEmailBody: cleanString(record["proposalEmailBody"]),
+    whatsappMessage: cleanString(record["whatsappMessage"]),
+    meetingInvitationText: cleanString(record["meetingInvitationText"]),
+    presentationSummary: cleanString(record["presentationSummary"])
+  }) as TenantBranding["followUpAssets"];
+}
+
+function cleanAgencySuccessCenter(value: unknown): TenantBranding["agencySuccessCenter"] | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  const tone = record["salesScriptTone"] === "direct" || record["salesScriptTone"] === "executive" ? record["salesScriptTone"] : "consultative";
+  return {
+    enabled: Boolean(record["enabled"]),
+    defaultPricingTier: cleanString(record["defaultPricingTier"]),
+    salesScriptTone: tone
+  };
+}
+
+function brandedReportBaseUrl(branding: TenantBranding): string | undefined {
+  const domain = normalizeDomainList([branding.customDomain, ...(branding.customDomains ?? [])])[0];
+  return domain ? `https://${domain}` : undefined;
+}
+
+function reportExpiresAt(report: ReportSnapshot): string | undefined {
+  const days = report.tenantBranding.reportValidityDays;
+  if (!days || days <= 0) return undefined;
+  const created = new Date(report.createdAt);
+  if (Number.isNaN(created.getTime())) return undefined;
+  return new Date(created.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+}
 function cleanPoweredByMode(value: unknown): TenantBranding["poweredByMode"] | undefined {
   return value === "full_white_label" || value === "co_branded" || value === "systolab_standard" ? value : undefined;
 }

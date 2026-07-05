@@ -93,6 +93,9 @@ export interface PortalReportSummary {
   confidenceLabel: string;
   reportUrl: string;
   pdfUrl: string;
+  brandedReportUrl?: string;
+  brandedPdfUrl?: string;
+  expiresAt?: string;
 }
 
 export interface PortalMeResponse {
@@ -138,6 +141,32 @@ export interface PortalBillingPlan {
   priceCentsPerYear?: number;
   limits: Record<string, number | boolean>;
   features: string[];
+}
+export interface AgencyDashboardResponse {
+  tenantSlug: string;
+  totalWorkspaces: number;
+  totalMembers: number;
+  activeSubscription: { tier: string; status: string; planName: string } | null;
+  usageThisPeriod: { scansUsed: number; apiCallsUsed: number; webhookDeliveriesCount: number };
+  analytics: {
+    reportsGenerated: number;
+    leadsCreated: number;
+    reportToClientConversionRate: number;
+    mostCommonClientIssues: string[];
+    highestRoiRecommendations: string[];
+    industryTrends: Array<{ industry: string; reports: number; averageOss: number | null; trend: string }>;
+  };
+  successCenter: {
+    whyThisLeadIsLikelyToBuy: string[];
+    servicesToPitchFirst: string[];
+    estimatedDealSize: string;
+    suggestedPricingTier: string;
+    likelySalesObjections: string[];
+    personalizedSalesScript: string;
+    crossSellUpsellOpportunities: string[];
+  };
+  crm: { enabled: boolean; provider: string; deliveryMode: string; queuedLeadCount: number; note: string };
+  workspaces: Array<Record<string, unknown>>;
 }
 export interface CreateScanResponse {
   jobId: string;
@@ -223,7 +252,7 @@ export async function getSpecCoverage(): Promise<SpecCoverageItem[]> {
   return payload.items;
 }
 
-// ── Admin auth API ─────────────────────────────────────────────────────────────
+// â”€â”€ Admin auth API â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function adminLogin(email: string, password: string): Promise<AdminLoginResponse> {
   return postJson("/api/admin/auth/login", { email, password });
@@ -255,7 +284,7 @@ export async function adminBootstrap(ownerKey: string, email: string, password: 
   return postJson("/api/admin/auth/bootstrap", { ownerKey, email, password });
 }
 
-// ── Internal platform API (Bearer-token authenticated) ─────────────────────────
+// â”€â”€ Internal platform API (Bearer-token authenticated) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export async function internalPlatformGet<T>(path: string, session: AdminSession): Promise<T> {
   const response = await fetch(`${API_URL}/api/internal/platform${path}`, {
@@ -361,6 +390,11 @@ export async function runProjectScan(workspaceId: string, request: { mode?: "fas
   return postJson(`/api/projects/${encodeURIComponent(workspaceId)}/scans`, request, readStoredAccessToken());
 }
 
+export async function getAgencyDashboard(tenantSlug: string): Promise<AgencyDashboardResponse> {
+  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/dashboard`, { headers: storedAuthHeader() });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
 export async function getUsageOverview(tenantSlug: string): Promise<PortalUsageOverview> {
   const response = await fetch(`${API_URL}/api/usage?tenantSlug=${encodeURIComponent(tenantSlug)}`, { headers: storedAuthHeader() });
   if (!response.ok) throw new Error(await readError(response));

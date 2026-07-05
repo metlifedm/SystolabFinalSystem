@@ -8,6 +8,8 @@ export interface TenantDocument extends mongoose.Document {
   publicName: string;
   logoUrl?: string;
   faviconUrl?: string;
+  consultantPhotoUrl?: string;
+  consultantEmail?: string;
   websiteUrl?: string;
   phoneNumber?: string;
   officeAddress?: string;
@@ -17,13 +19,38 @@ export interface TenantDocument extends mongoose.Document {
   consultantName?: string;
   disclaimerText?: string;
   coverPageDesign?: TenantBranding["coverPageDesign"];
+  reportIntroduction?: string;
+  reportHeaderText?: string;
+  thankYouPageTitle?: string;
+  thankYouPageMessage?: string;
+  iconStyle?: TenantBranding["iconStyle"];
   qrCodeUrl?: string;
   whatsappLink?: string;
   calendarBookingLink?: string;
   digitalSignature?: string;
+  primaryCtaLabel?: string;
+  primaryCtaUrl?: string;
+  secondaryCtaLabel?: string;
+  secondaryCtaUrl?: string;
+  reportValidityDays?: number;
+  validityStatement?: string;
+  proposalModeEnabled?: boolean;
+  proposalTimeline?: string;
+  proposalInvestmentRange?: string;
+  proposalDeliverables?: string[];
+  proposalExpectedImpact?: string;
+  crmIntegration?: TenantBranding["crmIntegration"];
+  pdfSecurity?: TenantBranding["pdfSecurity"];
+  reportLanguage?: TenantBranding["reportLanguage"];
+  industryTemplate?: TenantBranding["industryTemplate"];
+  followUpAssets?: TenantBranding["followUpAssets"];
+  agencySuccessCenter?: TenantBranding["agencySuccessCenter"];
   serviceOfferings?: string[];
   poweredByMode?: TenantBranding["poweredByMode"];
   customDomain?: string;
+  customDomains?: string[];
+  customDomainStatus?: TenantBranding["customDomainStatus"];
+  customDomainVerificationTarget?: string;
   primaryColor: string;
   secondaryColor?: string;
   accentColor: string;
@@ -52,6 +79,8 @@ const TenantSchema = new Schema<TenantDocument>(
     publicName: { type: String, required: true },
     logoUrl: { type: String },
     faviconUrl: { type: String },
+    consultantPhotoUrl: { type: String },
+    consultantEmail: { type: String },
     websiteUrl: { type: String },
     phoneNumber: { type: String },
     officeAddress: { type: String },
@@ -61,13 +90,38 @@ const TenantSchema = new Schema<TenantDocument>(
     consultantName: { type: String },
     disclaimerText: { type: String },
     coverPageDesign: { type: String, enum: ["classic", "executive", "minimal"], default: "executive" },
+    reportIntroduction: { type: String },
+    reportHeaderText: { type: String },
+    thankYouPageTitle: { type: String },
+    thankYouPageMessage: { type: String },
+    iconStyle: { type: String, enum: ["line", "solid", "minimal"], default: "line" },
     qrCodeUrl: { type: String },
     whatsappLink: { type: String },
     calendarBookingLink: { type: String },
     digitalSignature: { type: String },
+    primaryCtaLabel: { type: String, default: "Book a Strategy Call" },
+    primaryCtaUrl: { type: String },
+    secondaryCtaLabel: { type: String },
+    secondaryCtaUrl: { type: String },
+    reportValidityDays: { type: Number, default: 30 },
+    validityStatement: { type: String, default: "Recommendations are based on the scan date and should be reviewed within the stated validity window." },
+    proposalModeEnabled: { type: Boolean, default: false },
+    proposalTimeline: { type: String },
+    proposalInvestmentRange: { type: String },
+    proposalDeliverables: { type: [String], default: [] },
+    proposalExpectedImpact: { type: String },
+    crmIntegration: { type: Schema.Types.Mixed },
+    pdfSecurity: { type: Schema.Types.Mixed },
+    reportLanguage: { type: String, enum: ["en", "ar", "fr", "de", "es", "hi"], default: "en" },
+    industryTemplate: { type: String, enum: ["general", "dentists", "lawyers", "interior_designers", "real_estate", "saas", "hotels", "ecommerce", "healthcare", "manufacturing"], default: "general" },
+    followUpAssets: { type: Schema.Types.Mixed },
+    agencySuccessCenter: { type: Schema.Types.Mixed },
     serviceOfferings: { type: [String], default: ["SEO", "Website Development", "Google Ads", "CRO", "Local SEO", "AI Search Optimization"] },
     poweredByMode: { type: String, enum: ["full_white_label", "co_branded", "systolab_standard"], default: "systolab_standard" },
     customDomain: { type: String, index: true },
+    customDomains: { type: [String], default: [], index: true },
+    customDomainStatus: { type: String, enum: ["not_configured", "pending_dns", "verified", "failed"], default: "not_configured" },
+    customDomainVerificationTarget: { type: String },
     primaryColor: { type: String, default: "#246b5b" },
     secondaryColor: { type: String },
     accentColor: { type: String, default: "#c27a2c" },
@@ -99,6 +153,8 @@ export function tenantToBranding(tenant: TenantDocument): TenantBranding {
     publicName: tenant.publicName,
     logoUrl: tenant.logoUrl,
     faviconUrl: tenant.faviconUrl,
+    consultantPhotoUrl: tenant.consultantPhotoUrl,
+    consultantEmail: tenant.consultantEmail,
     websiteUrl: tenant.websiteUrl,
     phoneNumber: tenant.phoneNumber,
     officeAddress: tenant.officeAddress,
@@ -108,10 +164,32 @@ export function tenantToBranding(tenant: TenantDocument): TenantBranding {
     consultantName: tenant.consultantName,
     disclaimerText: tenant.disclaimerText,
     coverPageDesign: tenant.coverPageDesign,
+    reportIntroduction: tenant.reportIntroduction,
+    reportHeaderText: tenant.reportHeaderText,
+    thankYouPageTitle: tenant.thankYouPageTitle,
+    thankYouPageMessage: tenant.thankYouPageMessage,
+    iconStyle: tenant.iconStyle,
     qrCodeUrl: tenant.qrCodeUrl,
     whatsappLink: tenant.whatsappLink,
     calendarBookingLink: tenant.calendarBookingLink,
     digitalSignature: tenant.digitalSignature,
+    primaryCtaLabel: tenant.primaryCtaLabel,
+    primaryCtaUrl: tenant.primaryCtaUrl,
+    secondaryCtaLabel: tenant.secondaryCtaLabel,
+    secondaryCtaUrl: tenant.secondaryCtaUrl,
+    reportValidityDays: tenant.reportValidityDays,
+    validityStatement: tenant.validityStatement,
+    proposalModeEnabled: tenant.proposalModeEnabled,
+    proposalTimeline: tenant.proposalTimeline,
+    proposalInvestmentRange: tenant.proposalInvestmentRange,
+    proposalDeliverables: tenant.proposalDeliverables ?? [],
+    proposalExpectedImpact: tenant.proposalExpectedImpact,
+    crmIntegration: tenant.crmIntegration,
+    pdfSecurity: tenant.pdfSecurity,
+    reportLanguage: tenant.reportLanguage,
+    industryTemplate: tenant.industryTemplate,
+    followUpAssets: tenant.followUpAssets,
+    agencySuccessCenter: tenant.agencySuccessCenter,
     serviceOfferings: tenant.serviceOfferings ?? [],
     poweredByMode: tenant.poweredByMode,
     primaryColor: tenant.primaryColor,
@@ -131,7 +209,10 @@ export function tenantToBranding(tenant: TenantDocument): TenantBranding {
     customReportLabels: tenant.customReportLabels,
     poweredByLabel: tenant.poweredByLabel,
     footerLabel: tenant.footerLabel,
-    customDomain: tenant.customDomain
+    customDomain: tenant.customDomain,
+    customDomains: tenant.customDomains ?? [],
+    customDomainStatus: tenant.customDomainStatus,
+    customDomainVerificationTarget: tenant.customDomainVerificationTarget
   };
 }
 
@@ -145,6 +226,14 @@ export function defaultBranding(): TenantBranding {
     attributionMode: "systolab",
     assistantName: "SYSTOLAB Intelligence Assistant",
     websiteUrl: "https://systolab.com",
+    reportValidityDays: 30,
+    validityStatement: "Recommendations are based on the scan date and should be reviewed within the stated validity window.",
+    primaryCtaLabel: "Book a Strategy Call",
+    proposalModeEnabled: false,
+    reportLanguage: "en",
+    industryTemplate: "general",
+    customDomains: [],
+    customDomainStatus: "not_configured",
     serviceOfferings: ["SEO", "Website Development", "Google Ads", "CRO", "Local SEO", "AI Search Optimization"],
     poweredByMode: "systolab_standard",
     reportTitle: "Website Growth & Decision Intelligence Report",

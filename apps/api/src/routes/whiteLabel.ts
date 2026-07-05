@@ -18,7 +18,7 @@ function handleError(error: unknown, res: Response): void {
 whiteLabelRouter.get("/resolve", async (req: Request, res: Response) => {
   try {
     const slug = typeof req.query["slug"] === "string" ? req.query["slug"] : undefined;
-    const domain = typeof req.query["domain"] === "string" ? req.query["domain"] : undefined;
+    const domain = typeof req.query["domain"] === "string" ? req.query["domain"] : req.hostname;
     res.json(await resolveWhiteLabelBranding({ slug, domain }));
   } catch (error) {
     handleError(error, res);

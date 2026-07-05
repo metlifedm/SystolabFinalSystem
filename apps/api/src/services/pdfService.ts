@@ -151,7 +151,9 @@ export async function renderReportPdf(
         writeEnterpriseExpandedCustomerInsights(doc, report);
         writeEnterpriseCustomerActionCenter(doc, report);
         writeEnterpriseRecommendedActions(doc, report);
+        writeEnterpriseAgencyProposal(doc, report);
         writeEnterprisePartnerContactPage(doc, report);
+        writeEnterpriseThankYouPage(doc, report);
         writeEnterpriseFooterAndPageNumbers(doc, report);
         doc.end();
       } catch (error) {
@@ -529,8 +531,10 @@ function writeEnterpriseReportHeader(doc: PDFKit.PDFDocument, report: ReportSnap
     partnerName,
     branding.websiteUrl ? `Website: ${branding.websiteUrl}` : undefined,
     branding.supportEmail ? `Email: ${branding.supportEmail}` : undefined,
+    branding.consultantEmail ? `Consultant Email: ${branding.consultantEmail}` : undefined,
     branding.phoneNumber ? `Phone: ${branding.phoneNumber}` : undefined,
-    branding.consultantName ? `Consultant: ${branding.consultantName}` : undefined
+    branding.consultantName ? `Consultant: ${branding.consultantName}` : undefined,
+    pdfReportDomain(report) ? `Report Domain: ${pdfReportDomain(report)}` : undefined
   ]);
   drawEnterpriseInfoBox(doc, left + columnWidth + columnGap, boxY, columnWidth, "Prepared For", [
     pdfClientName(report),
@@ -548,7 +552,8 @@ function writeEnterpriseReportHeader(doc: PDFKit.PDFDocument, report: ReportSnap
     ["Generated", pdfDateLabel(client.scanDate ?? report.createdAt)],
     ["Website", safePdfHostLabel(report.targetUrl)],
     ["Competitors", String(client.competitorUrls?.length ?? report.competitorComparison?.length ?? 0)],
-    ["Coverage", report.scanCoverage?.coverageLabel ?? "Not Available"]
+    ["Coverage", report.scanCoverage?.coverageLabel ?? "Not Available"],
+    ["Valid Until", pdfReportValidUntil(report) ?? "Review scan date"]
   ] as const;
   const metadataWidth = width / metadata.length;
   metadata.forEach(([label, value], index) => {
@@ -565,7 +570,17 @@ function writeEnterpriseReportHeader(doc: PDFKit.PDFDocument, report: ReportSnap
       .text(pdfCustomerText(value), x + 10, metaY + 27, { width: metadataWidth - 20 });
   });
 
-  doc.y = metaY + 82;
+  const intro = pdfCustomerText(branding.reportIntroduction || branding.dashboardWelcomeMessage || "");
+  if (intro) {
+    const introY = metaY + 74;
+    const introHeight = Math.min(92, Math.max(44, doc.heightOfString(intro, { width: width - 24 }) + 24));
+    doc.roundedRect(left, introY, width, introHeight, 5).fillColor(ENTERPRISE_PDF.white).fill().strokeColor(ENTERPRISE_PDF.line).lineWidth(1).stroke();
+    doc.font("Helvetica-Bold").fontSize(8).fillColor(ENTERPRISE_PDF.muted).text("INTRODUCTION", left + 12, introY + 10, { width: width - 24 });
+    doc.font("Helvetica").fontSize(8.8).fillColor(ENTERPRISE_PDF.ink).text(intro, left + 12, introY + 25, { width: width - 24, height: introHeight - 30 });
+    doc.y = introY + introHeight + 18;
+  } else {
+    doc.y = metaY + 82;
+  }
 }
 function writeEnterpriseContinuationHeader(doc: PDFKit.PDFDocument, report?: ReportSnapshot): void {
   const left = doc.page.margins.left;
@@ -639,6 +654,26 @@ function pdfDateLabel(value: string): string {
   return date.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 }
 
+function pdfReportValidUntil(report: ReportSnapshot): string | undefined {
+  const days = report.tenantBranding?.reportValidityDays;
+  if (!days || days <= 0) return undefined;
+  const created = new Date(report.clientInformation?.scanDate ?? report.createdAt);
+  if (Number.isNaN(created.getTime())) return undefined;
+  const validUntil = new Date(created.getTime() + days * 24 * 60 * 60 * 1000);
+  const statement = report.tenantBranding.validityStatement ? ` ${pdfCustomerText(report.tenantBranding.validityStatement)}` : "";
+  return `${pdfDateLabel(validUntil.toISOString())}.${statement}`;
+}
+
+function pdfReportDomain(report: ReportSnapshot): string | undefined {
+  const domains = [report.tenantBranding.customDomain, ...(report.tenantBranding.customDomains ?? [])].filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+  return domains[0];
+}
+
+function pdfPrimaryCta(report: ReportSnapshot): string {
+  const branding = report.tenantBranding;
+  const label = branding.primaryCtaLabel || "Book a Strategy Call";
+  return [label, branding.primaryCtaUrl || branding.calendarBookingLink || branding.websiteUrl].filter(Boolean).join(" - ");
+}
 function pdfShouldShowSystolabBranding(report: ReportSnapshot): boolean {
   return (report.tenantBranding?.poweredByMode ?? "systolab_standard") !== "full_white_label";
 }
@@ -1323,6 +1358,53 @@ function writeEnterpriseFreshness(doc: PDFKit.PDFDocument, report: ReportSnapsho
   });
 }
 
+function writeEnterpriseAgencyProposal(doc: PDFKit.PDFDocument, report: ReportSnapshot): void {
+  const branding = report.tenantBranding;
+  if (!branding.proposalModeEnabled) return;
+  const services = branding.serviceOfferings?.length ? branding.serviceOfferings : ["SEO", "Website Development", "Google Ads", "CRO", "Local SEO", "AI Search Optimization"];
+  const recommendations = report.recommendationEngine?.recommendations ?? [];
+  const issues = recommendations.map((item) => item.issue).filter(Boolean).slice(0, 6);
+  const deliverables = branding.proposalDeliverables?.length ? branding.proposalDeliverables : services.slice(0, 6).map((service) => `${service} implementation support`);
+
+  doc.addPage();
+  writeEnterpriseContinuationHeader(doc, report);
+  writeEnterpriseSectionLabel(doc, report, "Implementation Proposal");
+
+  writeEnterpriseBox(doc, report, "Problems Found", "amber", 120, () => {
+    const rows = issues.length ? issues : [report.decisionIntelligenceBrief?.executiveDecisionMatrix?.primaryBusinessConstraint ?? "No proposal issue passed the current evidence threshold."];
+    rows.forEach((issue, index) => writeEnterpriseTableRow(doc, `Problem ${index + 1}`, issue, index));
+  });
+
+  writeEnterpriseBox(doc, report, "Recommended Services And Deliverables", "green", 170, () => {
+    writeEnterpriseTableRow(doc, "Services", services.slice(0, 8).join(", "), 0);
+    deliverables.slice(0, 8).forEach((deliverable, index) => writeEnterpriseTableRow(doc, `Deliverable ${index + 1}`, deliverable, index + 1));
+  });
+
+  writeEnterpriseBox(doc, report, "Timeline, Investment, And Expected Impact", "blue", 146, () => {
+    writeEnterpriseTableRow(doc, "Estimated Timeline", branding.proposalTimeline || "To be confirmed after implementation scoping.", 0);
+    writeEnterpriseTableRow(doc, "Investment", branding.proposalInvestmentRange || "To be proposed after scope confirmation.", 1);
+    writeEnterpriseTableRow(doc, "Expected Business Impact", branding.proposalExpectedImpact || report.decisionIntelligenceBrief?.executiveDecisionMatrix?.potentialBusinessImpact || "Expected impact is limited to validated report evidence and follow-up measurement.", 2);
+    writeEnterpriseTableRow(doc, "CTA", pdfPrimaryCta(report), 3);
+  });
+}
+
+function writeEnterpriseThankYouPage(doc: PDFKit.PDFDocument, report: ReportSnapshot): void {
+  const branding = report.tenantBranding;
+  const title = pdfCustomerText(branding.thankYouPageTitle || "Thank You");
+  const message = pdfCustomerText(branding.thankYouPageMessage || `${pdfPartnerName(report)} is ready to help turn this report into a prioritized implementation plan.`);
+  doc.addPage();
+  writeEnterpriseContinuationHeader(doc, report);
+  writeEnterpriseSectionLabel(doc, report, title);
+  writeEnterpriseBox(doc, report, pdfPartnerName(report), "green", 210, () => {
+    doc.font("Helvetica").fontSize(10).fillColor(ENTERPRISE_PDF.ink).text(message, enterpriseInnerX(doc), doc.y, { width: enterpriseInnerWidth(doc) }).moveDown(0.7);
+    writeEnterpriseTableRow(doc, "Primary CTA", pdfPrimaryCta(report), 0);
+    if (branding.secondaryCtaLabel || branding.secondaryCtaUrl) writeEnterpriseTableRow(doc, "Secondary CTA", [branding.secondaryCtaLabel, branding.secondaryCtaUrl].filter(Boolean).join(" - "), 1);
+    if (branding.calendarBookingLink) writeEnterpriseTableRow(doc, "Book", branding.calendarBookingLink, 2);
+    if (branding.whatsappLink) writeEnterpriseTableRow(doc, "WhatsApp", branding.whatsappLink, 3);
+    if (branding.supportEmail || branding.consultantEmail) writeEnterpriseTableRow(doc, "Email", branding.consultantEmail || branding.supportEmail || "", 4);
+    if (pdfReportValidUntil(report)) writeEnterpriseTableRow(doc, "Report Valid Until", pdfReportValidUntil(report)!, 5);
+  });
+}
 function writeEnterprisePartnerContactPage(doc: PDFKit.PDFDocument, report: ReportSnapshot): void {
   const branding = report.tenantBranding;
   const services = branding.serviceOfferings?.length ? branding.serviceOfferings : ["SEO", "Website Development", "Google Ads", "CRO", "Local SEO", "AI Search Optimization"];
@@ -1340,9 +1422,12 @@ function writeEnterprisePartnerContactPage(doc: PDFKit.PDFDocument, report: Repo
     const contactRows = [
       ["Call", branding.phoneNumber],
       ["Email", branding.supportEmail],
+      ["Consultant Email", branding.consultantEmail],
       ["Website", branding.websiteUrl],
       ["Book Consultation", branding.calendarBookingLink],
       ["WhatsApp", branding.whatsappLink],
+      ["Primary CTA", pdfPrimaryCta(report)],
+      ["Valid Until", pdfReportValidUntil(report)],
       ["Consultant", branding.consultantName],
       ["Office", branding.officeAddress]
     ] as const;
@@ -1352,7 +1437,7 @@ function writeEnterprisePartnerContactPage(doc: PDFKit.PDFDocument, report: Repo
     services.slice(0, 12).forEach((service) => doc.font("Helvetica").fontSize(8.8).fillColor(ENTERPRISE_PDF.muted).text(`- ${pdfCustomerText(service)}`, { width: enterpriseInnerWidth(doc) }));
   });
 
-  if (branding.qrCodeUrl || branding.digitalSignature || branding.businessRegistration || branding.licenseNumber || branding.socialLinks?.length) {
+  if (branding.qrCodeUrl || branding.digitalSignature || branding.consultantPhotoUrl || branding.businessRegistration || branding.licenseNumber || branding.socialLinks?.length) {
     writeEnterpriseBox(doc, report, "Partner Details", "gray", 164, () => {
       if (branding.businessRegistration) writeEnterpriseTableRow(doc, "Business Registration", branding.businessRegistration, 0);
       if (branding.licenseNumber) writeEnterpriseTableRow(doc, "License Number", branding.licenseNumber, 1);
@@ -1360,7 +1445,8 @@ function writeEnterprisePartnerContactPage(doc: PDFKit.PDFDocument, report: Repo
       const imageY = doc.y + 6;
       const qrDrawn = drawPdfDataUrlImage(doc, branding.qrCodeUrl, enterpriseInnerX(doc), imageY, 72, 72);
       const signatureDrawn = drawPdfDataUrlImage(doc, branding.digitalSignature, enterpriseInnerX(doc) + 92, imageY, 150, 72);
-      if (qrDrawn || signatureDrawn) doc.y = imageY + 84;
+      const photoDrawn = drawPdfDataUrlImage(doc, branding.consultantPhotoUrl, enterpriseInnerX(doc) + 262, imageY, 72, 72);
+      if (qrDrawn || signatureDrawn || photoDrawn) doc.y = imageY + 84;
     });
   }
 
@@ -1377,6 +1463,7 @@ function writeEnterpriseFooterAndPageNumbers(doc: PDFKit.PDFDocument, report?: R
     const pageNumber = index + 1;
     const left = doc.page.margins.left;
     const width = enterpriseWidth(doc);
+    if (report?.tenantBranding?.pdfSecurity?.watermarkText) drawPdfWatermark(doc, report.tenantBranding.pdfSecurity.watermarkText);
     doc
       .font("Helvetica")
       .fontSize(8)
@@ -1387,6 +1474,16 @@ function writeEnterpriseFooterAndPageNumbers(doc: PDFKit.PDFDocument, report?: R
   }
 }
 
+function drawPdfWatermark(doc: PDFKit.PDFDocument, value: string): void {
+  const text = pdfCustomerText(value);
+  if (!text) return;
+  doc.save();
+  doc.rotate(-28, { origin: [doc.page.width / 2, doc.page.height / 2] });
+  doc.opacity(0.075);
+  doc.font("Helvetica-Bold").fontSize(42).fillColor(ENTERPRISE_PDF.gray).text(text, 90, doc.page.height / 2 - 24, { width: doc.page.width - 180, align: "center" });
+  doc.opacity(1);
+  doc.restore();
+}
 function writeInternalFooterAndPageNumbers(doc: PDFKit.PDFDocument): void {
   const range = doc.bufferedPageRange();
   for (let index = 0; index < range.count; index += 1) {

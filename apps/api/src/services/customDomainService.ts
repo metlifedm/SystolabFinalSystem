@@ -44,5 +44,16 @@ export async function lookupTenantByDomain(domain: string): Promise<{ tenantSlug
 }
 
 export async function setVerifiedDomain(tenantSlug: string, domain: string): Promise<void> {
-  await Tenant.updateOne({ slug: tenantSlug }, { $set: { customDomain: domain.toLowerCase().trim() } });
+  const normalized = domain.toLowerCase().trim();
+  await Tenant.updateOne(
+    { slug: tenantSlug },
+    {
+      $set: {
+        customDomain: normalized,
+        customDomainStatus: "verified",
+        customDomainVerificationTarget: `${tenantSlug}.systolab.app`
+      },
+      $addToSet: { customDomains: normalized }
+    }
+  );
 }
