@@ -7,7 +7,8 @@ import {
   getUsageOverview,
   listProjectsForUser,
   resolveWhiteLabelBranding,
-  runProjectScan
+  runProjectScan,
+  updateWhiteLabelBranding
 } from "./services/portalService.js";
 import { makeId } from "./utils/crypto.js";
 
@@ -84,6 +85,22 @@ describe("portal service", () => {
     await expect(runProjectScan(project.workspaceId, tenant._id.toString(), ownerId)).rejects.toThrow(/Monthly scan limit/);
   });
 
+  it("allows agency sales content but rejects locked intelligence fields", async () => {
+    const ownerId = makeId("usr");
+    const slug = uniqueSlug("portal-lock");
+    const { tenant } = await createTenant(slug, "Portal Lock Tenant", ownerId);
+
+    const updated = await updateWhiteLabelBranding(tenant._id.toString(), {
+      publicName: "Evidence-Safe Agency",
+      aboutCompany: "We implement SYSTOLAB findings without changing the diagnosis.",
+      agencyImplementationNotes: [{ recommendationId: "REC-001", note: "Our team can implement this after client approval." }]
+    });
+
+    expect(updated.publicName).toBe("Evidence-Safe Agency");
+    expect(updated.agencyImplementationNotes?.[0]?.note).toContain("client approval");
+    await expect(updateWhiteLabelBranding(tenant._id.toString(), { poweredByLabel: "Agency Engine" } as never)).rejects.toThrow(/Locked SYSTOLAB intelligence fields/);
+    await expect(updateWhiteLabelBranding(tenant._id.toString(), { recommendationEngine: { status: "fake" } } as never)).rejects.toThrow(/Locked SYSTOLAB intelligence fields/);
+  });
   it("resolves public white-label branding by slug and custom domain", async () => {
     const ownerId = makeId("usr");
     const slug = uniqueSlug("portal-brand");

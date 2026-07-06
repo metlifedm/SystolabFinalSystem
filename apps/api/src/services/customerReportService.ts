@@ -138,7 +138,8 @@ export function buildCustomerReportPayload(report: ReportSnapshot): Record<strin
     customerRevenueLeakage: buildCustomerRevenueLeakage(report, contentUnavailable),
     customerBusinessOutcomeSummary: buildCustomerOutcomeAttribution(report, contentUnavailable),
     customerIssueConnectionSummary: buildCustomerDependencySummary(report, contentUnavailable),
-    customerImplementationRoadmap: buildCustomerRecommendationRoadmap(report, contentUnavailable)
+    customerImplementationRoadmap: buildCustomerRecommendationRoadmap(report, contentUnavailable),
+    customerClientSuccessBlueprint: buildCustomerClientSuccessBlueprint(report, contentUnavailable)
   }) as JsonRecord;
 
   for (const key of INTERNAL_TOP_LEVEL_KEYS) delete payload[key];
@@ -1119,6 +1120,57 @@ function buildCustomerDependencySummary(report: ReportSnapshot, contentUnavailab
   };
 }
 
+function buildCustomerClientSuccessBlueprint(report: ReportSnapshot, contentUnavailable: boolean): Record<string, unknown> {
+  const recommendations = (report.recommendationEngine?.recommendations ?? []).map((recommendation) => ({
+    action: sanitizeCustomerText(recommendation.action),
+    reason: sanitizeCustomerText(recommendation.revenueIntelligenceMapping || recommendation.issue),
+    priority: recommendation.priority,
+    confidence: `${Math.round(recommendation.confidenceScore ?? 0)}% evidence confidence`
+  }));
+  const confidence = contentUnavailable ? "Very limited confidence" : summarizeCustomerEvidenceStrength(report);
+  const actionAt = (index: number, fallback: string) => recommendations[index]?.action ?? fallback;
+  const reasonAt = (index: number) => recommendations[index]?.reason ?? "Validated evidence supports this improvement priority.";
+  const item = (action: string, reason: string, dependencies: string, successMetric: string) => ({
+    action: sanitizeCustomerText(action),
+    expectedBusinessOutcome: expectedOutcomeForAction(action),
+    estimatedEffort: effortForAction(action),
+    dependencies: sanitizeCustomerText(dependencies),
+    successMetric: sanitizeCustomerText(successMetric),
+    confidence: confidence || sanitizeCustomerText(reason)
+  });
+  return {
+    status: contentUnavailable ? "Content Unavailable" : "Evidence-backed roadmap",
+    summary: contentUnavailable
+      ? "Website content could not be collected, so a full 90-day improvement plan was not scored. First restore access and re-run the scan."
+      : "This 90-day plan converts validated recommendations into a practical implementation roadmap. Outcomes are expected business support, not guaranteed revenue, and should be validated through follow-up scans.",
+    phases: [
+      {
+        phase: "Week 1",
+        timeframe: "Critical fixes",
+        focus: "Remove the highest-friction customer decision blockers",
+        items: [item(actionAt(0, report.actionFirstPanel?.fallbackAction ?? "Improve the weakest validated customer decision area and re-run the scan."), reasonAt(0), "Access to website content, CMS, analytics or owner approval where needed", "Top recommendation completed and re-scan shows improved evidence coverage or score movement")]
+      },
+      {
+        phase: "Weeks 2-4",
+        timeframe: "High-impact improvements",
+        focus: "Improve customer trust, clarity, and action paths",
+        items: [item(actionAt(1, actionForDimensionKey("trust")), reasonAt(1), "Week 1 blocker removed and decision pages identified", "Trust, clarity, or conversion readiness improves on the next scan")]
+      },
+      {
+        phase: "Month 2",
+        timeframe: "Growth initiatives",
+        focus: "Strengthen search, local visibility, content depth, and decision support",
+        items: [item(actionAt(2, actionForDimensionKey("visibilityStructure")), reasonAt(2), "Core website fixes completed and priority service pages selected", "More customer questions answered and visibility-support signals validated")]
+      },
+      {
+        phase: "Month 3",
+        timeframe: "Competitive advantage projects",
+        focus: "Differentiate against competitors and prove progress",
+        items: [item(actionAt(3, "Compare competitor gaps, improve weaker content areas, and re-scan to validate improvement."), reasonAt(3), "At least one follow-up scan and competitor URLs available", "First scan vs latest scan shows completed recommendations and stronger competitive decision support")]
+      }
+    ]
+  };
+}
 function buildCustomerRecommendationRoadmap(report: ReportSnapshot, contentUnavailable: boolean): Record<string, unknown> {
   const sequencing = (report as unknown as { recommendationSequencingEngine?: ReportSnapshot["recommendationSequencingEngine"] }).recommendationSequencingEngine;
   const phases = [

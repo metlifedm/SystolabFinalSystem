@@ -29,8 +29,9 @@ describe("enterprise PDF report rendering", () => {
     expect(text).toContain("Business Priority This Week");
     expect(text).toContain("Expected Business Outcomes");
     expect(text).toContain("Business Initiatives");
+    expect(text).toContain("Your 90-Day Business Improvement Plan");
     expect(pdfPageCount(text)).toBeGreaterThanOrEqual(8);
-    expect(pdfPageCount(text)).toBeLessThanOrEqual(45);
+    expect(pdfPageCount(text)).toBeLessThanOrEqual(50);
     expect(text).not.toMatch(/Full Customer Intelligence Report|Revenue Intelligence Engine|Recommendation Outcome Validation Loop|Evidence Database|Global Output Contract|Action Plan Mapping|canonical issue|Dependency Intelligence|Business Outcome Attribution|Recommendation Sequencing|SEO Intelligence Report|GBP \/ Local/i);
     expect(text).not.toMatch(/System Health Status|Evidence Explorer|Ground Truth Validation Log|Layered Intelligence Architecture|Parser success|Crawler stability|rawSignalTelemetry|executionProvenance|validationTrace/i);
     expect(text).not.toMatch(/EV-\d+|EO-\d+|REC-\d+|Snapshot ID/i);

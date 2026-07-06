@@ -10,9 +10,11 @@ export interface TenantDocument extends mongoose.Document {
   faviconUrl?: string;
   consultantPhotoUrl?: string;
   consultantEmail?: string;
+  consultantDesignation?: string;
   websiteUrl?: string;
   phoneNumber?: string;
   officeAddress?: string;
+  googleMapsUrl?: string;
   businessRegistration?: string;
   licenseNumber?: string;
   socialLinks?: string[];
@@ -26,6 +28,7 @@ export interface TenantDocument extends mongoose.Document {
   iconStyle?: TenantBranding["iconStyle"];
   qrCodeUrl?: string;
   whatsappLink?: string;
+  whatsappNumber?: string;
   calendarBookingLink?: string;
   digitalSignature?: string;
   primaryCtaLabel?: string;
@@ -39,13 +42,23 @@ export interface TenantDocument extends mongoose.Document {
   proposalInvestmentRange?: string;
   proposalDeliverables?: string[];
   proposalExpectedImpact?: string;
+  proposalExpectedServiceOutcome?: string;
+  proposalPageContent?: string;
+  pricingPageContent?: string;
   crmIntegration?: TenantBranding["crmIntegration"];
   pdfSecurity?: TenantBranding["pdfSecurity"];
   reportLanguage?: TenantBranding["reportLanguage"];
+  currency?: string;
+  timeZone?: string;
   industryTemplate?: TenantBranding["industryTemplate"];
   followUpAssets?: TenantBranding["followUpAssets"];
   agencySuccessCenter?: TenantBranding["agencySuccessCenter"];
   serviceOfferings?: string[];
+  aboutCompany?: string;
+  whyChooseUs?: string;
+  portfolioItems?: string[];
+  testimonials?: string[];
+  agencyImplementationNotes?: TenantBranding["agencyImplementationNotes"];
   poweredByMode?: TenantBranding["poweredByMode"];
   customDomain?: string;
   customDomains?: string[];
@@ -81,9 +94,11 @@ const TenantSchema = new Schema<TenantDocument>(
     faviconUrl: { type: String },
     consultantPhotoUrl: { type: String },
     consultantEmail: { type: String },
+    consultantDesignation: { type: String },
     websiteUrl: { type: String },
     phoneNumber: { type: String },
     officeAddress: { type: String },
+    googleMapsUrl: { type: String },
     businessRegistration: { type: String },
     licenseNumber: { type: String },
     socialLinks: { type: [String], default: [] },
@@ -97,6 +112,7 @@ const TenantSchema = new Schema<TenantDocument>(
     iconStyle: { type: String, enum: ["line", "solid", "minimal"], default: "line" },
     qrCodeUrl: { type: String },
     whatsappLink: { type: String },
+    whatsappNumber: { type: String },
     calendarBookingLink: { type: String },
     digitalSignature: { type: String },
     primaryCtaLabel: { type: String, default: "Book a Strategy Call" },
@@ -110,13 +126,23 @@ const TenantSchema = new Schema<TenantDocument>(
     proposalInvestmentRange: { type: String },
     proposalDeliverables: { type: [String], default: [] },
     proposalExpectedImpact: { type: String },
+    proposalExpectedServiceOutcome: { type: String },
+    proposalPageContent: { type: String },
+    pricingPageContent: { type: String },
     crmIntegration: { type: Schema.Types.Mixed },
     pdfSecurity: { type: Schema.Types.Mixed },
     reportLanguage: { type: String, enum: ["en", "ar", "fr", "de", "es", "hi"], default: "en" },
+    currency: { type: String, default: "USD" },
+    timeZone: { type: String, default: "UTC" },
     industryTemplate: { type: String, enum: ["general", "dentists", "lawyers", "interior_designers", "real_estate", "saas", "hotels", "ecommerce", "healthcare", "manufacturing"], default: "general" },
     followUpAssets: { type: Schema.Types.Mixed },
     agencySuccessCenter: { type: Schema.Types.Mixed },
     serviceOfferings: { type: [String], default: ["SEO", "Website Development", "Google Ads", "CRO", "Local SEO", "AI Search Optimization"] },
+    aboutCompany: { type: String },
+    whyChooseUs: { type: String },
+    portfolioItems: { type: [String], default: [] },
+    testimonials: { type: [String], default: [] },
+    agencyImplementationNotes: { type: Schema.Types.Mixed },
     poweredByMode: { type: String, enum: ["full_white_label", "co_branded", "systolab_standard"], default: "systolab_standard" },
     customDomain: { type: String, index: true },
     customDomains: { type: [String], default: [], index: true },
@@ -155,9 +181,11 @@ export function tenantToBranding(tenant: TenantDocument): TenantBranding {
     faviconUrl: tenant.faviconUrl,
     consultantPhotoUrl: tenant.consultantPhotoUrl,
     consultantEmail: tenant.consultantEmail,
+    consultantDesignation: tenant.consultantDesignation,
     websiteUrl: tenant.websiteUrl,
     phoneNumber: tenant.phoneNumber,
     officeAddress: tenant.officeAddress,
+    googleMapsUrl: tenant.googleMapsUrl,
     businessRegistration: tenant.businessRegistration,
     licenseNumber: tenant.licenseNumber,
     socialLinks: tenant.socialLinks ?? [],
@@ -171,6 +199,7 @@ export function tenantToBranding(tenant: TenantDocument): TenantBranding {
     iconStyle: tenant.iconStyle,
     qrCodeUrl: tenant.qrCodeUrl,
     whatsappLink: tenant.whatsappLink,
+    whatsappNumber: tenant.whatsappNumber,
     calendarBookingLink: tenant.calendarBookingLink,
     digitalSignature: tenant.digitalSignature,
     primaryCtaLabel: tenant.primaryCtaLabel,
@@ -184,13 +213,23 @@ export function tenantToBranding(tenant: TenantDocument): TenantBranding {
     proposalInvestmentRange: tenant.proposalInvestmentRange,
     proposalDeliverables: tenant.proposalDeliverables ?? [],
     proposalExpectedImpact: tenant.proposalExpectedImpact,
+    proposalExpectedServiceOutcome: tenant.proposalExpectedServiceOutcome,
+    proposalPageContent: tenant.proposalPageContent,
+    pricingPageContent: tenant.pricingPageContent,
     crmIntegration: tenant.crmIntegration,
     pdfSecurity: tenant.pdfSecurity,
     reportLanguage: tenant.reportLanguage,
+    currency: tenant.currency,
+    timeZone: tenant.timeZone,
     industryTemplate: tenant.industryTemplate,
     followUpAssets: tenant.followUpAssets,
     agencySuccessCenter: tenant.agencySuccessCenter,
     serviceOfferings: tenant.serviceOfferings ?? [],
+    aboutCompany: tenant.aboutCompany,
+    whyChooseUs: tenant.whyChooseUs,
+    portfolioItems: tenant.portfolioItems ?? [],
+    testimonials: tenant.testimonials ?? [],
+    agencyImplementationNotes: tenant.agencyImplementationNotes,
     poweredByMode: tenant.poweredByMode,
     primaryColor: tenant.primaryColor,
     secondaryColor: tenant.secondaryColor,
@@ -231,10 +270,15 @@ export function defaultBranding(): TenantBranding {
     primaryCtaLabel: "Book a Strategy Call",
     proposalModeEnabled: false,
     reportLanguage: "en",
+    currency: "USD",
+    timeZone: "UTC",
     industryTemplate: "general",
     customDomains: [],
     customDomainStatus: "not_configured",
     serviceOfferings: ["SEO", "Website Development", "Google Ads", "CRO", "Local SEO", "AI Search Optimization"],
+    portfolioItems: [],
+    testimonials: [],
+    agencyImplementationNotes: [],
     poweredByMode: "systolab_standard",
     reportTitle: "Website Growth & Decision Intelligence Report",
     poweredByLabel: "Powered by SYSTOLAB Revenue Intelligence Engine",

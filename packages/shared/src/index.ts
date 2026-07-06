@@ -170,9 +170,11 @@ export interface TenantBranding {
   faviconUrl?: string;
   consultantPhotoUrl?: string;
   consultantEmail?: string;
+  consultantDesignation?: string;
   websiteUrl?: string;
   phoneNumber?: string;
   officeAddress?: string;
+  googleMapsUrl?: string;
   businessRegistration?: string;
   licenseNumber?: string;
   socialLinks?: string[];
@@ -186,6 +188,7 @@ export interface TenantBranding {
   iconStyle?: "line" | "solid" | "minimal";
   qrCodeUrl?: string;
   whatsappLink?: string;
+  whatsappNumber?: string;
   calendarBookingLink?: string;
   digitalSignature?: string;
   primaryCtaLabel?: string;
@@ -199,6 +202,9 @@ export interface TenantBranding {
   proposalInvestmentRange?: string;
   proposalDeliverables?: string[];
   proposalExpectedImpact?: string;
+  proposalExpectedServiceOutcome?: string;
+  proposalPageContent?: string;
+  pricingPageContent?: string;
   crmIntegration?: {
     enabled: boolean;
     provider: "hubspot" | "gohighlevel" | "salesforce" | "zoho" | "pipedrive" | "custom_webhook" | "none";
@@ -214,6 +220,8 @@ export interface TenantBranding {
     tamperSeal: boolean;
   };
   reportLanguage?: "en" | "ar" | "fr" | "de" | "es" | "hi";
+  currency?: string;
+  timeZone?: string;
   industryTemplate?: "general" | "dentists" | "lawyers" | "interior_designers" | "real_estate" | "saas" | "hotels" | "ecommerce" | "healthcare" | "manufacturing";
   followUpAssets?: {
     emailSubject?: string;
@@ -229,6 +237,11 @@ export interface TenantBranding {
     salesScriptTone?: "consultative" | "direct" | "executive";
   };
   serviceOfferings?: string[];
+  aboutCompany?: string;
+  whyChooseUs?: string;
+  portfolioItems?: string[];
+  testimonials?: string[];
+  agencyImplementationNotes?: Array<{ recommendationId?: string; note: string }>;
   poweredByMode?: "full_white_label" | "co_branded" | "systolab_standard";
   customDomains?: string[];
   customDomainStatus?: "not_configured" | "pending_dns" | "verified" | "failed";

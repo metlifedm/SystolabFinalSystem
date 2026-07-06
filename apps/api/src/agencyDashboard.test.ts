@@ -9,6 +9,15 @@ import {
 } from "./services/agencyService.js";
 import { seedDefaultPlans, activateSubscription, getPlanByTier } from "./services/billingService.js";
 import { recordScanUsage, recordApiCallUsage } from "./services/usageTrackingService.js";
+import {
+  generateAgencyProposal,
+  getAgencyOperatingSystem,
+  updateAgencyKnowledgeBase,
+  updateAgencyProfile,
+  updateClientWorkspaceState,
+  updateRecommendationStatus,
+  updateServiceCatalog
+} from "./services/agencyOperatingService.js";
 
 async function setupTenant(prefix: string) {
   const slug = `${prefix}-${makeId("t").slice(2, 8)}`;
@@ -114,5 +123,66 @@ describe("agency dashboard — profitability report", () => {
     }
     // If no usage period exists, that's valid too — just verify structure
     expect(report.planName).toBeTruthy();
+  });
+});
+
+describe("agency operating system", () => {
+  it("manages agency profile, services, client progress, proposals, permissions, and audit trail", async () => {
+    const { slug, userId, tenant } = await setupTenant("ag-os");
+    const { workspace } = await createWorkspace(tenant._id, slug, userId, "https://agency-client.example.com", "Dentist");
+
+    const profiled = await updateAgencyProfile(slug, userId, {
+      officeLocations: ["Dubai", "New York"],
+      specializedIndustries: ["Dentists", "Local Services"],
+      teamMembers: [{ name: "Azhar", email: "azhar@example.com", role: "owner" }],
+      defaultReportSettings: { language: "en", currency: "USD" }
+    });
+    expect(profiled.profile.officeLocations).toContain("Dubai");
+    expect(profiled.profile.teamMembers[0]?.role).toBe("owner");
+
+    const serviced = await updateServiceCatalog(slug, userId, [
+      { name: "Local SEO Retainer", category: "local_seo", startingPrice: "$1500", active: true },
+      { name: "Website CRO", category: "cro", pricingModel: "fixed", active: true }
+    ]);
+    expect(serviced.serviceCatalog.map((service) => service.name)).toContain("Local SEO Retainer");
+
+    const withKnowledge = await updateAgencyKnowledgeBase(slug, userId, {
+      caseStudies: ["Local dentist increased calls after trust and local visibility work."],
+      methodologies: ["Evidence-first audit, implementation, re-scan, and outcome validation."],
+      faqs: ["How long does implementation take?"],
+      pricing: ["Local SEO starts at $1500."],
+      brandVoice: "Executive and direct"
+    });
+    expect(withKnowledge.knowledgeBase.caseStudies).toHaveLength(1);
+
+    const client = await updateClientWorkspaceState(slug, workspace.workspaceId, userId, {
+      assignedConsultantName: "Azhar",
+      followUpStatus: "contacted",
+      note: "Client requested proposal and implementation timeline.",
+      sharingControls: { allowDownload: true, allowShare: true, passwordProtected: true, passwordHint: "Shared separately" }
+    });
+    expect(client.assignedConsultant).toBe("Azhar");
+    expect(client.followUpStatus).toBe("contacted");
+    expect(client.notes[0]?.body).toContain("proposal");
+    expect(client.sharingControls.passwordProtected).toBe(true);
+
+    const recommendation = await updateRecommendationStatus(slug, workspace.workspaceId, userId, "REC-001", "completed", "Implemented by agency team.");
+    expect(recommendation.completedRecommendations).toBe(1);
+    expect(recommendation.recommendationStatuses[0]?.status).toBe("completed");
+
+    const proposal = await generateAgencyProposal(slug, workspace.workspaceId, userId);
+    expect(proposal.clientName).toBeTruthy();
+    expect(proposal.recommendedServices.length).toBeGreaterThan(0);
+    expect(proposal.sections.some((section) => section.title.includes("Services"))).toBe(true);
+
+    const operating = await getAgencyOperatingSystem(slug);
+    expect(operating.permissions.find((entry) => entry.role === "owner")?.permissions).toContain("manage_clients");
+    expect(operating.progress.clientsTracked).toBeGreaterThanOrEqual(1);
+    expect(operating.progress.completedRecommendations).toBeGreaterThanOrEqual(1);
+    expect(operating.auditTrail.map((event) => event.action)).toEqual(expect.arrayContaining(["agency_profile.updated", "client_state.updated", "proposal.generated"]));
+    expect(operating.salesCoach.status).toBeDefined();
+    expect(operating.salesCoach.easiestServicesToSell.length).toBeGreaterThan(0);
+    expect(operating.salesCoach.clientPlaybooks[0]?.clientName).toBeTruthy();
+    expect(operating.salesCoach.suggestedMeetingAgenda.length).toBeGreaterThan(0);
   });
 });

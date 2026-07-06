@@ -149,6 +149,7 @@ export async function renderReportPdf(
         writeEnterpriseBusinessOpportunity(doc, report);
         writeEnterpriseCompetitorScorecard(doc, report);
         writeEnterpriseExpandedCustomerInsights(doc, report);
+        writeEnterpriseClientSuccessBlueprint(doc, report);
         writeEnterpriseCustomerActionCenter(doc, report);
         writeEnterpriseRecommendedActions(doc, report);
         writeEnterpriseAgencyProposal(doc, report);
@@ -674,6 +675,11 @@ function pdfPrimaryCta(report: ReportSnapshot): string {
   const label = branding.primaryCtaLabel || "Book a Strategy Call";
   return [label, branding.primaryCtaUrl || branding.calendarBookingLink || branding.websiteUrl].filter(Boolean).join(" - ");
 }
+function pdfAgencyImplementationNote(report: ReportSnapshot, recommendationId: string): string | undefined {
+  const notes = report.tenantBranding.agencyImplementationNotes ?? [];
+  const note = notes.find((item) => item.recommendationId === recommendationId) ?? notes.find((item) => !item.recommendationId);
+  return note?.note ? pdfCustomerText(note.note) : undefined;
+}
 function pdfShouldShowSystolabBranding(report: ReportSnapshot): boolean {
   return (report.tenantBranding?.poweredByMode ?? "systolab_standard") !== "full_white_label";
 }
@@ -695,7 +701,7 @@ function pdfFooterText(report: ReportSnapshot): string {
 }
 
 function pdfCustomerPdfKeywords(report: ReportSnapshot): string {
-  const generic = "Business Decision Snapshot, Where Customers Hesitate, Why Customers May Choose Competitors, Business Priority This Week, Expected Business Outcomes, Business Initiatives, Supporting Recommendation Detail, Website Intelligence Report, Visibility Intelligence Report, Business Opportunity Boundary, Business Decision Summary, Priority Action Summary, Local Presence Intelligence, Customer Question Coverage, Website vs Competitor Content Comparison, Why Competitors Are Winning, Revenue Leakage Analysis, What Affects Revenue Most, What To Fix Before Other Work, Implementation Roadmap, Customer Action Center, customer report, website intelligence, visibility intelligence, executive report";
+  const generic = "Business Decision Snapshot, Where Customers Hesitate, Why Customers May Choose Competitors, Business Priority This Week, Expected Business Outcomes, Business Initiatives, Your 90-Day Business Improvement Plan, Supporting Recommendation Detail, Website Intelligence Report, Visibility Intelligence Report, Business Opportunity Boundary, Business Decision Summary, Priority Action Summary, Local Presence Intelligence, Customer Question Coverage, Website vs Competitor Content Comparison, Why Competitors Are Winning, Revenue Leakage Analysis, What Affects Revenue Most, What To Fix Before Other Work, Implementation Roadmap, Customer Action Center, customer report, website intelligence, visibility intelligence, executive report";
   if (!pdfShouldShowSystolabBranding(report)) return generic;
   return `SYSTOLAB Decision Intelligence Brief, ${generic}, revenue health diagnosis`;
 }
@@ -1248,6 +1254,80 @@ function writeEnterpriseExpandedCustomerInsights(doc: PDFKit.PDFDocument, report
     writeEnterpriseTableRow(doc, "Implementation Roadmap", sequenceSummary || "No sequenced recommendation passed the evidence threshold.", 9);
   });
 }
+function writeEnterpriseClientSuccessBlueprint(doc: PDFKit.PDFDocument, report: ReportSnapshot): void {
+  const blueprint = buildPdfClientSuccessBlueprint(report);
+  writeEnterpriseSectionLabel(doc, report, "Your 90-Day Business Improvement Plan");
+  writeEnterpriseBox(doc, report, "Roadmap Summary", "green", 92, () => {
+    writeEnterpriseTableRow(doc, "Status", blueprint.status, 0);
+    writeEnterpriseTableRow(doc, "Boundary", blueprint.summary, 1);
+  });
+  blueprint.phases.forEach((phase, index) => {
+    const tone: EnterpriseStatusTone = index === 0 ? "red" : index === 1 ? "amber" : index === 2 ? "blue" : "green";
+    writeEnterpriseBox(doc, report, `${phase.phase}: ${phase.timeframe}`, tone, 120, () => {
+      writeEnterpriseTableRow(doc, "Focus", phase.focus, 0);
+      phase.items.slice(0, 2).forEach((item, itemIndex) => {
+        writeEnterpriseTableRow(
+          doc,
+          item.action,
+          `Outcome: ${item.expectedBusinessOutcome} Effort: ${item.estimatedEffort}. Dependencies: ${item.dependencies}. Success metric: ${item.successMetric}. ${item.confidence}.`,
+          itemIndex + 1
+        );
+      });
+    });
+  });
+}
+
+type PdfClientSuccessBlueprint = {
+  status: string;
+  summary: string;
+  phases: Array<{ phase: string; timeframe: string; focus: string; items: Array<{ action: string; expectedBusinessOutcome: string; estimatedEffort: string; dependencies: string; successMetric: string; confidence: string }> }>;
+};
+
+function buildPdfClientSuccessBlueprint(report: ReportSnapshot): PdfClientSuccessBlueprint {
+  const recommendations = report.recommendationEngine?.recommendations ?? [];
+  const confidence = isPdfContentUnavailable(report) ? "Very limited confidence" : pdfEvidenceStrengthLabel(report);
+  const actionAt = (index: number, fallback: string) => pdfCustomerText(recommendations[index]?.action ?? fallback);
+  const item = (action: string, dependencies: string, successMetric: string) => ({
+    action,
+    expectedBusinessOutcome: pdfExpectedOutcomeForAction(action),
+    estimatedEffort: pdfEffortForAction(action),
+    dependencies: pdfCustomerText(dependencies),
+    successMetric: pdfCustomerText(successMetric),
+    confidence
+  });
+  return {
+    status: isPdfContentUnavailable(report) ? "Content Unavailable" : "Evidence-backed roadmap",
+    summary: isPdfContentUnavailable(report)
+      ? "Website content could not be collected, so a full 90-day improvement plan was not scored. First restore access and re-run the scan."
+      : "This plan converts validated recommendations into a practical roadmap. Expected outcomes are business support signals, not guaranteed revenue, and should be validated through follow-up scans.",
+    phases: [
+      {
+        phase: "Week 1",
+        timeframe: "Critical fixes",
+        focus: "Remove the highest-friction customer decision blockers",
+        items: [item(actionAt(0, report.actionFirstPanel?.fallbackAction ?? "Improve the weakest validated customer decision area and re-run the scan."), "Website access, CMS access, analytics or owner approval where needed", "Top recommendation completed and re-scan shows improved evidence coverage or score movement")]
+      },
+      {
+        phase: "Weeks 2-4",
+        timeframe: "High-impact improvements",
+        focus: "Improve customer trust, clarity, and action paths",
+        items: [item(actionAt(1, pdfPdfActionForDimension("trust")), "Week 1 blocker removed and priority decision pages selected", "Trust, clarity, or conversion readiness improves on the next scan")]
+      },
+      {
+        phase: "Month 2",
+        timeframe: "Growth initiatives",
+        focus: "Strengthen search, local visibility, content depth, and decision support",
+        items: [item(actionAt(2, pdfPdfActionForDimension("visibilityStructure")), "Core website fixes completed and priority service pages selected", "More customer questions answered and visibility-support signals validated")]
+      },
+      {
+        phase: "Month 3",
+        timeframe: "Competitive advantage projects",
+        focus: "Differentiate against competitors and prove progress",
+        items: [item(actionAt(3, "Compare competitor gaps, improve weaker content areas, and re-scan to validate improvement."), "At least one follow-up scan and competitor URLs available", "First scan vs latest scan shows completed recommendations and stronger competitive decision support")]
+      }
+    ]
+  };
+}
 function writeEnterpriseCustomerActionCenter(doc: PDFKit.PDFDocument, report: ReportSnapshot): void {
   const brief = pdfDecisionBrief(report);
   writeEnterpriseSectionLabel(doc, report, "Customer Action Center");
@@ -1278,7 +1358,8 @@ function writeEnterpriseRecommendedActions(doc: PDFKit.PDFDocument, report: Repo
   writeEnterpriseSectionLabel(doc, report, "Supporting Recommendation Detail");
   recommendations.forEach((recommendation, index) => {
     const tone: EnterpriseStatusTone = recommendation.priority === "FIX NOW" ? "red" : recommendation.priority === "THIS MONTH" ? "amber" : "blue";
-    writeEnterpriseBox(doc, report, `Action ${index + 1}: ${recommendation.priority}`, tone, 92, () => {
+    const agencyNote = pdfAgencyImplementationNote(report, recommendation.recommendationId);
+    writeEnterpriseBox(doc, report, `Action ${index + 1}: ${recommendation.priority}`, tone, agencyNote ? 118 : 92, () => {
       doc
         .font("Helvetica-Bold")
         .fontSize(9.5)
@@ -1290,10 +1371,21 @@ function writeEnterpriseRecommendedActions(doc: PDFKit.PDFDocument, report: Repo
         .fillColor(ENTERPRISE_PDF.muted)
         .text(`Evidence & Implementation: ${pdfCustomerText(recommendation.action)} ${pdfTechnicalTasksForAction(recommendation.action).join(" ")}`, { width: enterpriseInnerWidth(doc) })
         .text(`Confidence: ${recommendation.confidenceScore}%`, { width: enterpriseInnerWidth(doc) });
+      if (agencyNote) {
+        doc
+          .moveDown(0.25)
+          .font("Helvetica-Bold")
+          .fontSize(8.5)
+          .fillColor(ENTERPRISE_PDF.ink)
+          .text("Agency Implementation Note", enterpriseInnerX(doc), doc.y, { width: enterpriseInnerWidth(doc) })
+          .font("Helvetica")
+          .fontSize(8.5)
+          .fillColor(ENTERPRISE_PDF.muted)
+          .text(agencyNote, { width: enterpriseInnerWidth(doc) });
+      }
     }, 2);
   });
 }
-
 function writeEnterprisePriorityTimeline(doc: PDFKit.PDFDocument, report: ReportSnapshot): void {
   const timeline = report.priorityTimeline;
   if (!timeline) return;

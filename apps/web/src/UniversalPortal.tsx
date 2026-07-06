@@ -3,6 +3,7 @@ import type { AuthIdentifierType, AuthResponse, AuthSessionSummary, AuthTokenPai
 import { CheckCircle2, KeyRound, Layers, LogOut, ShieldCheck } from "lucide-react";
 import {
   createProject,
+  generateAgencyProposal,
   createTenant,
   downloadReportPdf,
   getBillingOverview,
@@ -12,16 +13,20 @@ import {
   getProjectReports,
   getUsageOverview,
   getAgencyDashboard,
+  getAgencyOperatingSystem,
   googleAuth,
   loginPassword,
   logoutAuth,
   registerPassword,
   requestOtp,
   runProjectScan,
+  updateAgencyKnowledgeBase,
+  updateAgencyServiceCatalog,
+  updateClientWorkspaceState,
   updateWhiteLabelBranding,
   verifyOtp
 } from "./api.js";
-import type { AgencyDashboardResponse, PortalBillingPlan, PortalMeResponse, PortalProjectSummary, PortalReportSummary, PortalTenantSummary, PortalUsageOverview } from "./api.js";
+import type { AgencyDashboardResponse, AgencyOperatingSystemResponse, ClientFollowUpStatus, ClientOperatingSummary, PortalBillingPlan, PortalMeResponse, PortalProjectSummary, PortalReportSummary, PortalTenantSummary, PortalUsageOverview } from "./api.js";
 
 type StoredPortalAuth = { user: AuthUserProfile; tokens: AuthTokenPair; session: AuthSessionSummary };
 
@@ -68,6 +73,7 @@ export function UniversalPortal() {
   const [plans, setPlans] = useState<PortalBillingPlan[]>([]);
   const [usage, setUsage] = useState<PortalUsageOverview | null>(null);
   const [agencyDashboard, setAgencyDashboard] = useState<AgencyDashboardResponse | null>(null);
+  const [agencyOperating, setAgencyOperating] = useState<AgencyOperatingSystemResponse | null>(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -86,6 +92,7 @@ export function UniversalPortal() {
       setPortal(null);
       setUsage(null);
       setAgencyDashboard(null);
+      setAgencyOperating(null);
       return;
     }
     void refreshPortal();
@@ -96,6 +103,7 @@ export function UniversalPortal() {
     if (!tenantSlug || !auth) return;
     getUsageOverview(tenantSlug).then(setUsage).catch(() => setUsage(null));
     getAgencyDashboard(tenantSlug).then(setAgencyDashboard).catch(() => setAgencyDashboard(null));
+    getAgencyOperatingSystem(tenantSlug).then(setAgencyOperating).catch(() => setAgencyOperating(null));
   }, [auth?.tokens.accessToken, portal?.tenants[0]?.tenantSlug]);
 
   function navigate(nextPath: string) {
@@ -111,6 +119,12 @@ export function UniversalPortal() {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Unable to load portal data.");
     }
+  }
+
+  async function refreshAgencyOperating() {
+    const tenantSlug = portal?.tenants[0]?.tenantSlug;
+    if (!tenantSlug) { setAgencyOperating(null); return; }
+    try { setAgencyOperating(await getAgencyOperatingSystem(tenantSlug)); } catch { setAgencyOperating(null); }
   }
 
   function applyAuth(result: AuthResponse) {
@@ -130,6 +144,7 @@ export function UniversalPortal() {
     localStorage.removeItem("systolab.auth");
     setAuth(null);
     setPortal(null);
+    setAgencyOperating(null);
     navigate("/");
   }
 
@@ -141,12 +156,12 @@ export function UniversalPortal() {
       <PortalTopNav auth={auth} path={path} navigate={navigate} signOut={signOut} />
       {message && <div className="portal-status">{message}</div>}
       {error && <div className="portal-alert">{error}</div>}
-      {!auth && protectedRoute ? <PortalAuthPage mode="login" onAuth={applyAuth} /> : renderPortalPage(path, { auth, portal, tenant, plans, usage, agencyDashboard, navigate, refreshPortal, applyAuth })}
+      {!auth && protectedRoute ? <PortalAuthPage mode="login" onAuth={applyAuth} /> : renderPortalPage(path, { auth, portal, tenant, plans, usage, agencyDashboard, agencyOperating, navigate, refreshPortal, refreshAgencyOperating, applyAuth })}
     </div>
   );
 }
 
-function renderPortalPage(path: string, ctx: { auth: StoredPortalAuth | null; portal: PortalMeResponse | null; tenant: PortalTenantSummary | null; plans: PortalBillingPlan[]; usage: PortalUsageOverview | null; agencyDashboard: AgencyDashboardResponse | null; navigate: (path: string) => void; refreshPortal: () => Promise<void>; applyAuth: (result: AuthResponse) => void }) {
+function renderPortalPage(path: string, ctx: { auth: StoredPortalAuth | null; portal: PortalMeResponse | null; tenant: PortalTenantSummary | null; plans: PortalBillingPlan[]; usage: PortalUsageOverview | null; agencyDashboard: AgencyDashboardResponse | null; agencyOperating: AgencyOperatingSystemResponse | null; navigate: (path: string) => void; refreshPortal: () => Promise<void>; refreshAgencyOperating: () => Promise<void>; applyAuth: (result: AuthResponse) => void }) {
   if (path === "/") return <PortalLanding navigate={ctx.navigate} />;
   if (path === "/login" || path === "/signup") return <PortalAuthPage mode={path === "/signup" ? "signup" : "login"} onAuth={ctx.applyAuth} />;
   if (path === "/features") return <PortalStaticPage eyebrow="Features" title="Business Decision Intelligence" items={featureCards} />;
@@ -157,18 +172,19 @@ function renderPortalPage(path: string, ctx: { auth: StoredPortalAuth | null; po
   if (path === "/white-label" && !ctx.auth) return <PortalWhiteLabelMarketing navigate={ctx.navigate} />;
   if (path === "/testimonials") return <PortalTestimonials navigate={ctx.navigate} />;
   if (path === "/contact") return <PortalContact navigate={ctx.navigate} />;
-  if (path === "/dashboard") return <PortalDashboard portal={ctx.portal} usage={ctx.usage} agencyDashboard={ctx.agencyDashboard} refresh={ctx.refreshPortal} navigate={ctx.navigate} />;
+  if (path === "/dashboard") return <PortalDashboard portal={ctx.portal} usage={ctx.usage} agencyDashboard={ctx.agencyDashboard} agencyOperating={ctx.agencyOperating} refresh={ctx.refreshPortal} navigate={ctx.navigate} />;
   if (path === "/projects") return <PortalProjects portal={ctx.portal} refresh={ctx.refreshPortal} navigate={ctx.navigate} />;
   if (path.startsWith("/projects/")) return <PortalProjectDetail workspaceId={path.split("/")[2] ?? ""} navigate={ctx.navigate} />;
   if (path === "/reports") return <PortalReports projects={ctx.portal?.projects ?? []} navigate={ctx.navigate} />;
+  if (path === "/clients") return <PortalClients tenant={ctx.tenant} agencyOperating={ctx.agencyOperating} refresh={ctx.refreshAgencyOperating} navigate={ctx.navigate} />;
   if (path === "/billing") return <PortalBilling tenant={ctx.tenant} plans={ctx.plans} />;
-  if (path === "/white-label") return <PortalWhiteLabel tenant={ctx.tenant} refresh={ctx.refreshPortal} />;
+  if (path === "/white-label") return <PortalWhiteLabel tenant={ctx.tenant} agencyOperating={ctx.agencyOperating} refresh={ctx.refreshPortal} refreshAgencyOperating={ctx.refreshAgencyOperating} />;
   if (path === "/account" || path === "/security") return <PortalAccountSecurity auth={ctx.auth} security={path === "/security"} />;
   return <PortalOperationsPage path={path as PortalPath} projects={ctx.portal?.projects ?? []} navigate={ctx.navigate} />;
 }
 function PortalTopNav({ auth, path, navigate, signOut }: { auth: StoredPortalAuth | null; path: string; navigate: (path: string) => void; signOut: () => void }) {
   const items: Array<[string, string]> = auth
-    ? [["/dashboard", "Dashboard"], ["/projects", "Projects"], ["/reports", "Reports"], ["/billing", "Billing"], ["/white-label", "White Label"]]
+    ? [["/dashboard", "Dashboard"], ["/projects", "Projects"], ["/reports", "Reports"], ["/clients", "Clients"], ["/team", "Team"], ["/billing", "Billing"], ["/white-label", "White Label"]]
     : [["/features", "Features"], ["/pricing", "Pricing"], ["/demo", "Live Demo"], ["/docs", "Docs"], ["/white-label", "White Label"], ["/contact", "Contact"]];
   return (
     <header className="portal-nav">
@@ -252,24 +268,33 @@ function PortalAuthPage({ mode, onAuth }: { mode: "login" | "signup"; onAuth: (r
   );
 }
 
-function PortalDashboard({ portal, usage, agencyDashboard, refresh, navigate }: { portal: PortalMeResponse | null; usage: PortalUsageOverview | null; agencyDashboard: AgencyDashboardResponse | null; refresh: () => Promise<void>; navigate: (path: string) => void }) {
+function PortalDashboard({ portal, usage, agencyDashboard, agencyOperating, refresh, navigate }: { portal: PortalMeResponse | null; usage: PortalUsageOverview | null; agencyDashboard: AgencyDashboardResponse | null; agencyOperating: AgencyOperatingSystemResponse | null; refresh: () => Promise<void>; navigate: (path: string) => void }) {
   const organization = portal?.tenants[0] ?? null;
   const projects = portal?.projects ?? [];
   const latest = projects.find((project) => project.latestReport)?.latestReport;
-  const organizationName = organization?.branding.publicName ?? organization?.tenantSlug ?? "No organization yet";
+  const organizationName = organization?.branding.publicName ?? agencyOperating?.profile.companyName ?? organization?.tenantSlug ?? "No organization yet";
+  const progress = agencyOperating?.progress;
+  const activeServices = agencyOperating?.serviceCatalog.filter((service) => service.active).slice(0, 6) ?? [];
+  const clients = agencyOperating?.clients ?? [];
+  const knowledge = agencyOperating?.knowledgeBase;
   return (
     <main className="portal-main">
       <PortalPageHeader eyebrow="Executive Dashboard" title={`Welcome back${portal?.user.displayName ? `, ${portal.user.displayName.split(" ")[0]}` : ""}.`} actions={<button className="portal-primary" onClick={() => navigate(organization ? "/projects" : "/dashboard")}>{organization ? "+ Add Website" : "Create Organization"}</button>} />
       {!organization && <CreateOrganizationCard refresh={refresh} />}
       <section className="portal-dashboard-grid">
-        <div className="portal-panel"><h2>Organization</h2><MetricTile label="Name" value={organizationName} /><MetricTile label="White Label" value={organization ? "Available" : "Create organization first"} /><MetricTile label="Team" value={organization ? "Ready" : "Pending"} /></div>
+        <div className="portal-panel"><h2>Organization</h2><MetricTile label="Name" value={organizationName} /><MetricTile label="White Label" value={organization ? "Available" : "Create organization first"} /><MetricTile label="Team" value={agencyOperating ? `${agencyOperating.profile.teamMembers.length || 1} role profile` : "Pending"} /></div>
         <div className="portal-panel"><h2>Usage</h2><MetricTile label="Reports this month" value={`${usage?.scanLimit.used ?? 0}/${usage?.scanLimit.limit === -1 ? "Unlimited" : usage?.scanLimit.limit ?? 0}`} /><MetricTile label="API calls" value={`${usage?.apiCallLimit.used ?? 0}/${usage?.apiCallLimit.limit === -1 ? "Unlimited" : usage?.apiCallLimit.limit ?? 0}`} /></div>
         <div className="portal-panel wide"><h2>Business Health Snapshot</h2><div className="health-snapshot"><HealthRow label="Customer Acquisition" value={latest?.oss === null ? "Not scored" : latest ? "Tracked" : "Ready for first report"} /><HealthRow label="Customer Trust" value={latest?.businessRiskStatus ?? "Awaiting report"} /><HealthRow label="Customer Decision Support" value={latest ? latest.visualStateLabel : "Needs first report"} /><HealthRow label="Competitive Position" value={projects.some((project) => project.competitorUrls.length) ? "Competitors configured" : "Add competitors"} /><HealthRow label="Local Presence" value={projects.some((project) => project.gbpUrl) ? "GBP linked" : "Needs GBP URL"} /><HealthRow label="Priority" value={latest ? "Review latest decisions" : "Run first report"} /></div></div>
         <div className="portal-panel wide"><h2>Projects</h2>{projects.length ? <ProjectList projects={projects} navigate={navigate} /> : <p className="portal-muted">Add a website to create your first project and generate a business intelligence report.</p>}</div>
         <div className="portal-panel"><h2>Recent Reports</h2><MetricTile label="Latest" value={latest ? latest.visualStateLabel : "No reports yet"} /><MetricTile label="OSS" value={latest?.oss === null || latest?.oss === undefined ? "Not scored" : `${latest.oss}/100`} /></div>
-        <div className="portal-panel wide"><h2>Agency Analytics</h2><div className="portal-signal-grid"><MetricTile label="Reports generated" value={String(agencyDashboard?.analytics.reportsGenerated ?? 0)} /><MetricTile label="Leads created" value={String(agencyDashboard?.analytics.leadsCreated ?? projects.length)} /><MetricTile label="Report-to-client rate" value={`${agencyDashboard?.analytics.reportToClientConversionRate ?? 0}%`} /><MetricTile label="CRM outbox" value={agencyDashboard?.crm.enabled ? `${agencyDashboard.crm.provider} / ${agencyDashboard.crm.queuedLeadCount}` : "Disabled"} /></div><p className="portal-muted">{agencyDashboard?.analytics.mostCommonClientIssues.length ? `Common issues: ${agencyDashboard.analytics.mostCommonClientIssues.slice(0, 3).join("; ")}` : "Common client issues appear after reports are generated."}</p></div>
-        <div className="portal-panel wide"><h2>Agency Success Center</h2><div className="health-snapshot"><HealthRow label="Pitch first" value={agencyDashboard?.successCenter.servicesToPitchFirst.slice(0, 3).join(", ") || "Run reports to identify services"} /><HealthRow label="Estimated deal size" value={agencyDashboard?.successCenter.estimatedDealSize ?? "Pending report data"} /><HealthRow label="Suggested tier" value={agencyDashboard?.successCenter.suggestedPricingTier ?? "Pending report data"} /></div><p className="portal-muted">{agencyDashboard?.successCenter.personalizedSalesScript ?? "Sales script appears after reports create evidence-backed recommendations."}</p></div>
-        <div className="portal-panel"><h2>Recommendations</h2><p className="portal-muted">Recommendations appear after your first report and are organized by business impact, evidence strength, and priority.</p></div>
+        <div className="portal-panel wide"><h2>Agency Analytics</h2><div className="portal-signal-grid"><MetricTile label="Reports generated" value={String(agencyDashboard?.analytics.reportsGenerated ?? progress?.reportsGenerated ?? 0)} /><MetricTile label="Leads created" value={String(agencyDashboard?.analytics.leadsCreated ?? clients.length)} /><MetricTile label="Report-to-client rate" value={`${agencyDashboard?.analytics.reportToClientConversionRate ?? 0}%`} /><MetricTile label="CRM outbox" value={agencyDashboard?.crm.enabled ? `${agencyDashboard.crm.provider} / ${agencyDashboard.crm.queuedLeadCount}` : "Disabled"} /></div><p className="portal-muted">{agencyDashboard?.analytics.mostCommonClientIssues.length ? `Common issues: ${agencyDashboard.analytics.mostCommonClientIssues.slice(0, 3).join("; ")}` : "Common client issues appear after reports are generated."}</p></div>
+        <div className="portal-panel wide"><h2>Agency Operating System</h2><div className="portal-signal-grid"><MetricTile label="Clients tracked" value={String(progress?.clientsTracked ?? clients.length)} /><MetricTile label="Improved clients" value={String(progress?.improvedClients ?? 0)} /><MetricTile label="Average score delta" value={progress?.averageScoreDelta === null || progress?.averageScoreDelta === undefined ? "No trend yet" : formatDelta(progress.averageScoreDelta)} /><MetricTile label="Remaining priorities" value={String(progress?.remainingPriorities ?? 0)} /></div><p className="portal-muted">{agencyOperating ? `Profile, client management, permissions, sharing controls, service catalog, proposals, and audit trail are active for ${agencyOperating.profile.companyName}.` : "Create an organization to activate agency operating controls."}</p></div>
+        <div className="portal-panel"><h2>Service Catalog</h2>{activeServices.length ? <div className="portal-timeline">{activeServices.map((service) => <span key={service.serviceId}>{service.name}</span>)}</div> : <p className="portal-muted">Configure agency services from white-label settings.</p>}</div>
+        <div className="portal-panel"><h2>Knowledge Base</h2><MetricTile label="Case studies" value={String(knowledge?.caseStudies.length ?? 0)} /><MetricTile label="FAQs" value={String(knowledge?.faqs.length ?? 0)} /><MetricTile label="Methodologies" value={String(knowledge?.methodologies.length ?? 0)} /></div>
+        <div className="portal-panel wide"><h2>Client Management</h2>{clients.length ? <div className="portal-table">{clients.slice(0, 5).map((client) => <button key={client.workspaceId} className="portal-table-row" onClick={() => navigate("/clients")}><span><strong>{client.clientName}</strong><small>{safeHostLabel(client.targetUrl)}</small></span><span>{titleCaseStatus(client.followUpStatus)}</span><span>{client.scoreDelta === null ? "No trend" : formatDelta(client.scoreDelta)}</span></button>)}</div> : <p className="portal-muted">Clients appear here after you add website projects.</p>}</div>
+        <div className="portal-panel wide"><h2>Agency Success Center</h2><div className="health-snapshot"><HealthRow label="Pitch first" value={agencyDashboard?.successCenter.servicesToPitchFirst.slice(0, 3).join(", ") || activeServices.slice(0, 3).map((service) => service.name).join(", ") || "Run reports to identify services"} /><HealthRow label="Estimated deal size" value={agencyDashboard?.successCenter.estimatedDealSize ?? "Pending report data"} /><HealthRow label="Suggested tier" value={agencyDashboard?.successCenter.suggestedPricingTier ?? "Pending report data"} /></div><p className="portal-muted">{agencyDashboard?.successCenter.personalizedSalesScript ?? "Sales script appears after reports create evidence-backed recommendations."}</p></div>
+        <div className="portal-panel wide"><h2>AI Sales Coach</h2><p className="portal-muted">Private agency-only guidance. This is never shown in client reports.</p><div className="portal-signal-grid"><MetricTile label="Easiest services" value={agencyOperating?.salesCoach.easiestServicesToSell.slice(0, 3).join(", ") || "Run reports"} /><MetricTile label="Implementation effort" value={agencyOperating?.salesCoach.estimatedImplementationEffort ?? "Pending"} /><MetricTile label="Playbooks" value={String(agencyOperating?.salesCoach.clientPlaybooks.length ?? 0)} /><MetricTile label="Coach status" value={agencyOperating?.salesCoach.status ?? "Limited"} /></div><div className="health-snapshot compact"><HealthRow label="Likely objection" value={agencyOperating?.salesCoach.likelyClientObjections[0] ?? "No objection model yet"} /><HealthRow label="Suggested response" value={agencyOperating?.salesCoach.suggestedResponses[0] ?? "Generate a report to create a response"} /><HealthRow label="Meeting agenda" value={agencyOperating?.salesCoach.suggestedMeetingAgenda[0] ?? "Review evidence and next steps"} /></div></div>
+        <div className="portal-panel wide"><h2>Audit Trail</h2>{agencyOperating?.auditTrail.length ? <div className="portal-table">{agencyOperating.auditTrail.slice(0, 5).map((event) => <div key={event.eventId} className="portal-table-row static"><span><strong>{event.summary}</strong><small>{event.action}</small></span><span>{formatDateLabel(event.createdAt)}</span></div>)}</div> : <p className="portal-muted">Agency profile, client, proposal, report, and recommendation activity will be recorded here.</p>}</div>
       </section>
     </main>
   );
@@ -447,11 +472,23 @@ function PortalBilling({ tenant, plans }: { tenant: PortalTenantSummary | null; 
   useEffect(() => { if (tenant) getBillingOverview(tenant.tenantSlug).then(setOverview).catch(() => setOverview(null)); }, [tenant?.tenantSlug]);
   return <main className="portal-main"><PortalPageHeader eyebrow="Billing" title="Plan, usage, limits, and API capacity" /><section className="portal-band pricing-grid">{(overview?.plans ?? plans).map((plan) => <PricingCard key={plan.planId} plan={plan} />)}</section><section className="portal-panel"><h2>Current usage</h2><div className="portal-signal-grid"><MetricTile label="Organization" value={tenant?.branding.publicName ?? tenant?.tenantSlug ?? "No organization"} /><MetricTile label="Reports" value={`${overview?.usage.scanLimit.used ?? 0}/${overview?.usage.scanLimit.limit ?? 0}`} /><MetricTile label="API calls" value={`${overview?.usage.apiCallLimit.used ?? 0}/${overview?.usage.apiCallLimit.limit ?? 0}`} /></div></section></main>;
 }
-function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | null; refresh: () => Promise<void> }) {
+function PortalWhiteLabel({ tenant, agencyOperating, refresh, refreshAgencyOperating }: { tenant: PortalTenantSummary | null; agencyOperating: AgencyOperatingSystemResponse | null; refresh: () => Promise<void>; refreshAgencyOperating: () => Promise<void> }) {
   const [branding, setBranding] = useState<TenantBranding | null>(() => tenant?.branding ?? null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [serviceCatalogText, setServiceCatalogText] = useState("");
+  const [knowledgeText, setKnowledgeText] = useState({ caseStudies: "", methodologies: "", faqs: "", pricing: "", serviceDescriptions: "" });
   useEffect(() => setBranding(tenant?.branding ?? null), [tenant?.tenantSlug]);
+  useEffect(() => {
+    setServiceCatalogText(catalogTextFromItems(agencyOperating?.serviceCatalog ?? []));
+    setKnowledgeText({
+      caseStudies: (agencyOperating?.knowledgeBase.caseStudies ?? []).join("\n"),
+      methodologies: (agencyOperating?.knowledgeBase.methodologies ?? []).join("\n"),
+      faqs: (agencyOperating?.knowledgeBase.faqs ?? []).join("\n"),
+      pricing: (agencyOperating?.knowledgeBase.pricing ?? []).join("\n"),
+      serviceDescriptions: (agencyOperating?.knowledgeBase.serviceDescriptions ?? []).join("\n")
+    });
+  }, [agencyOperating?.tenantSlug]);
 
   function readImageUpload(event: ChangeEvent<HTMLInputElement>, field: "logoUrl" | "faviconUrl" | "digitalSignature" | "consultantPhotoUrl") {
     const file = event.target.files?.[0];
@@ -500,8 +537,8 @@ function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | n
             <label><span>Consultant photo URL</span><input value={branding.consultantPhotoUrl ?? ""} onChange={(e) => setBranding({ ...branding, consultantPhotoUrl: e.target.value })} placeholder="Optional photo" /></label>
             <label><span>Primary report domain</span><input value={branding.customDomain ?? ""} onChange={(e) => setBranding({ ...branding, customDomain: e.target.value })} placeholder="reports.agency.com" /></label>
             <label className="full"><span>Allowed report domains</span><textarea value={listText(branding.customDomains)} onChange={(e) => setBranding({ ...branding, customDomains: parseLines(e.target.value) })} placeholder="reports.agency.com\naudit.agency.com\nintelligence.company.com" /></label>
-            <label><span>Domain status</span><select value={branding.customDomainStatus ?? "not_configured"} onChange={(e) => setBranding({ ...branding, customDomainStatus: e.target.value as TenantBranding["customDomainStatus"] })}><option value="not_configured">Not configured</option><option value="pending_dns">Pending DNS</option><option value="verified">Verified</option><option value="failed">Failed</option></select></label>
-            <label><span>DNS target</span><input value={branding.customDomainVerificationTarget ?? ""} onChange={(e) => setBranding({ ...branding, customDomainVerificationTarget: e.target.value })} placeholder={`${tenant.tenantSlug}.systolab.app`} /></label>
+            <label><span>Domain status</span><input value={branding.customDomainStatus ?? "not_configured"} disabled /></label>
+            <label><span>DNS target</span><input value={branding.customDomainVerificationTarget ?? `${tenant.tenantSlug}.systolab.app`} disabled /></label>
           </div>
         </div>
 
@@ -527,7 +564,6 @@ function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | n
             <label><span>Report title</span><input value={branding.reportTitle ?? ""} onChange={(e) => setBranding({ ...branding, reportTitle: e.target.value })} placeholder="Website Growth & Decision Intelligence Report" /></label>
             <label><span>Header text</span><input value={branding.reportHeaderText ?? ""} onChange={(e) => setBranding({ ...branding, reportHeaderText: e.target.value })} placeholder="Website Growth Assessment" /></label>
             <label><span>Report language</span><select value={branding.reportLanguage ?? "en"} onChange={(e) => setBranding({ ...branding, reportLanguage: e.target.value as TenantBranding["reportLanguage"] })}><option value="en">English</option><option value="ar">Arabic</option><option value="fr">French</option><option value="de">German</option><option value="es">Spanish</option><option value="hi">Hindi</option></select></label>
-            <label><span>Industry template</span><select value={branding.industryTemplate ?? "general"} onChange={(e) => setBranding({ ...branding, industryTemplate: e.target.value as TenantBranding["industryTemplate"] })}><option value="general">General</option><option value="dentists">Dentists</option><option value="lawyers">Lawyers</option><option value="interior_designers">Interior Designers</option><option value="real_estate">Real Estate</option><option value="saas">SaaS</option><option value="hotels">Hotels</option><option value="ecommerce">E-commerce</option><option value="healthcare">Healthcare</option><option value="manufacturing">Manufacturing</option></select></label>
             <label><span>Icon style</span><select value={branding.iconStyle ?? "line"} onChange={(e) => setBranding({ ...branding, iconStyle: e.target.value as TenantBranding["iconStyle"] })}><option value="line">Line</option><option value="solid">Solid</option><option value="minimal">Minimal</option></select></label>
             <label><span>Valid days</span><input type="number" min="1" max="365" value={branding.reportValidityDays ?? 30} onChange={(e) => setBranding({ ...branding, reportValidityDays: Number(e.target.value) })} /></label>
             <label className="full"><span>Report introduction</span><textarea value={branding.reportIntroduction ?? ""} onChange={(e) => setBranding({ ...branding, reportIntroduction: e.target.value })} placeholder="Short executive introduction shown on the cover page" /></label>
@@ -555,7 +591,7 @@ function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | n
             <label><span>Enable proposal mode</span><input type="checkbox" checked={Boolean(branding.proposalModeEnabled)} onChange={(e) => setBranding({ ...branding, proposalModeEnabled: e.target.checked })} /></label>
             <label><span>Estimated timeline</span><input value={branding.proposalTimeline ?? ""} onChange={(e) => setBranding({ ...branding, proposalTimeline: e.target.value })} placeholder="2-4 weeks" /></label>
             <label><span>Investment range</span><input value={branding.proposalInvestmentRange ?? ""} onChange={(e) => setBranding({ ...branding, proposalInvestmentRange: e.target.value })} placeholder="Starting from $..." /></label>
-            <label><span>Expected impact</span><input value={branding.proposalExpectedImpact ?? ""} onChange={(e) => setBranding({ ...branding, proposalExpectedImpact: e.target.value })} placeholder="Reduce decision friction and improve qualified enquiries" /></label>
+            <label><span>Agency service outcome note</span><input value={branding.proposalExpectedServiceOutcome ?? ""} onChange={(e) => setBranding({ ...branding, proposalExpectedServiceOutcome: e.target.value })} placeholder="How your service helps implement the locked findings" /></label>
             <label className="full"><span>Proposal deliverables</span><textarea value={listText(branding.proposalDeliverables)} onChange={(e) => setBranding({ ...branding, proposalDeliverables: parseLines(e.target.value) })} placeholder="Technical SEO fixes\nLanding page improvements\nLocal SEO optimization" /></label>
           </div>
         </div>
@@ -600,7 +636,7 @@ function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | n
             setStatus("");
             setError("");
             try {
-              await updateWhiteLabelBranding(tenant.tenantSlug, branding);
+              await updateWhiteLabelBranding(tenant.tenantSlug, whiteLabelEditablePayload(branding));
               setStatus("White-label settings saved.");
               await refresh();
             } catch (brandingError) {
@@ -609,6 +645,38 @@ function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | n
           }}>Save white-label settings</button>
           {status && <div className="portal-status inline">{status}</div>}
           {error && <div className="portal-alert inline">{error}</div>}
+        </div>
+
+        <div className="portal-panel wide">
+          <h2>Agency Service Catalog & Knowledge Base</h2>
+          <p className="portal-muted">These inputs customize agency implementation notes, proposal generation, and sales enablement. SYSTOLAB intelligence findings remain locked.</p>
+          <div className="portal-form-grid">
+            <label className="full"><span>Service catalog</span><textarea value={serviceCatalogText} onChange={(e) => setServiceCatalogText(e.target.value)} placeholder="SEO | seo | $1500\nWebsite Development | website | Fixed project" /></label>
+            <label className="full"><span>Case studies</span><textarea value={knowledgeText.caseStudies} onChange={(e) => setKnowledgeText({ ...knowledgeText, caseStudies: e.target.value })} placeholder="One case study per line" /></label>
+            <label className="full"><span>Methodologies</span><textarea value={knowledgeText.methodologies} onChange={(e) => setKnowledgeText({ ...knowledgeText, methodologies: e.target.value })} placeholder="One methodology per line" /></label>
+            <label className="full"><span>FAQs</span><textarea value={knowledgeText.faqs} onChange={(e) => setKnowledgeText({ ...knowledgeText, faqs: e.target.value })} placeholder="One FAQ per line" /></label>
+            <label><span>Pricing notes</span><textarea value={knowledgeText.pricing} onChange={(e) => setKnowledgeText({ ...knowledgeText, pricing: e.target.value })} placeholder="One pricing rule per line" /></label>
+            <label><span>Service descriptions</span><textarea value={knowledgeText.serviceDescriptions} onChange={(e) => setKnowledgeText({ ...knowledgeText, serviceDescriptions: e.target.value })} placeholder="One service description per line" /></label>
+          </div>
+          <button className="portal-primary full" onClick={async () => {
+            if (!tenant) return;
+            setStatus("");
+            setError("");
+            try {
+              await updateAgencyServiceCatalog(tenant.tenantSlug, parseServiceCatalogText(serviceCatalogText));
+              await updateAgencyKnowledgeBase(tenant.tenantSlug, {
+                caseStudies: parseLines(knowledgeText.caseStudies),
+                methodologies: parseLines(knowledgeText.methodologies),
+                faqs: parseLines(knowledgeText.faqs),
+                pricing: parseLines(knowledgeText.pricing),
+                serviceDescriptions: parseLines(knowledgeText.serviceDescriptions)
+              });
+              setStatus("Agency operating settings saved.");
+              await refreshAgencyOperating();
+            } catch (operatingError) {
+              setError(operatingError instanceof Error ? operatingError.message : "Unable to update agency operating settings.");
+            }
+          }}>Save agency operating settings</button>
         </div>
 
         <div className="portal-panel brand-preview" style={{ "--brand": branding.primaryColor, "--accent": branding.accentColor } as CSSProperties}>
@@ -624,6 +692,77 @@ function PortalWhiteLabel({ tenant, refresh }: { tenant: PortalTenantSummary | n
           </div>
           <button>{branding.reportTitle || "Website Growth & Decision Intelligence Report"}</button>
         </div>
+      </section>
+    </main>
+  );
+}
+function PortalClients({ tenant, agencyOperating, refresh, navigate }: { tenant: PortalTenantSummary | null; agencyOperating: AgencyOperatingSystemResponse | null; refresh: () => Promise<void>; navigate: (path: string) => void }) {
+  const [noteByClient, setNoteByClient] = useState<Record<string, string>>({});
+  const [statusByClient, setStatusByClient] = useState<Record<string, ClientFollowUpStatus>>({});
+  const [actionStatus, setActionStatus] = useState("");
+  const [error, setError] = useState("");
+  const clients = agencyOperating?.clients ?? [];
+  const followUpOptions: ClientFollowUpStatus[] = ["new", "contacted", "proposal_sent", "won", "lost", "on_hold"];
+
+  async function saveClientState(client: ClientOperatingSummary) {
+    if (!tenant) return;
+    setActionStatus("");
+    setError("");
+    try {
+      await updateClientWorkspaceState(tenant.tenantSlug, client.workspaceId, { followUpStatus: statusByClient[client.workspaceId] ?? client.followUpStatus, note: noteByClient[client.workspaceId] });
+      setNoteByClient((current) => ({ ...current, [client.workspaceId]: "" }));
+      setActionStatus(`${client.clientName} updated.`);
+      await refresh();
+    } catch (clientError) {
+      setError(clientError instanceof Error ? clientError.message : "Unable to update client workspace.");
+    }
+  }
+
+  async function createProposal(client: ClientOperatingSummary) {
+    if (!tenant) return;
+    setActionStatus("");
+    setError("");
+    try {
+      const proposal = await generateAgencyProposal(tenant.tenantSlug, client.workspaceId);
+      setActionStatus(`${proposal.templateName} generated for ${proposal.clientName}. Services: ${proposal.recommendedServices.join(", ") || "configure service catalog"}.`);
+      await refresh();
+    } catch (proposalError) {
+      setError(proposalError instanceof Error ? proposalError.message : "Unable to generate proposal.");
+    }
+  }
+
+  if (!tenant) return <main className="portal-main"><PortalPageHeader eyebrow="Clients" title="Create an organization before managing clients" /></main>;
+  return (
+    <main className="portal-main">
+      <PortalPageHeader eyebrow="Client Management" title="Client workspaces, progress, proposals, and sharing controls" actions={<button className="portal-secondary" onClick={() => navigate("/projects")}>Add website</button>} />
+      <section className="portal-dashboard-grid">
+        <div className="portal-panel wide"><h2>Progress Tracking</h2><div className="portal-signal-grid"><MetricTile label="Clients" value={String(agencyOperating?.progress.clientsTracked ?? clients.length)} /><MetricTile label="Reports" value={String(agencyOperating?.progress.reportsGenerated ?? 0)} /><MetricTile label="Improved" value={String(agencyOperating?.progress.improvedClients ?? 0)} /><MetricTile label="Completed recommendations" value={String(agencyOperating?.progress.completedRecommendations ?? 0)} /></div></div>
+        <div className="portal-panel wide"><h2>AI Sales Coach</h2><p className="portal-muted">Private agency-only sales coaching based on the latest client reports.</p><div className="portal-table">{(agencyOperating?.salesCoach.clientPlaybooks ?? []).slice(0, 4).map((playbook) => <div key={playbook.workspaceId} className="portal-table-row static"><span><strong>{playbook.clientName}</strong><small>{playbook.nextMeetingFocus}</small></span><span>{playbook.servicesToPitch.slice(0, 2).join(", ") || "Services pending"}</span><span>{playbook.estimatedEffort}</span></div>)}</div>{!(agencyOperating?.salesCoach.clientPlaybooks.length) && <p className="portal-muted">Run client reports to generate service pitches, objections, responses, agenda, and follow-up sequence.</p>}</div>
+        <div className="portal-panel"><h2>Default Sharing</h2><MetricTile label="View" value={agencyOperating?.sharingDefaults.allowView ? "Allowed" : "Blocked"} /><MetricTile label="Download" value={agencyOperating?.sharingDefaults.allowDownload ? "Allowed" : "Blocked"} /><MetricTile label="Password" value={agencyOperating?.sharingDefaults.passwordProtected ? "Required" : "Not required"} /></div>
+        {actionStatus && <div className="portal-status inline wide">{actionStatus}</div>}
+        {error && <div className="portal-alert inline wide">{error}</div>}
+        {clients.length ? clients.map((client) => (
+          <article key={client.workspaceId} className="portal-panel wide">
+            <h2>{client.clientName}</h2>
+            <div className="portal-signal-grid">
+              <MetricTile label="Website" value={safeHostLabel(client.targetUrl)} />
+              <MetricTile label="Consultant" value={client.assignedConsultant ?? "Not assigned"} />
+              <MetricTile label="Follow-up" value={titleCaseStatus(client.followUpStatus)} />
+              <MetricTile label="First scan" value={client.firstScan?.oss === null || client.firstScan?.oss === undefined ? "Not scored" : `${client.firstScan.oss}/100`} />
+              <MetricTile label="Latest scan" value={client.latestScan?.oss === null || client.latestScan?.oss === undefined ? "Not scored" : `${client.latestScan.oss}/100`} />
+              <MetricTile label="Score delta" value={client.scoreDelta === null ? "No trend" : formatDelta(client.scoreDelta)} />
+              <MetricTile label="Competitors" value={String(client.competitors.length)} />
+              <MetricTile label="Remaining priorities" value={String(client.remainingPriorities)} />
+            </div>
+            <div className="health-snapshot compact"><HealthRow label="Report sharing" value={`${client.sharingControls.allowView ? "View" : "No view"} / ${client.sharingControls.allowDownload ? "Download" : "No download"} / ${client.sharingControls.allowShare ? "Share" : "Private"}`} /><HealthRow label="Renewal reminder" value={client.renewalReminderAt ? formatDateLabel(client.renewalReminderAt) : "Not set"} /><HealthRow label="Latest report" value={client.latestScan ? formatDateLabel(client.latestScan.capturedAt) : "No report yet"} /></div>
+            <div className="portal-form-grid">
+              <label><span>Follow-up status</span><select value={statusByClient[client.workspaceId] ?? client.followUpStatus} onChange={(event) => setStatusByClient((current) => ({ ...current, [client.workspaceId]: event.target.value as ClientFollowUpStatus }))}>{followUpOptions.map((option) => <option key={option} value={option}>{titleCaseStatus(option)}</option>)}</select></label>
+              <label className="full"><span>Add note</span><textarea value={noteByClient[client.workspaceId] ?? ""} onChange={(event) => setNoteByClient((current) => ({ ...current, [client.workspaceId]: event.target.value }))} placeholder="Follow-up notes, client requests, renewal reminders, or implementation context" /></label>
+            </div>
+            <div className="portal-hero-actions"><button className="portal-primary" onClick={() => void saveClientState(client)}>Save client state</button><button className="portal-secondary" onClick={() => void createProposal(client)}>Generate proposal</button><button className="portal-secondary" onClick={() => navigate(`/projects/${client.workspaceId}`)}>Open project</button></div>
+            {client.notes.length > 0 && <div className="portal-table">{client.notes.slice(0, 3).map((note) => <div key={note.noteId} className="portal-table-row static"><span><strong>{note.body}</strong><small>{formatDateLabel(note.createdAt)}</small></span></div>)}</div>}
+          </article>
+        )) : <div className="portal-panel wide"><h2>No clients yet</h2><p className="portal-muted">Add website projects to create client workspaces with scan history, reports, competitors, notes, proposals, and progress tracking.</p><button className="portal-primary" onClick={() => navigate("/projects")}>Add website</button></div>}
       </section>
     </main>
   );
@@ -715,6 +854,119 @@ function simpleId(value: string) {
   let hash = 0;
   for (const char of value) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   return hash.toString(16);
+}
+
+function implementationNotesText(notes?: TenantBranding["agencyImplementationNotes"]): string {
+  return (notes ?? []).map((item) => [item.recommendationId, item.note].filter(Boolean).join(" | ")).join("\n");
+}
+
+function parseImplementationNotes(value: string): TenantBranding["agencyImplementationNotes"] {
+  return value
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [first, ...rest] = line.split("|").map((part) => part.trim());
+      if (rest.length === 0) return { note: first ?? "" };
+      return { recommendationId: first || undefined, note: rest.join(" | ") };
+    })
+    .filter((item) => item.note);
+}
+
+function whiteLabelEditablePayload(branding: TenantBranding): Partial<TenantBranding> {
+  return {
+    publicName: branding.publicName,
+    logoUrl: branding.logoUrl,
+    faviconUrl: branding.faviconUrl,
+    consultantPhotoUrl: branding.consultantPhotoUrl,
+    consultantEmail: branding.consultantEmail,
+    consultantDesignation: branding.consultantDesignation,
+    websiteUrl: branding.websiteUrl,
+    phoneNumber: branding.phoneNumber,
+    officeAddress: branding.officeAddress,
+    googleMapsUrl: branding.googleMapsUrl,
+    businessRegistration: branding.businessRegistration,
+    licenseNumber: branding.licenseNumber,
+    socialLinks: branding.socialLinks,
+    consultantName: branding.consultantName,
+    disclaimerText: branding.disclaimerText,
+    coverPageDesign: branding.coverPageDesign,
+    reportIntroduction: branding.reportIntroduction,
+    reportHeaderText: branding.reportHeaderText,
+    thankYouPageTitle: branding.thankYouPageTitle,
+    thankYouPageMessage: branding.thankYouPageMessage,
+    iconStyle: branding.iconStyle,
+    qrCodeUrl: branding.qrCodeUrl,
+    whatsappLink: branding.whatsappLink,
+    whatsappNumber: branding.whatsappNumber,
+    calendarBookingLink: branding.calendarBookingLink,
+    digitalSignature: branding.digitalSignature,
+    primaryCtaLabel: branding.primaryCtaLabel,
+    primaryCtaUrl: branding.primaryCtaUrl,
+    secondaryCtaLabel: branding.secondaryCtaLabel,
+    secondaryCtaUrl: branding.secondaryCtaUrl,
+    reportValidityDays: branding.reportValidityDays,
+    validityStatement: branding.validityStatement,
+    proposalModeEnabled: branding.proposalModeEnabled,
+    proposalTimeline: branding.proposalTimeline,
+    proposalInvestmentRange: branding.proposalInvestmentRange,
+    proposalDeliverables: branding.proposalDeliverables,
+    proposalExpectedServiceOutcome: branding.proposalExpectedServiceOutcome,
+    proposalPageContent: branding.proposalPageContent,
+    pricingPageContent: branding.pricingPageContent,
+    crmIntegration: branding.crmIntegration,
+    pdfSecurity: branding.pdfSecurity,
+    reportLanguage: branding.reportLanguage,
+    currency: branding.currency,
+    timeZone: branding.timeZone,
+    followUpAssets: branding.followUpAssets,
+    agencySuccessCenter: branding.agencySuccessCenter,
+    serviceOfferings: branding.serviceOfferings,
+    aboutCompany: branding.aboutCompany,
+    whyChooseUs: branding.whyChooseUs,
+    portfolioItems: branding.portfolioItems,
+    testimonials: branding.testimonials,
+    agencyImplementationNotes: branding.agencyImplementationNotes,
+    poweredByMode: branding.poweredByMode,
+    primaryColor: branding.primaryColor,
+    secondaryColor: branding.secondaryColor,
+    accentColor: branding.accentColor,
+    typography: branding.typography,
+    loginBackgroundUrl: branding.loginBackgroundUrl,
+    dashboardWelcomeMessage: branding.dashboardWelcomeMessage,
+    emailSenderName: branding.emailSenderName,
+    supportEmail: branding.supportEmail,
+    privacyPolicyUrl: branding.privacyPolicyUrl,
+    termsOfServiceUrl: branding.termsOfServiceUrl,
+    reportTitle: branding.reportTitle,
+    reportFooter: branding.reportFooter,
+    customDomain: branding.customDomain,
+    customDomains: branding.customDomains
+  };
+}
+function catalogTextFromItems(items: AgencyOperatingSystemResponse["serviceCatalog"]) {
+  return items.map((item) => [item.name, item.category, item.startingPrice ?? item.pricingModel ?? ""].filter(Boolean).join(" | ")).join("\n");
+}
+
+function parseServiceCatalogText(value: string): AgencyOperatingSystemResponse["serviceCatalog"] {
+  const items: AgencyOperatingSystemResponse["serviceCatalog"] = [];
+  value.split(/\n/).forEach((line, index) => {
+    const [name, category, price] = line.split("|").map((part) => part.trim());
+    if (name) items.push({ serviceId: `svc_custom_${index + 1}`, name, category: category || "other", startingPrice: price || undefined, active: true });
+  });
+  return items;
+}
+function formatDelta(value: number) {
+  return `${value > 0 ? "+" : ""}${value}`;
+}
+
+function titleCaseStatus(value: string) {
+  return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatDateLabel(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Not set" : date.toLocaleDateString();
 }
 
 function safeHostLabel(url: string) {

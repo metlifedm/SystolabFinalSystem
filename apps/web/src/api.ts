@@ -168,6 +168,112 @@ export interface AgencyDashboardResponse {
   crm: { enabled: boolean; provider: string; deliveryMode: string; queuedLeadCount: number; note: string };
   workspaces: Array<Record<string, unknown>>;
 }
+
+export type AgencyTeamRole = "owner" | "admin" | "sales" | "seo_specialist" | "account_manager" | "viewer";
+export type ClientFollowUpStatus = "new" | "contacted" | "proposal_sent" | "won" | "lost" | "on_hold";
+export type AgencyRecommendationStatus = "not_started" | "in_progress" | "completed" | "not_applicable" | "waiting_for_client";
+
+export interface AgencyOperatingSystemResponse {
+  tenantSlug: string;
+  profile: {
+    companyName: string;
+    companyLogo?: string;
+    brandColors: { primary: string; secondary?: string; accent: string };
+    website?: string;
+    contactEmail?: string;
+    phoneNumber?: string;
+    officeLocations: string[];
+    teamMembers: Array<{ userId?: string; name: string; email?: string; role: AgencyTeamRole }>;
+    defaultReportSettings: Record<string, unknown>;
+    serviceOfferings: string[];
+    specializedIndustries: string[];
+  };
+  serviceCatalog: Array<{ serviceId: string; name: string; category: string; description?: string; pricingModel?: string; startingPrice?: string; active: boolean }>;
+  proposalTemplates: Array<{ templateId: string; name: string; sections: string[]; pricingStructure?: string; defaultTimeline?: string; isDefault: boolean; active: boolean }>;
+  knowledgeBase: {
+    caseStudies: string[];
+    pricing: string[];
+    serviceDescriptions: string[];
+    guarantees: string[];
+    methodologies: string[];
+    faqs: string[];
+    brandVoice?: string;
+    proposalTemplateNotes: string[];
+  };
+  sharingDefaults: SharingControls;
+  permissions: Array<{ role: AgencyTeamRole; permissions: string[] }>;
+  clients: ClientOperatingSummary[];
+  progress: {
+    clientsTracked: number;
+    reportsGenerated: number;
+    improvedClients: number;
+    averageScoreDelta: number | null;
+    completedRecommendations: number;
+    remainingPriorities: number;
+  };
+  auditTrail: Array<{ eventId: string; action: string; workspaceId?: string; actorUserId?: string; summary: string; createdAt: string }>;
+  salesCoach: {
+    status: "ready" | "limited";
+    summary: string;
+    easiestServicesToSell: string[];
+    estimatedImplementationEffort: "Low" | "Medium" | "High" | "Mixed";
+    likelyClientObjections: string[];
+    suggestedResponses: string[];
+    crossSellOpportunities: string[];
+    upsellOpportunities: string[];
+    suggestedMeetingAgenda: string[];
+    followUpSequence: string[];
+    clientPlaybooks: Array<{
+      workspaceId: string;
+      clientName: string;
+      reportStatus: string;
+      servicesToPitch: string[];
+      estimatedEffort: "Low" | "Medium" | "High";
+      primaryObjection: string;
+      suggestedResponse: string;
+      nextMeetingFocus: string;
+    }>;
+  };
+}
+
+export interface SharingControls {
+  allowView: boolean;
+  allowDownload: boolean;
+  allowPrint: boolean;
+  allowShare: boolean;
+  passwordProtected: boolean;
+  passwordHint?: string;
+  accessExpiresAt?: string;
+}
+
+export interface ClientOperatingSummary {
+  workspaceId: string;
+  clientName: string;
+  targetUrl: string;
+  assignedConsultant?: string;
+  followUpStatus: ClientFollowUpStatus;
+  renewalReminderAt?: string;
+  notes: Array<{ noteId: string; body: string; createdBy?: string; createdAt: string }>;
+  competitors: string[];
+  scanHistory: Array<{ snapshotId: string; capturedAt: string; oss: number | null; visualStateLabel: string }>;
+  firstScan?: { snapshotId: string; capturedAt: string; oss: number | null };
+  latestScan?: { snapshotId: string; capturedAt: string; oss: number | null };
+  scoreDelta: number | null;
+  completedRecommendations: number;
+  remainingPriorities: number;
+  recommendationStatuses: Array<{ recommendationId: string; status: AgencyRecommendationStatus; note?: string; updatedBy?: string; updatedAt: string }>;
+  sharingControls: SharingControls;
+}
+
+export interface GeneratedAgencyProposal {
+  proposalId: string;
+  workspaceId: string;
+  clientName: string;
+  templateName: string;
+  recommendedServices: string[];
+  sections: Array<{ title: string; body: string }>;
+  generatedAt: string;
+}
 export interface CreateScanResponse {
   jobId: string;
   status: string;
@@ -394,6 +500,76 @@ export async function getAgencyDashboard(tenantSlug: string): Promise<AgencyDash
   const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/dashboard`, { headers: storedAuthHeader() });
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
+}
+
+export async function getAgencyOperatingSystem(tenantSlug: string): Promise<AgencyOperatingSystemResponse> {
+  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/operating-system`, { headers: storedAuthHeader() });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+
+export async function updateAgencyProfile(tenantSlug: string, profile: Partial<AgencyOperatingSystemResponse["profile"]>): Promise<AgencyOperatingSystemResponse> {
+  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/profile`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    body: JSON.stringify(profile)
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function updateAgencyServiceCatalog(tenantSlug: string, items: AgencyOperatingSystemResponse["serviceCatalog"]): Promise<AgencyOperatingSystemResponse> {
+  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/services`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    body: JSON.stringify({ items })
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function updateAgencyProposalTemplates(tenantSlug: string, items: AgencyOperatingSystemResponse["proposalTemplates"]): Promise<AgencyOperatingSystemResponse> {
+  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/proposal-templates`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    body: JSON.stringify({ items })
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function updateAgencyKnowledgeBase(tenantSlug: string, knowledgeBase: Partial<AgencyOperatingSystemResponse["knowledgeBase"]>): Promise<AgencyOperatingSystemResponse> {
+  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/knowledge-base`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    body: JSON.stringify(knowledgeBase)
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+export async function updateClientWorkspaceState(tenantSlug: string, workspaceId: string, request: { assignedConsultantName?: string; followUpStatus?: ClientFollowUpStatus; renewalReminderAt?: string; note?: string; sharingControls?: Partial<SharingControls> }): Promise<ClientOperatingSummary> {
+  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/workspaces/${encodeURIComponent(workspaceId)}/client-state`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    body: JSON.stringify(request)
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function updateRecommendationStatus(tenantSlug: string, workspaceId: string, recommendationId: string, request: { status: AgencyRecommendationStatus; note?: string }): Promise<ClientOperatingSummary> {
+  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/workspaces/${encodeURIComponent(workspaceId)}/recommendations/${encodeURIComponent(recommendationId)}/status`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    body: JSON.stringify(request)
+  });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
+}
+
+export async function generateAgencyProposal(tenantSlug: string, workspaceId: string, templateId?: string): Promise<GeneratedAgencyProposal> {
+  return postJson(`/api/agency/${encodeURIComponent(tenantSlug)}/workspaces/${encodeURIComponent(workspaceId)}/proposals`, { templateId }, readStoredAccessToken());
 }
 export async function getUsageOverview(tenantSlug: string): Promise<PortalUsageOverview> {
   const response = await fetch(`${API_URL}/api/usage?tenantSlug=${encodeURIComponent(tenantSlug)}`, { headers: storedAuthHeader() });

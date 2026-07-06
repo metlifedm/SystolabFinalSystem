@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type {
   AiceDecisionObject,
   AuthResponse,
@@ -364,7 +364,7 @@ function AuthConsole() {
         <div className="auth-profile-bar">
           <div className="auth-profile-identity">
             <span className="auth-profile-name">{user.displayName || user.email || user.phone || "Verified user"}</span>
-            <span className="auth-profile-sub">{user.email ?? user.phone} Ã‚Â· {user.providers.join(", ")}</span>
+            <span className="auth-profile-sub">{user.email ?? user.phone} Â· {user.providers.join(", ")}</span>
           </div>
           <div className="auth-profile-actions">
             {tokens && (
@@ -493,7 +493,7 @@ function AuthConsole() {
           <div className="auth-expandable-form">
             <p className="auth-otp-hint">
               Code sent to <strong>{otpChallenge?.maskedDestination}</strong>
-              {otpChallenge?.simulatedDelivery.code && <span className="auth-dev-code"> Ã‚Â· dev: {otpChallenge.simulatedDelivery.code}</span>}
+              {otpChallenge?.simulatedDelivery.code && <span className="auth-dev-code"> Â· dev: {otpChallenge.simulatedDelivery.code}</span>}
             </p>
             <label className="auth-form-field">
               <span className="auth-field-label">One-Time Code</span>
@@ -623,7 +623,7 @@ function AuthConsole() {
           <div className="auth-expandable-form">
             <p className="auth-otp-hint">
               Reset link sent to <strong>{resetChallenge?.maskedDestination}</strong>
-              {resetChallenge?.simulatedDelivery.token && <span className="auth-dev-code"> Ã‚Â· dev: {resetChallenge.simulatedDelivery.token}</span>}
+              {resetChallenge?.simulatedDelivery.token && <span className="auth-dev-code"> Â· dev: {resetChallenge.simulatedDelivery.token}</span>}
             </p>
             <label className="auth-form-field">
               <span className="auth-field-label">Reset Token</span>
@@ -1013,6 +1013,16 @@ interface CustomerBusinessReport {
     summary: string;
     phases: Array<{ phase: string; focus: string; timeframe: string; actions: Array<{ action: string; rationale: string; confidence: string; lifecycleState: string }> }>;
   };
+  clientSuccessBlueprint: {
+    status: string;
+    summary: string;
+    phases: Array<{
+      phase: string;
+      timeframe: string;
+      focus: string;
+      items: Array<{ action: string; expectedBusinessOutcome: string; estimatedEffort: string; dependencies: string; successMetric: string; confidence: string }>;
+    }>;
+  };
   psychology: Array<{
     label: string;
     reading: string;
@@ -1090,6 +1100,7 @@ function CustomerBusinessReportView({ report, style }: { report: ReportSnapshot;
       <CustomerTopPrioritySection priority={customer.topPriority} />
       <CustomerExpectedBusinessOutcomesSection outcomes={customer.expectedBusinessOutcomes} />
       <CustomerBusinessInitiativesSection initiatives={customer.businessInitiatives} />
+      <CustomerSuccessBlueprintSection blueprint={customer.clientSuccessBlueprint} />
 
       <CustomerBusinessDecisionSummary summary={customer.businessDecisionSummary} />
       <CustomerDecisionTimelineSection timeline={customer.decisionTimeline} />
@@ -1444,6 +1455,36 @@ function CustomerBusinessInitiativesSection({ initiatives }: { initiatives: Cust
               {initiative.actions.map((action) => <li key={action}>{action}</li>)}
             </ul>
             <em>{initiative.confidence}</em>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function CustomerSuccessBlueprintSection({ blueprint }: { blueprint: CustomerBusinessReport["clientSuccessBlueprint"] }) {
+  if (!blueprint.phases.length) return null;
+  return (
+    <section className="report-section">
+      <div className="section-title">
+        <CalendarClock size={18} />
+        <h2>Your 90-Day Business Improvement Plan</h2>
+      </div>
+      <p className="decision-summary">{blueprint.summary}</p>
+      <div className="customer-intelligence-grid business-initiative-grid">
+        {blueprint.phases.map((phase) => (
+          <div className="customer-intelligence-card" key={phase.phase}>
+            <span>{phase.timeframe}</span>
+            <strong>{phase.phase}: {phase.focus}</strong>
+            <ul className="initiative-action-list">
+              {phase.items.map((item) => (
+                <li key={`${phase.phase}-${item.action}`}>
+                  <b>{item.action}</b><br />
+                  Outcome: {item.expectedBusinessOutcome}<br />
+                  Effort: {item.estimatedEffort}; Depends on: {item.dependencies}; Metric: {item.successMetric}; {item.confidence}
+                </li>
+              ))}
+            </ul>
           </div>
         ))}
       </div>
@@ -1934,6 +1975,7 @@ function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessRe
     outcomeAttribution: buildCustomerOutcomeAttribution(report),
     dependencySummary: buildCustomerDependencySummary(report),
     recommendationRoadmap: buildCustomerRecommendationRoadmap(report),
+    clientSuccessBlueprint: buildCustomerSuccessBlueprint(report),
     psychology: buildCustomerPsychology(report),
     impactSummary: buildBusinessImpactSummary(report, revenueLeaks, competitorGaps),
     recommendedActions: recommendations.slice(0, 6).map((item, index) => ({
@@ -2434,6 +2476,62 @@ function buildCustomerDependencySummary(report: ReportSnapshot): CustomerBusines
   };
 }
 
+function buildCustomerSuccessBlueprint(report: ReportSnapshot): CustomerBusinessReport["clientSuccessBlueprint"] {
+  const payload = (report as unknown as { customerClientSuccessBlueprint?: Partial<CustomerBusinessReport["clientSuccessBlueprint"]> }).customerClientSuccessBlueprint;
+  const payloadPhases = normalizeRows<CustomerBusinessReport["clientSuccessBlueprint"]["phases"][number]>(payload?.phases);
+  if (payloadPhases.length) {
+    return {
+      status: customerSafeText(payload?.status ?? "Sequenced"),
+      summary: customerSafeText(payload?.summary ?? "A 90-day plan generated from validated recommendations."),
+      phases: payloadPhases
+    };
+  }
+  const recommendations = dedupeCustomerActions(report);
+  const confidence = customerEvidenceStrengthLabel(report);
+  const fallbackAction = report.actionFirstPanel?.fallbackAction ?? "Improve the weakest validated customer decision area and re-run the scan.";
+  const actionAt = (index: number, fallback: string) => recommendations[index]?.action ?? fallback;
+  const reasonAt = (index: number) => recommendations[index]?.reason ?? "Validated evidence supports this improvement priority.";
+  const item = (action: string, reason: string, dependencies: string, metric: string) => ({
+    action: customerSafeText(action),
+    expectedBusinessOutcome: expectedOutcomeForAction(action),
+    estimatedEffort: effortForAction(action),
+    dependencies: customerSafeText(dependencies),
+    successMetric: customerSafeText(metric),
+    confidence: confidence || customerRecommendationEvidenceNote(reason)
+  });
+  return {
+    status: report.oss?.scoringStatus === "not_scored" ? "Content Unavailable" : "Evidence-backed roadmap",
+    summary: report.oss?.scoringStatus === "not_scored"
+      ? "Website content could not be collected, so a full 90-day improvement plan was not scored. First restore access and re-run the scan."
+      : "This plan turns the report into a practical 90-day roadmap. Outcomes are framed as expected business support, not guaranteed revenue, and depend on implementation plus follow-up measurement.",
+    phases: [
+      {
+        phase: "Week 1",
+        timeframe: "Critical fixes",
+        focus: "Remove the highest-friction customer decision blockers",
+        items: [item(actionAt(0, fallbackAction), reasonAt(0), "Access to website content, CMS, analytics or owner approval where needed", "Top recommendation completed and re-scan shows improved evidence coverage or score movement")]
+      },
+      {
+        phase: "Weeks 2-4",
+        timeframe: "High-impact improvements",
+        focus: "Improve customer trust, clarity, and action paths",
+        items: [item(actionAt(1, actionForDimensionKey("trust")), reasonAt(1), "Week 1 blocker removed and decision pages identified", "Trust, clarity, or conversion readiness improves on the next scan")]
+      },
+      {
+        phase: "Month 2",
+        timeframe: "Growth initiatives",
+        focus: "Strengthen search, local visibility, content depth, and decision support",
+        items: [item(actionAt(2, actionForDimensionKey("visibilityStructure")), reasonAt(2), "Core website fixes completed and priority service pages selected", "More customer questions answered and visibility-support signals validated")]
+      },
+      {
+        phase: "Month 3",
+        timeframe: "Competitive advantage projects",
+        focus: "Differentiate against competitors and prove progress",
+        items: [item(actionAt(3, "Compare competitor gaps, improve weaker content areas, and re-scan to validate improvement."), reasonAt(3), "At least one follow-up scan and competitor URLs available", "First scan vs latest scan shows completed recommendations and stronger competitive decision support")]
+      }
+    ]
+  };
+}
 function buildCustomerRecommendationRoadmap(report: ReportSnapshot): CustomerBusinessReport["recommendationRoadmap"] {
   const payload = (report as unknown as { customerImplementationRoadmap?: Partial<CustomerBusinessReport["recommendationRoadmap"]> }).customerImplementationRoadmap;
   const phases = normalizeRows<CustomerBusinessReport["recommendationRoadmap"]["phases"][number]>(payload?.phases);

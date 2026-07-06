@@ -76,7 +76,7 @@ tenantsRouter.get("/:slug", authRequired, requireTenantMember(), async (req: Req
 
 tenantsRouter.patch("/:slug", authRequired, requireTenantMember(["owner"]), async (req: Request, res: Response) => {
   try {
-    const allowed = ["publicName", "logoUrl", "primaryColor", "accentColor", "reportTitle", "poweredByLabel", "footerLabel", "customDomain"] as const;
+    const allowed = ["publicName", "logoUrl", "faviconUrl", "primaryColor", "secondaryColor", "accentColor", "typography", "reportTitle", "reportFooter", "customDomain"] as const;
     type UpdateKey = typeof allowed[number];
     const updates: Partial<Record<UpdateKey, string>> = {};
     for (const key of allowed) {

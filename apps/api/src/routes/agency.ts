@@ -9,6 +9,17 @@ import {
   listClientWorkspaces
 } from "../services/agencyService.js";
 import { verifyCustomDomain, setVerifiedDomain } from "../services/customDomainService.js";
+import {
+  AgencyOperatingError,
+  generateAgencyProposal,
+  getAgencyOperatingSystem,
+  updateAgencyKnowledgeBase,
+  updateAgencyProfile,
+  updateClientWorkspaceState,
+  updateProposalTemplates,
+  updateRecommendationStatus,
+  updateServiceCatalog
+} from "../services/agencyOperatingService.js";
 import { MembershipError } from "../services/membershipService.js";
 
 export const agencyRouter = Router();
@@ -72,6 +83,75 @@ agencyRouter.get("/:slug/profitability", authRequired, requireTenantMember(["own
 
 // ── POST /agency/:slug/custom-domain/verify ───────────────────────────────────
 
+agencyRouter.get("/:slug/operating-system", authRequired, requireTenantMember(["owner", "member"]), async (req: Request, res: Response) => {
+  try {
+    res.json(await getAgencyOperatingSystem(req.tenantCtx!.tenantSlug));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
+agencyRouter.patch("/:slug/profile", authRequired, requireTenantMember(["owner"]), async (req: Request, res: Response) => {
+  try {
+    res.json(await updateAgencyProfile(req.tenantCtx!.tenantSlug, req.auth?.user.userId, req.body));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
+agencyRouter.put("/:slug/services", authRequired, requireTenantMember(["owner"]), async (req: Request, res: Response) => {
+  try {
+    res.json(await updateServiceCatalog(req.tenantCtx!.tenantSlug, req.auth?.user.userId, req.body?.items));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
+agencyRouter.put("/:slug/proposal-templates", authRequired, requireTenantMember(["owner"]), async (req: Request, res: Response) => {
+  try {
+    res.json(await updateProposalTemplates(req.tenantCtx!.tenantSlug, req.auth?.user.userId, req.body?.items));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
+agencyRouter.put("/:slug/knowledge-base", authRequired, requireTenantMember(["owner"]), async (req: Request, res: Response) => {
+  try {
+    res.json(await updateAgencyKnowledgeBase(req.tenantCtx!.tenantSlug, req.auth?.user.userId, req.body));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
+agencyRouter.patch("/:slug/workspaces/:workspaceId/client-state", authRequired, requireTenantMember(["owner", "member"]), async (req: Request, res: Response) => {
+  try {
+    res.json(await updateClientWorkspaceState(req.tenantCtx!.tenantSlug, req.params["workspaceId"]!, req.auth?.user.userId, req.body));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
+agencyRouter.patch("/:slug/workspaces/:workspaceId/recommendations/:recommendationId/status", authRequired, requireTenantMember(["owner", "member"]), async (req: Request, res: Response) => {
+  try {
+    const { status, note } = req.body as { status?: string; note?: string };
+    if (!status) {
+      res.status(400).json({ error: { message: "status is required." } });
+      return;
+    }
+    res.json(await updateRecommendationStatus(req.tenantCtx!.tenantSlug, req.params["workspaceId"]!, req.auth?.user.userId, req.params["recommendationId"]!, status as never, note));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
+
+agencyRouter.post("/:slug/workspaces/:workspaceId/proposals", authRequired, requireTenantMember(["owner", "member"]), async (req: Request, res: Response) => {
+  try {
+    const { templateId } = req.body as { templateId?: string };
+    res.status(201).json(await generateAgencyProposal(req.tenantCtx!.tenantSlug, req.params["workspaceId"]!, req.auth?.user.userId, templateId));
+  } catch (error) {
+    handleError(error, res);
+  }
+});
 agencyRouter.post("/:slug/custom-domain/verify", authRequired, requireTenantMember(["owner"]), async (req: Request, res: Response) => {
   try {
     const { domain } = req.body as { domain?: string };
@@ -88,3 +168,4 @@ agencyRouter.post("/:slug/custom-domain/verify", authRequired, requireTenantMemb
     handleError(error, res);
   }
 });
+

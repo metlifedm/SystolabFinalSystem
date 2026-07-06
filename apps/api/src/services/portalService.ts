@@ -345,15 +345,29 @@ export async function updateWhiteLabelBranding(
   tenantId: string,
   updates: Partial<TenantBranding>
 ): Promise<TenantBranding> {
+  assertNoLockedWhiteLabelKeys(updates as Record<string, unknown>);
+  const existingTenant = await findTenantByIdForBranding(tenantId);
+  if (!existingTenant) throw new MembershipError("Tenant not found.", 404);
+  const limits = await getTenantPlanLimits(existingTenant.slug);
+  const canUseWhiteLabel = Boolean(limits.whiteLabel);
+  const canUseCustomDomain = Boolean(limits.customDomain);
+  const poweredByMode = updates.poweredByMode === undefined
+    ? undefined
+    : canUseWhiteLabel
+      ? cleanPoweredByMode(updates.poweredByMode)
+      : "systolab_standard";
+
   const tenant = await updateTenant(tenantId, removeUndefined({
     publicName: cleanString(updates.publicName),
     logoUrl: cleanString(updates.logoUrl),
     faviconUrl: cleanString(updates.faviconUrl),
     consultantPhotoUrl: cleanString(updates.consultantPhotoUrl),
     consultantEmail: cleanString(updates.consultantEmail),
+    consultantDesignation: cleanString(updates.consultantDesignation),
     websiteUrl: cleanString(updates.websiteUrl),
     phoneNumber: cleanString(updates.phoneNumber),
     officeAddress: cleanString(updates.officeAddress),
+    googleMapsUrl: cleanString(updates.googleMapsUrl),
     businessRegistration: cleanString(updates.businessRegistration),
     licenseNumber: cleanString(updates.licenseNumber),
     socialLinks: updates.socialLinks ? normalizeTextList(updates.socialLinks) : undefined,
@@ -367,6 +381,7 @@ export async function updateWhiteLabelBranding(
     iconStyle: cleanIconStyle(updates.iconStyle),
     qrCodeUrl: cleanString(updates.qrCodeUrl),
     whatsappLink: cleanString(updates.whatsappLink),
+    whatsappNumber: cleanString(updates.whatsappNumber),
     calendarBookingLink: cleanString(updates.calendarBookingLink),
     digitalSignature: cleanString(updates.digitalSignature),
     primaryCtaLabel: cleanString(updates.primaryCtaLabel),
@@ -379,15 +394,23 @@ export async function updateWhiteLabelBranding(
     proposalTimeline: cleanString(updates.proposalTimeline),
     proposalInvestmentRange: cleanString(updates.proposalInvestmentRange),
     proposalDeliverables: updates.proposalDeliverables ? normalizeTextList(updates.proposalDeliverables) : undefined,
-    proposalExpectedImpact: cleanString(updates.proposalExpectedImpact),
+    proposalExpectedServiceOutcome: cleanString(updates.proposalExpectedServiceOutcome),
+    proposalPageContent: cleanString(updates.proposalPageContent),
+    pricingPageContent: cleanString(updates.pricingPageContent),
     crmIntegration: cleanCrmIntegration(updates.crmIntegration),
     pdfSecurity: cleanPdfSecurity(updates.pdfSecurity),
     reportLanguage: cleanReportLanguage(updates.reportLanguage),
-    industryTemplate: cleanIndustryTemplate(updates.industryTemplate),
+    currency: cleanCurrency(updates.currency),
+    timeZone: cleanString(updates.timeZone),
     followUpAssets: cleanFollowUpAssets(updates.followUpAssets),
     agencySuccessCenter: cleanAgencySuccessCenter(updates.agencySuccessCenter),
     serviceOfferings: updates.serviceOfferings ? normalizeTextList(updates.serviceOfferings) : undefined,
-    poweredByMode: cleanPoweredByMode(updates.poweredByMode),
+    aboutCompany: cleanString(updates.aboutCompany),
+    whyChooseUs: cleanString(updates.whyChooseUs),
+    portfolioItems: updates.portfolioItems ? normalizeTextList(updates.portfolioItems) : undefined,
+    testimonials: updates.testimonials ? normalizeTextList(updates.testimonials) : undefined,
+    agencyImplementationNotes: cleanAgencyImplementationNotes(updates.agencyImplementationNotes),
+    poweredByMode,
     primaryColor: cleanString(updates.primaryColor),
     secondaryColor: cleanString(updates.secondaryColor),
     accentColor: cleanString(updates.accentColor),
@@ -398,21 +421,60 @@ export async function updateWhiteLabelBranding(
     supportEmail: cleanString(updates.supportEmail),
     privacyPolicyUrl: cleanString(updates.privacyPolicyUrl),
     termsOfServiceUrl: cleanString(updates.termsOfServiceUrl),
-    attributionMode: updates.attributionMode,
-    assistantName: cleanString(updates.assistantName),
     reportTitle: cleanString(updates.reportTitle),
     reportFooter: cleanString(updates.reportFooter),
-    customReportLabels: updates.customReportLabels,
-    poweredByLabel: cleanString(updates.poweredByLabel),
-    footerLabel: cleanString(updates.footerLabel),
-    customDomain: cleanDomain(updates.customDomain),
-    customDomains: updates.customDomains ? normalizeDomainList(updates.customDomains) : undefined,
-    customDomainStatus: cleanCustomDomainStatus(updates.customDomainStatus),
-    customDomainVerificationTarget: cleanString(updates.customDomainVerificationTarget)
+    customDomain: canUseCustomDomain ? cleanDomain(updates.customDomain) : undefined,
+    customDomains: canUseCustomDomain && updates.customDomains ? normalizeDomainList(updates.customDomains) : undefined
   }));
   return tenantToBranding(tenant);
 }
-async function summarizeProject(workspace: WorkspaceDocument, role: WorkspaceRole): Promise<PortalProjectSummary> {
+
+async function findTenantByIdForBranding(tenantId: string) {
+  if (!isMongoConnected()) {
+    return [..._memTenants.values()].find((tenant) => tenant._id?.toString() === tenantId || tenant.id === tenantId) ?? null;
+  }
+  return Tenant.findById(tenantId);
+}
+
+const LOCKED_WHITE_LABEL_UPDATE_KEYS = new Set([
+  "tenantId",
+  "slug",
+  "poweredByLabel",
+  "footerLabel",
+  "customReportLabels",
+  "attributionMode",
+  "assistantName",
+  "proposalExpectedImpact",
+  "customDomainStatus",
+  "customDomainVerificationTarget",
+  "businessReadinessScore",
+  "oss",
+  "verdictCard",
+  "businessVitalSigns",
+  "evidenceObjects",
+  "evidenceDatabase",
+  "evidenceClusters",
+  "confidenceLayer",
+  "confidenceEngine",
+  "recommendationEngine",
+  "decisionIntelligenceBrief",
+  "competitorComparison",
+  "revenueIntelligence",
+  "customerQuestionCoverage",
+  "dimensions",
+  "rawSignalTelemetry",
+  "validationTrace",
+  "executionProvenance",
+  "reportGovernance",
+  "integrity"
+]);
+
+function assertNoLockedWhiteLabelKeys(updates: Record<string, unknown>): void {
+  const locked = Object.keys(updates).filter((key) => LOCKED_WHITE_LABEL_UPDATE_KEYS.has(key));
+  if (locked.length > 0) {
+    throw new MembershipError(`Locked SYSTOLAB intelligence fields cannot be edited by agencies: ${locked.join(", ")}.`, 403);
+  }
+}async function summarizeProject(workspace: WorkspaceDocument, role: WorkspaceRole): Promise<PortalProjectSummary> {
   const history = await findSnapshotHistoryForTarget(workspace.targetUrl, workspace.tenantSlug, 1);
   const latestReport = history[0] ? summarizeReport(history[0]) : undefined;
   return {
@@ -506,7 +568,24 @@ function normalizeTextList(value: unknown): string[] {
   return [...new Set(value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean))].slice(0, 24);
 }
 
-function cleanDomain(value: unknown): string | undefined {
+function cleanCurrency(value: unknown): string | undefined {
+  const clean = cleanString(value)?.toUpperCase();
+  return clean && /^[A-Z]{3}$/.test(clean) ? clean : undefined;
+}
+
+function cleanAgencyImplementationNotes(value: unknown): TenantBranding["agencyImplementationNotes"] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const notes: NonNullable<TenantBranding["agencyImplementationNotes"]> = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const note = cleanString(record["note"]);
+    if (!note) continue;
+    notes.push({ recommendationId: cleanString(record["recommendationId"]), note });
+    if (notes.length >= 50) break;
+  }
+  return notes;
+}function cleanDomain(value: unknown): string | undefined {
   const clean = cleanString(value)?.toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   if (!clean) return undefined;
   return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(clean) ? clean : undefined;
