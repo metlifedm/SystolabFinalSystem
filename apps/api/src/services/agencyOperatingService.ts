@@ -24,6 +24,7 @@ export interface AgencyOperatingSystem {
   progress: AgencyProgressSummary;
   auditTrail: AgencyAuditSummary[];
   salesCoach: AgencySalesCoach;
+  performanceIntelligence: AgencyPerformanceIntelligence;
 }
 
 export interface AgencyProfile {
@@ -141,6 +142,75 @@ export interface AgencySalesCoach {
   }>;
 }
 
+
+export interface AgencyPerformanceIntelligence {
+  status: "ready" | "limited";
+  summary: string;
+  generatedAt: string;
+  dataCoverage: {
+    clientsTracked: number;
+    reportsAnalyzed: number;
+    proposalsTracked: number;
+    recommendationStatusesTracked: number;
+    consultantsTracked: number;
+    wonClients: number;
+    lostClients: number;
+    retentionEligibleClients: number;
+    limitation: string;
+  };
+  consultantPerformance: Array<{
+    consultantName: string;
+    assignedClients: number;
+    wonClients: number;
+    proposalsGenerated: number;
+    closeRate: number;
+    implementedRecommendations: number;
+    averageTimeReportToSaleDays: number | null;
+    averageProjectValue: string;
+    topIndustry: string;
+  }>;
+  reportConversion: {
+    totalReports: number;
+    proposalsGenerated: number;
+    wonClients: number;
+    reportToProposalRate: number;
+    reportToSaleRate: number;
+    bestConvertingReportProfiles: Array<{ reportProfile: string; reports: number; wonClients: number; closeRate: number; implication: string }>;
+  };
+  recommendationImplementation: {
+    totalTracked: number;
+    completed: number;
+    inProgress: number;
+    implementationRate: number;
+    mostImplemented: Array<{ recommendation: string; trackedCount: number; implementedCount: number; implementationRate: number; linkedService: string }>;
+  };
+  salesCycle: {
+    averageTimeReportToSaleDays: number | null;
+    fastestTimeReportToSaleDays: number | null;
+    slowestTimeReportToSaleDays: number | null;
+    sampleSize: number;
+    limitation: string;
+  };
+  industryPerformance: Array<{
+    industry: string;
+    clients: number;
+    reportsGenerated: number;
+    wonClients: number;
+    closeRate: number;
+    averageProjectValue: string;
+    retainedAfterSixMonths: number;
+    retentionRate: number;
+  }>;
+  retention: {
+    eligibleClients: number;
+    retainedClients: number;
+    retentionRate: number;
+    averageClientAgeDays: number | null;
+    rule: string;
+    limitation: string;
+  };
+  insights: string[];
+}
 export interface GeneratedAgencyProposal {
   proposalId: string;
   workspaceId: string;
@@ -172,6 +242,7 @@ export async function getAgencyOperatingSystem(tenantSlug: string): Promise<Agen
   const serviceCatalog = cleanServiceCatalog(operating.serviceCatalog, branding?.serviceOfferings ?? []);
   const clients = await Promise.all(workspaces.map((workspace) => buildClientOperatingSummary(tenantSlug, workspace, operating.sharingDefaults as Partial<SharingControls>)));
   const salesCoach = await buildAgencySalesCoach(tenantSlug, workspaces, serviceCatalog, cleanKnowledgeBase(operating.knowledgeBase));
+  const performanceIntelligence = await buildAgencyPerformanceIntelligence(tenantSlug, workspaces, clients, serviceCatalog, auditTrail);
   return {
     tenantSlug,
     profile,
@@ -183,7 +254,8 @@ export async function getAgencyOperatingSystem(tenantSlug: string): Promise<Agen
     clients,
     progress: summarizeAgencyProgress(clients),
     auditTrail,
-    salesCoach
+    salesCoach,
+    performanceIntelligence
   };
 }
 
@@ -402,6 +474,314 @@ function buildUpsellOpportunities(serviceNames: string[], knowledge: AgencyKnowl
   ]).slice(0, 6);
 }
 
+
+type AgencyPerformanceRow = {
+  workspace: WorkspaceDocument;
+  client: ClientOperatingSummary;
+  state: ClientWorkspaceStateDocument;
+  reports: ReportSnapshot[];
+  latest?: ReportSnapshot;
+};
+
+async function buildAgencyPerformanceIntelligence(
+  tenantSlug: string,
+  workspaces: WorkspaceDocument[],
+  clients: ClientOperatingSummary[],
+  services: ServiceCatalogItem[],
+  auditTrail: AgencyAuditSummary[]
+): Promise<AgencyPerformanceIntelligence> {
+  const rows: AgencyPerformanceRow[] = await Promise.all(workspaces.map(async (workspace) => {
+    const [state, reports] = await Promise.all([
+      getOrCreateClientState(tenantSlug, workspace.workspaceId),
+      findSnapshotHistoryForTarget(workspace.targetUrl, tenantSlug, 24)
+    ]);
+    const client = clients.find((item) => item.workspaceId === workspace.workspaceId) ?? await buildClientOperatingSummary(tenantSlug, workspace, defaultSharingControls());
+    return { workspace, client, state, reports, latest: reports[0] };
+  }));
+
+  const proposalEvents = auditTrail.filter((event) => event.action === "proposal.generated");
+  const totalReports = rows.reduce((sum, row) => sum + row.reports.length, 0);
+  const recommendationStatusesTracked = rows.reduce((sum, row) => sum + row.state.recommendationStatuses.length, 0);
+  const wonClients = rows.filter((row) => row.state.followUpStatus === "won").length;
+  const lostClients = rows.filter((row) => row.state.followUpStatus === "lost").length;
+  const consultantCount = new Set(rows.map((row) => row.state.assignedConsultantName || "Unassigned")).size;
+  const retention = buildAgencyRetention(rows);
+  const consultantPerformance = buildConsultantPerformance(rows, proposalEvents, services);
+  const reportConversion = buildReportConversion(rows, proposalEvents);
+  const recommendationImplementation = buildRecommendationImplementation(rows, services);
+  const salesCycle = buildSalesCycle(rows);
+  const industryPerformance = buildIndustryPerformance(rows, services);
+  const hasOperationalSignals = totalReports > 0 || proposalEvents.length > 0 || recommendationStatusesTracked > 0 || rows.some((row) => row.state.followUpStatus !== "new");
+  return {
+    status: hasOperationalSignals ? "ready" : "limited",
+    summary: hasOperationalSignals
+      ? "Private agency-only performance intelligence generated from internal reports, proposal activity, recommendation status, consultant assignment, and client follow-up state. This is never shown to clients."
+      : "Add reports, proposals, consultant assignments, and follow-up outcomes to unlock private agency performance intelligence.",
+    generatedAt: new Date().toISOString(),
+    dataCoverage: {
+      clientsTracked: rows.length,
+      reportsAnalyzed: totalReports,
+      proposalsTracked: proposalEvents.length,
+      recommendationStatusesTracked,
+      consultantsTracked: consultantCount,
+      wonClients,
+      lostClients,
+      retentionEligibleClients: retention.eligibleClients,
+      limitation: "Close rate, sale timing, project value, and retention are computed only from internal SYSTOLAB activity currently available in the agency workspace. CRM/payment data is not assumed."
+    },
+    consultantPerformance,
+    reportConversion,
+    recommendationImplementation,
+    salesCycle,
+    industryPerformance,
+    retention,
+    insights: buildAgencyPerformanceInsights(consultantPerformance, reportConversion, recommendationImplementation, industryPerformance, retention)
+  };
+}
+
+function buildConsultantPerformance(rows: AgencyPerformanceRow[], proposalEvents: AgencyAuditSummary[], services: ServiceCatalogItem[]): AgencyPerformanceIntelligence["consultantPerformance"] {
+  const groups = new Map<string, { assignedClients: number; wonClients: number; proposalsGenerated: number; implementedRecommendations: number; saleDays: number[]; projectValues: number[]; industries: Map<string, number> }>();
+  for (const row of rows) {
+    const name = row.state.assignedConsultantName || "Unassigned";
+    const group = groups.get(name) ?? { assignedClients: 0, wonClients: 0, proposalsGenerated: 0, implementedRecommendations: 0, saleDays: [], projectValues: [], industries: new Map<string, number>() };
+    group.assignedClients += 1;
+    group.proposalsGenerated += proposalEvents.filter((event) => event.workspaceId === row.workspace.workspaceId).length;
+    group.implementedRecommendations += row.state.recommendationStatuses.filter((item) => item.status === "completed").length;
+    const industry = workspaceIndustry(row.workspace);
+    group.industries.set(industry, (group.industries.get(industry) ?? 0) + 1);
+    if (row.state.followUpStatus === "won") {
+      group.wonClients += 1;
+      const days = reportToSaleDays(row);
+      if (days !== null) group.saleDays.push(days);
+      const value = estimateProjectValueCents(row.latest, services);
+      if (value !== null) group.projectValues.push(value);
+    }
+    groups.set(name, group);
+  }
+  return [...groups.entries()].map(([consultantName, group]) => ({
+    consultantName,
+    assignedClients: group.assignedClients,
+    wonClients: group.wonClients,
+    proposalsGenerated: group.proposalsGenerated,
+    closeRate: percent(group.wonClients, group.assignedClients),
+    implementedRecommendations: group.implementedRecommendations,
+    averageTimeReportToSaleDays: averageRounded(group.saleDays),
+    averageProjectValue: formatMoney(averageRounded(group.projectValues)),
+    topIndustry: topMapEntry(group.industries) ?? "Unspecified"
+  })).sort((a, b) => b.wonClients - a.wonClients || b.closeRate - a.closeRate || b.proposalsGenerated - a.proposalsGenerated).slice(0, 10);
+}
+
+function buildReportConversion(rows: AgencyPerformanceRow[], proposalEvents: AgencyAuditSummary[]): AgencyPerformanceIntelligence["reportConversion"] {
+  const clientsWithReports = rows.filter((row) => row.reports.length > 0);
+  const proposalWorkspaceIds = new Set(proposalEvents.map((event) => event.workspaceId).filter((value): value is string => Boolean(value)));
+  const profileGroups = new Map<string, { reports: number; wonClients: number }>();
+  for (const row of rows) {
+    if (!row.latest) continue;
+    const profile = reportProfileLabel(row.latest);
+    const group = profileGroups.get(profile) ?? { reports: 0, wonClients: 0 };
+    group.reports += 1;
+    if (row.state.followUpStatus === "won") group.wonClients += 1;
+    profileGroups.set(profile, group);
+  }
+  return {
+    totalReports: rows.reduce((sum, row) => sum + row.reports.length, 0),
+    proposalsGenerated: proposalEvents.length,
+    wonClients: rows.filter((row) => row.state.followUpStatus === "won").length,
+    reportToProposalRate: percent(proposalWorkspaceIds.size, clientsWithReports.length),
+    reportToSaleRate: percent(rows.filter((row) => row.state.followUpStatus === "won").length, clientsWithReports.length || rows.length),
+    bestConvertingReportProfiles: [...profileGroups.entries()].map(([reportProfile, group]) => ({
+      reportProfile,
+      reports: group.reports,
+      wonClients: group.wonClients,
+      closeRate: percent(group.wonClients, group.reports),
+      implication: group.wonClients > 0 ? "This report profile is associated with won client follow-up outcomes." : "No won outcome has been recorded for this report profile yet."
+    })).sort((a, b) => b.closeRate - a.closeRate || b.reports - a.reports).slice(0, 6)
+  };
+}
+
+function buildRecommendationImplementation(rows: AgencyPerformanceRow[], services: ServiceCatalogItem[]): AgencyPerformanceIntelligence["recommendationImplementation"] {
+  const labels = new Map<string, string>();
+  for (const row of rows) {
+    for (const recommendation of row.latest?.recommendationEngine?.recommendations ?? []) labels.set(recommendation.recommendationId, recommendation.action || recommendation.issue);
+  }
+  const groups = new Map<string, { recommendation: string; trackedCount: number; implementedCount: number; inProgressCount: number }>();
+  let completed = 0;
+  let inProgress = 0;
+  let totalTracked = 0;
+  for (const row of rows) {
+    for (const status of row.state.recommendationStatuses) {
+      totalTracked += 1;
+      if (status.status === "completed") completed += 1;
+      if (status.status === "in_progress") inProgress += 1;
+      const recommendation = labels.get(status.recommendationId) ?? status.note ?? status.recommendationId;
+      const group = groups.get(recommendation) ?? { recommendation, trackedCount: 0, implementedCount: 0, inProgressCount: 0 };
+      group.trackedCount += 1;
+      if (status.status === "completed") group.implementedCount += 1;
+      if (status.status === "in_progress") group.inProgressCount += 1;
+      groups.set(recommendation, group);
+    }
+  }
+  return {
+    totalTracked,
+    completed,
+    inProgress,
+    implementationRate: percent(completed, totalTracked),
+    mostImplemented: [...groups.values()].map((group) => ({
+      recommendation: group.recommendation,
+      trackedCount: group.trackedCount,
+      implementedCount: group.implementedCount,
+      implementationRate: percent(group.implementedCount, group.trackedCount),
+      linkedService: matchServiceForText(group.recommendation, services)
+    })).sort((a, b) => b.implementedCount - a.implementedCount || b.implementationRate - a.implementationRate).slice(0, 8)
+  };
+}
+
+function buildSalesCycle(rows: AgencyPerformanceRow[]): AgencyPerformanceIntelligence["salesCycle"] {
+  const samples = rows.map(reportToSaleDays).filter((value): value is number => value !== null);
+  return {
+    averageTimeReportToSaleDays: averageRounded(samples),
+    fastestTimeReportToSaleDays: samples.length ? Math.min(...samples) : null,
+    slowestTimeReportToSaleDays: samples.length ? Math.max(...samples) : null,
+    sampleSize: samples.length,
+    limitation: samples.length ? "Measured from first recorded report date to the internal date when follow-up status was marked won." : "No won client with report history exists yet, so sale timing is not measured."
+  };
+}
+
+function buildIndustryPerformance(rows: AgencyPerformanceRow[], services: ServiceCatalogItem[]): AgencyPerformanceIntelligence["industryPerformance"] {
+  const groups = new Map<string, { clients: number; reportsGenerated: number; wonClients: number; retained: number; eligible: number; values: number[] }>();
+  for (const row of rows) {
+    const industry = workspaceIndustry(row.workspace);
+    const group = groups.get(industry) ?? { clients: 0, reportsGenerated: 0, wonClients: 0, retained: 0, eligible: 0, values: [] };
+    group.clients += 1;
+    group.reportsGenerated += row.reports.length;
+    if (row.state.followUpStatus === "won") {
+      group.wonClients += 1;
+      const value = estimateProjectValueCents(row.latest, services);
+      if (value !== null) group.values.push(value);
+    }
+    if (workspaceAgeDays(row.workspace) >= 180) {
+      group.eligible += 1;
+      if (row.state.followUpStatus !== "lost") group.retained += 1;
+    }
+    groups.set(industry, group);
+  }
+  return [...groups.entries()].map(([industry, group]) => ({
+    industry,
+    clients: group.clients,
+    reportsGenerated: group.reportsGenerated,
+    wonClients: group.wonClients,
+    closeRate: percent(group.wonClients, group.clients),
+    averageProjectValue: formatMoney(averageRounded(group.values)),
+    retainedAfterSixMonths: group.retained,
+    retentionRate: percent(group.retained, group.eligible)
+  })).sort((a, b) => b.closeRate - a.closeRate || b.clients - a.clients).slice(0, 10);
+}
+
+function buildAgencyRetention(rows: AgencyPerformanceRow[]): AgencyPerformanceIntelligence["retention"] {
+  const eligible = rows.filter((row) => workspaceAgeDays(row.workspace) >= 180);
+  const retained = eligible.filter((row) => row.state.followUpStatus !== "lost");
+  return {
+    eligibleClients: eligible.length,
+    retainedClients: retained.length,
+    retentionRate: percent(retained.length, eligible.length),
+    averageClientAgeDays: averageRounded(rows.map((row) => workspaceAgeDays(row.workspace))),
+    rule: "A client is retention-eligible after six months in the workspace and counted retained when not marked lost.",
+    limitation: "This is a SYSTOLAB workspace retention proxy until billing/CRM renewal data is connected."
+  };
+}
+
+function buildAgencyPerformanceInsights(
+  consultants: AgencyPerformanceIntelligence["consultantPerformance"],
+  conversion: AgencyPerformanceIntelligence["reportConversion"],
+  implementation: AgencyPerformanceIntelligence["recommendationImplementation"],
+  industries: AgencyPerformanceIntelligence["industryPerformance"],
+  retention: AgencyPerformanceIntelligence["retention"]
+): string[] {
+  const topConsultant = consultants[0];
+  const topReport = conversion.bestConvertingReportProfiles[0];
+  const topRecommendation = implementation.mostImplemented[0];
+  const topIndustry = industries[0];
+  return dedupeStrings([
+    topConsultant ? `${topConsultant.consultantName} currently has the strongest close signal with ${topConsultant.wonClients} won client(s) and a ${topConsultant.closeRate}% close rate.` : "Assign consultants to clients to identify who closes best.",
+    topReport ? `${topReport.reportProfile} is the strongest report conversion profile currently visible in agency data.` : "Generate more reports to identify which report profiles convert best.",
+    topRecommendation ? `${topRecommendation.recommendation} is the most implemented tracked recommendation.` : "Mark recommendation statuses to learn which recommendations clients actually implement.",
+    topIndustry ? `${topIndustry.industry} currently has the strongest industry close signal at ${topIndustry.closeRate}%.` : "Add business type or industry to projects to compare close rates by market.",
+    retention.eligibleClients ? `${retention.retainedClients}/${retention.eligibleClients} eligible clients are retained by the six-month workspace proxy.` : "Six-month retention will appear after clients have enough history."
+  ]).slice(0, 6);
+}
+
+function reportToSaleDays(row: AgencyPerformanceRow): number | null {
+  if (row.state.followUpStatus !== "won") return null;
+  const firstReportDate = row.reports.length ? new Date(row.reports[row.reports.length - 1]!.createdAt) : null;
+  const wonDate = row.state.updatedAt instanceof Date ? row.state.updatedAt : new Date(row.state.updatedAt);
+  if (!firstReportDate || Number.isNaN(firstReportDate.getTime()) || Number.isNaN(wonDate.getTime())) return null;
+  return Math.max(0, Math.round((wonDate.getTime() - firstReportDate.getTime()) / 86400000));
+}
+
+function reportProfileLabel(report: ReportSnapshot): string {
+  const label = report.oss?.visualState?.label ?? report.status ?? "Report";
+  const score = report.oss?.score;
+  const scoreBand = typeof score === "number" ? score >= 80 ? "80+" : score >= 60 ? "60-79" : score >= 40 ? "40-59" : "Below 40" : "Not scored";
+  return `${label} / ${scoreBand}`;
+}
+
+function workspaceIndustry(workspace: WorkspaceDocument): string {
+  return cleanString(workspace.industry) ?? cleanString(workspace.businessType) ?? cleanString(workspace.targetLocation) ?? "Unspecified";
+}
+
+function workspaceAgeDays(workspace: WorkspaceDocument): number {
+  const created = workspace.createdAt instanceof Date ? workspace.createdAt : new Date(workspace.createdAt);
+  if (Number.isNaN(created.getTime())) return 0;
+  return Math.max(0, Math.round((Date.now() - created.getTime()) / 86400000));
+}
+
+function estimateProjectValueCents(report: ReportSnapshot | undefined, services: ServiceCatalogItem[]): number | null {
+  const matchedNames = matchServicesToReport(report, services);
+  const values = services
+    .filter((service) => matchedNames.includes(service.name))
+    .map((service) => parseMoneyCents(service.startingPrice))
+    .filter((value): value is number => value !== null);
+  if (values.length === 0) return null;
+  return values.reduce((sum, value) => sum + value, 0);
+}
+
+function parseMoneyCents(value: string | undefined): number | null {
+  if (!value) return null;
+  const matches = value.match(/\d[\d,]*(?:\.\d+)?/g);
+  if (!matches?.length) return null;
+  const numbers = matches.map((match) => Number(match.replace(/,/g, ""))).filter((amount) => Number.isFinite(amount) && amount > 0);
+  if (!numbers.length) return null;
+  const average = numbers.reduce((sum, amount) => sum + amount, 0) / numbers.length;
+  return Math.round(average * 100);
+}
+
+function matchServiceForText(text: string, services: ServiceCatalogItem[]): string {
+  const normalized = text.toLowerCase();
+  const matched = services.find((service) => {
+    const haystack = `${service.name} ${service.category} ${service.description ?? ""}`.toLowerCase();
+    return haystack.split(/\s+/).some((word) => word.length > 3 && normalized.includes(word));
+  });
+  return matched?.name ?? "Implementation service";
+}
+
+function percent(numerator: number, denominator: number): number {
+  if (denominator <= 0) return 0;
+  return Math.round((numerator / denominator) * 100);
+}
+
+function averageRounded(values: number[]): number | null {
+  if (!values.length) return null;
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+function topMapEntry(map: Map<string, number>): string | undefined {
+  return [...map.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+}
+
+function formatMoney(cents: number | null): string {
+  if (cents === null) return "Not configured";
+  return `$${Math.round(cents / 100).toLocaleString("en-US")}`;
+}
 function dedupeStrings(items: string[]): string[] {
   return [...new Set(items.map((item) => item.trim()).filter(Boolean))];
 }
@@ -791,12 +1171,3 @@ function safeHost(url: string): string {
     return url;
   }
 }
-
-
-
-
-
-
-
-
-

@@ -234,7 +234,74 @@ export interface AgencyOperatingSystemResponse {
       nextMeetingFocus: string;
     }>;
   };
-}
+  performanceIntelligence: {
+    status: "ready" | "limited";
+    summary: string;
+    generatedAt: string;
+    dataCoverage: {
+      clientsTracked: number;
+      reportsAnalyzed: number;
+      proposalsTracked: number;
+      recommendationStatusesTracked: number;
+      consultantsTracked: number;
+      wonClients: number;
+      lostClients: number;
+      retentionEligibleClients: number;
+      limitation: string;
+    };
+    consultantPerformance: Array<{
+      consultantName: string;
+      assignedClients: number;
+      wonClients: number;
+      proposalsGenerated: number;
+      closeRate: number;
+      implementedRecommendations: number;
+      averageTimeReportToSaleDays: number | null;
+      averageProjectValue: string;
+      topIndustry: string;
+    }>;
+    reportConversion: {
+      totalReports: number;
+      proposalsGenerated: number;
+      wonClients: number;
+      reportToProposalRate: number;
+      reportToSaleRate: number;
+      bestConvertingReportProfiles: Array<{ reportProfile: string; reports: number; wonClients: number; closeRate: number; implication: string }>;
+    };
+    recommendationImplementation: {
+      totalTracked: number;
+      completed: number;
+      inProgress: number;
+      implementationRate: number;
+      mostImplemented: Array<{ recommendation: string; trackedCount: number; implementedCount: number; implementationRate: number; linkedService: string }>;
+    };
+    salesCycle: {
+      averageTimeReportToSaleDays: number | null;
+      fastestTimeReportToSaleDays: number | null;
+      slowestTimeReportToSaleDays: number | null;
+      sampleSize: number;
+      limitation: string;
+    };
+    industryPerformance: Array<{
+      industry: string;
+      clients: number;
+      reportsGenerated: number;
+      wonClients: number;
+      closeRate: number;
+      averageProjectValue: string;
+      retainedAfterSixMonths: number;
+      retentionRate: number;
+    }>;
+    retention: {
+      eligibleClients: number;
+      retainedClients: number;
+      retentionRate: number;
+      averageClientAgeDays: number | null;
+      rule: string;
+      limitation: string;
+    };
+    insights: string[];
+  };}
 
 export interface SharingControls {
   allowView: boolean;

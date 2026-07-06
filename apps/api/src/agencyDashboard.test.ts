@@ -175,6 +175,8 @@ describe("agency operating system", () => {
     expect(proposal.recommendedServices.length).toBeGreaterThan(0);
     expect(proposal.sections.some((section) => section.title.includes("Services"))).toBe(true);
 
+    await updateClientWorkspaceState(slug, workspace.workspaceId, userId, { followUpStatus: "won" });
+
     const operating = await getAgencyOperatingSystem(slug);
     expect(operating.permissions.find((entry) => entry.role === "owner")?.permissions).toContain("manage_clients");
     expect(operating.progress.clientsTracked).toBeGreaterThanOrEqual(1);
@@ -184,5 +186,11 @@ describe("agency operating system", () => {
     expect(operating.salesCoach.easiestServicesToSell.length).toBeGreaterThan(0);
     expect(operating.salesCoach.clientPlaybooks[0]?.clientName).toBeTruthy();
     expect(operating.salesCoach.suggestedMeetingAgenda.length).toBeGreaterThan(0);
+    expect(operating.performanceIntelligence.status).toBe("ready");
+    expect(operating.performanceIntelligence.dataCoverage.clientsTracked).toBeGreaterThanOrEqual(1);
+    expect(operating.performanceIntelligence.dataCoverage.proposalsTracked).toBeGreaterThanOrEqual(1);
+    expect(operating.performanceIntelligence.consultantPerformance[0]?.consultantName).toBe("Azhar");
+    expect(operating.performanceIntelligence.consultantPerformance[0]?.wonClients).toBeGreaterThanOrEqual(1);
+    expect(operating.performanceIntelligence.recommendationImplementation.completed).toBeGreaterThanOrEqual(1);
   });
 });
