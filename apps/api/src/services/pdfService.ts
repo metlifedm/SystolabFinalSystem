@@ -1189,69 +1189,121 @@ function writeEnterpriseExpandedCustomerInsights(doc: PDFKit.PDFDocument, report
   const local = pdfNativeSignal(report, "native_local_visibility_opportunity_score") ?? pdfNativeSignal(report, "native_local_business_readiness_score");
   const citation = pdfNativeSignal(report, "native_citation_credibility_score");
   const competitorGaps = pdfNativeSignals(report, "native_competitor_content_gap_score");
+  const coverageNotes: string[] = [];
 
-  writeEnterpriseSectionLabel(doc, report, "Local Presence Intelligence");
-  writeEnterpriseBox(doc, report, "Local Presence, Reviews, Profile Completeness, And Citations", "blue", 170, () => {
-    writeEnterpriseTableRow(doc, "Business Profile", report.gbpIdentity ? `${report.gbpIdentity.identityConsistencyScore}/100; ${report.gbpIdentity.profileCompletenessLevel} profile completeness.` : "Not assessed", 0);
-    writeEnterpriseTableRow(doc, "Local Visibility", local ? `${pdfSignalScore(local)}/100 - ${pdfCustomerText(local.rawValue)}` : "Not assessed from collected evidence.", 1);
-    writeEnterpriseTableRow(doc, "Review Analysis", pdfEvidenceCorpus(report).match(/review|rating|testimonial/i) ? "Review, rating, or testimonial proof was visible in collected website evidence. Live Google rating trends are not asserted without validated profile evidence." : "Review count, rating trend, and business profile history were not validated in this scan.", 2);
-    writeEnterpriseTableRow(doc, "Service Area Clarity", local ? pdfCustomerText(local.rawValue) : "Service-area, hours, map, and local contact signals were not strongly validated.", 3);
-    writeEnterpriseTableRow(doc, "Citation Coverage", citation ? `${pdfSignalScore(citation)}/100 - ${pdfCustomerText(citation.rawValue)}` : "Citation and authority-reference evidence was not assessed.", 4);
-  });
+  if (isPdfContentUnavailable(report)) {
+    writeEnterpriseCoverageNotes(doc, report, [
+      "Expanded website, local, competitor, and revenue sections were not expanded because website content could not be collected for the current scan."
+    ]);
+    return;
+  }
 
-  writeEnterpriseSectionLabel(doc, report, "Customer Question Coverage");
-  writeEnterpriseBox(doc, report, "Questions Customers Ask, Answered Questions, And Missing Answers", "green", 160, () => {
-    const covered = pdfStringArray(question?.normalizedInput?.["coveredQuestionFamilies"]).map(pdfQuestionLabel);
-    const missing = pdfStringArray(question?.normalizedInput?.["missingQuestionFamilies"]).map(pdfQuestionLabel);
-    writeEnterpriseTableRow(doc, "Coverage Score", question ? `${pdfSignalScore(question)}/100` : "Not assessed", 0);
-    writeEnterpriseTableRow(doc, "Questions Customers Ask", pdfJoin([...covered, ...missing]), 1);
-    writeEnterpriseTableRow(doc, "Answered On Website", pdfJoin(covered), 2);
-    writeEnterpriseTableRow(doc, "Missing From Website", pdfJoin(missing), 3);
-    writeEnterpriseTableRow(doc, "Competitor Answers", competitorGaps.some((item) => String(item.normalizedInput?.["comparedSignal"] ?? "").includes("question")) ? "A compared competitor appears stronger in customer question coverage." : "Competitor question-answer coverage was not validated in this scan.", 4);
-  });
-
-  writeEnterpriseSectionLabel(doc, report, "Website vs Competitor Content Comparison");
-  writeEnterpriseBox(doc, report, "Why Competitors Are Winning", "amber", 190, () => {
-    const weakerRows = (report.competitorComparison ?? []).flatMap((comparison) =>
-      comparison.evidenceTraceabilityMap
-        .filter((row) => row.position === "primary_weaker")
-        .map((row) => ({
-          label: comparison.competitorLabel || safePdfHostLabel(comparison.competitorUrl),
-          value: `${pdfCustomerText(row.dimensionLabel)}: client ${row.primaryScore}/100 vs competitor ${row.competitorScore ?? "Not scored"}. Competitors provide more information that helps customers compare services and make confident decisions. ${pdfPdfActionForDimension(row.dimension)}`
-        }))
-    );
-    const signalRows = competitorGaps.map((evidence) => ({
-      label: pdfCustomerText(evidence.normalizedInput?.["competitor"] ?? "Compared competitor"),
-      value: `${pdfSignalArea(String(evidence.normalizedInput?.["comparedSignal"] ?? "customer decision support"))}: client ${evidence.normalizedInput?.["primaryScore"] ?? "Not assessed"}/100 vs competitor ${evidence.normalizedInput?.["competitorScore"] ?? "Not assessed"}/100. Competitors provide more information that helps customers compare services and make confident decisions. ${seoMeaningForSignal(String(evidence.normalizedInput?.["comparedSignal"] ?? ""))}`
-    }));
-    const rows = dedupePdfRows([...signalRows, ...weakerRows]).slice(0, 7);
-    if (rows.length === 0) writeEnterpriseTableRow(doc, "Status", "No validated competitor content advantage was available in this scan.", 0);
-    rows.forEach((row, index) => writeEnterpriseTableRow(doc, row.label, row.value, index));
-    pdfContentTypeRows(report).forEach((row, index) => writeEnterpriseTableRow(doc, row.label, row.value, rows.length + index));
-  });
-
-  writeEnterpriseSectionLabel(doc, report, "Revenue Leakage And Implementation Roadmap");
-  writeEnterpriseBox(doc, report, "Business Outcome Bridge", "gray", 230, () => {
-    const leakKeys = ["trust", "conversionReadiness", "informationClarity", "visibilityStructure"];
-    leakKeys.forEach((key, index) => {
-      const dimension = report.dimensions?.find((item) => item.key === key);
-      writeEnterpriseTableRow(doc, pdfLeakLabel(key), dimension ? `${dimension.score}/100 - ${dimension.classification}. ${pdfCustomerText(dimension.businessMeaning)}` : "Not assessed", index);
+  const evidenceCorpus = pdfEvidenceCorpus(report);
+  const hasLocalPresenceEvidence = Boolean(
+    (report.gbpIdentity && report.gbpIdentity.status !== "not_assessed") ||
+    local ||
+    citation ||
+    /review|rating|testimonial|service area|hours|map|address|location|near me|city|citation/i.test(evidenceCorpus)
+  );
+  if (hasLocalPresenceEvidence) {
+    writeEnterpriseSectionLabel(doc, report, "Local Presence Intelligence");
+    writeEnterpriseBox(doc, report, "Local Presence, Reviews, Profile Completeness, And Citations", "blue", 170, () => {
+      writeEnterpriseTableRow(doc, "Business Profile", report.gbpIdentity ? `${report.gbpIdentity.identityConsistencyScore}/100; ${report.gbpIdentity.profileCompletenessLevel} profile completeness.` : "Business profile evidence was not provided for this scan.", 0);
+      writeEnterpriseTableRow(doc, "Local Visibility", local ? `${pdfSignalScore(local)}/100 - ${pdfCustomerText(local.rawValue)}` : "Local visibility was not separately measured from the current evidence.", 1);
+      writeEnterpriseTableRow(doc, "Review Analysis", /review|rating|testimonial/i.test(evidenceCorpus) ? "Review, rating, or testimonial proof was visible in collected website evidence. Live Google rating trends are not asserted without validated profile evidence." : "Review count, rating trend, and business profile history were not validated in this scan.", 2);
+      writeEnterpriseTableRow(doc, "Service Area Clarity", local ? pdfCustomerText(local.rawValue) : "Service-area, hours, map, and local contact signals were not strongly validated.", 3);
+      writeEnterpriseTableRow(doc, "Citation Coverage", citation ? `${pdfSignalScore(citation)}/100 - ${pdfCustomerText(citation.rawValue)}` : "Citation and authority-reference evidence was not separately assessed.", 4);
     });
-    const attribution = (report as unknown as { businessOutcomeAttributionLayer?: ReportSnapshot["businessOutcomeAttributionLayer"] }).businessOutcomeAttributionLayer;
-    writeEnterpriseTableRow(doc, "What Affects Revenue Most", pdfCustomerText(attribution?.summary ?? "No business impact link passed the current evidence threshold."), 4);
-    (attribution?.profiles ?? []).slice(0, 3).forEach((profile, index) => {
-      writeEnterpriseTableRow(doc, `Attribution ${index + 1}`, `${profile.impactAreas.map((item) => item.replaceAll("_", " ")).join(", ")}; ${profile.confidenceScore}% confidence. ${pdfCustomerText(profile.customerBehaviorExplanation)}`, index + 5);
+  } else {
+    coverageNotes.push("Local Presence Intelligence was not expanded because no business profile, review, citation, location, or service-area evidence was validated.");
+  }
+
+  const covered = pdfStringArray(question?.normalizedInput?.["coveredQuestionFamilies"]).map(pdfQuestionLabel);
+  const missing = pdfStringArray(question?.normalizedInput?.["missingQuestionFamilies"]).map(pdfQuestionLabel);
+  const hasQuestionCoverageEvidence = Boolean(question || covered.length > 0 || missing.length > 0);
+  if (hasQuestionCoverageEvidence) {
+    writeEnterpriseSectionLabel(doc, report, "Customer Question Coverage");
+    writeEnterpriseBox(doc, report, "Questions Customers Ask, Answered Questions, And Missing Answers", "green", 160, () => {
+      writeEnterpriseTableRow(doc, "Coverage Score", question ? `${pdfSignalScore(question)}/100` : "Measured from collected content.", 0);
+      writeEnterpriseTableRow(doc, "Questions Customers Ask", pdfJoin([...covered, ...missing]), 1);
+      writeEnterpriseTableRow(doc, "Answered On Website", pdfJoin(covered), 2);
+      writeEnterpriseTableRow(doc, "Missing From Website", pdfJoin(missing), 3);
+      writeEnterpriseTableRow(doc, "Competitor Answers", competitorGaps.some((item) => String(item.normalizedInput?.["comparedSignal"] ?? "").includes("question")) ? "A compared competitor appears stronger in customer question coverage." : "Competitor question-answer coverage was not validated in this scan.", 4);
     });
-    const dependency = (report as unknown as { dependencyIntelligenceLayer?: ReportSnapshot["dependencyIntelligenceLayer"] }).dependencyIntelligenceLayer;
-    writeEnterpriseTableRow(doc, "What To Fix Before Other Work", pdfCustomerText(dependency?.summary ?? "No issue connection passed the evidence threshold."), 8);
-    const sequence = (report as unknown as { recommendationSequencingEngine?: ReportSnapshot["recommendationSequencingEngine"] }).recommendationSequencingEngine;
-    const sequenceSummary = [
-      ...(sequence?.immediateActions ?? []),
-      ...(sequence?.nearTermActions ?? []),
-      ...(sequence?.mediumTermActions ?? []),
-      ...(sequence?.strategicActions ?? [])
-    ].slice(0, 4).map((item) => `${item.bucket}: ${pdfCustomerText(item.action)}`).join(" ");
-    writeEnterpriseTableRow(doc, "Implementation Roadmap", sequenceSummary || "No sequenced recommendation passed the evidence threshold.", 9);
+  } else {
+    coverageNotes.push("Customer Question Coverage was not expanded because current evidence did not include measured answered or missing question families.");
+  }
+
+  const weakerRows = (report.competitorComparison ?? []).flatMap((comparison) =>
+    comparison.evidenceTraceabilityMap
+      .filter((row) => row.position === "primary_weaker")
+      .map((row) => ({
+        label: comparison.competitorLabel || safePdfHostLabel(comparison.competitorUrl),
+        value: `${pdfCustomerText(row.dimensionLabel)}: client ${row.primaryScore}/100 vs competitor ${row.competitorScore ?? "Not scored"}. Competitors provide more information that helps customers compare services and make confident decisions. ${pdfPdfActionForDimension(row.dimension)}`
+      }))
+  );
+  const signalRows = competitorGaps.map((evidence) => ({
+    label: pdfCustomerText(evidence.normalizedInput?.["competitor"] ?? "Compared competitor"),
+    value: `${pdfSignalArea(String(evidence.normalizedInput?.["comparedSignal"] ?? "customer decision support"))}: client ${evidence.normalizedInput?.["primaryScore"] ?? "Not assessed"}/100 vs competitor ${evidence.normalizedInput?.["competitorScore"] ?? "Not assessed"}/100. Competitors provide more information that helps customers compare services and make confident decisions. ${seoMeaningForSignal(String(evidence.normalizedInput?.["comparedSignal"] ?? ""))}`
+  }));
+  const rows = dedupePdfRows([...signalRows, ...weakerRows]).slice(0, 7);
+  const contentRows = pdfMeaningfulContentTypeRows(report);
+  const hasCompetitorEvidence = rows.length > 0 || contentRows.length > 0 || (report.competitorComparison ?? []).some((comparison) => comparison.status === "assessed");
+  if (hasCompetitorEvidence) {
+    writeEnterpriseSectionLabel(doc, report, "Website vs Competitor Content Comparison");
+    writeEnterpriseBox(doc, report, "Why Competitors Are Winning", "amber", 190, () => {
+      const displayRows = rows.length > 0 ? rows : [{ label: "Competitive Context", value: "Competitor data was collected, but no validated content advantage was strong enough to expand as a gap." }];
+      displayRows.forEach((row, index) => writeEnterpriseTableRow(doc, row.label, row.value, index));
+      contentRows.forEach((row, index) => writeEnterpriseTableRow(doc, row.label, row.value, displayRows.length + index));
+    });
+  } else {
+    coverageNotes.push("Website vs Competitor Content Comparison was not expanded because no validated competitor content advantage or content-type evidence was available.");
+  }
+
+  const leakKeys = ["trust", "conversionReadiness", "informationClarity", "visibilityStructure"];
+  const leakRows = leakKeys.flatMap((key) => {
+    const dimension = report.dimensions?.find((item) => item.key === key);
+    return dimension ? [{ key, dimension }] : [];
+  });
+  const attribution = (report as unknown as { businessOutcomeAttributionLayer?: ReportSnapshot["businessOutcomeAttributionLayer"] }).businessOutcomeAttributionLayer;
+  const dependency = (report as unknown as { dependencyIntelligenceLayer?: ReportSnapshot["dependencyIntelligenceLayer"] }).dependencyIntelligenceLayer;
+  const sequence = (report as unknown as { recommendationSequencingEngine?: ReportSnapshot["recommendationSequencingEngine"] }).recommendationSequencingEngine;
+  const sequenceActions = [
+    ...(sequence?.immediateActions ?? []),
+    ...(sequence?.nearTermActions ?? []),
+    ...(sequence?.mediumTermActions ?? []),
+    ...(sequence?.strategicActions ?? [])
+  ];
+  const hasRoadmapEvidence = leakRows.length > 0 || Boolean(attribution?.summary || (attribution?.profiles ?? []).length || dependency?.summary || sequenceActions.length || pdfHasEstimatedRevenue(report));
+  if (hasRoadmapEvidence) {
+    writeEnterpriseSectionLabel(doc, report, "Revenue Leakage And Implementation Roadmap");
+    writeEnterpriseBox(doc, report, "Business Outcome Bridge", "gray", 230, () => {
+      leakRows.forEach((row, index) => {
+        writeEnterpriseTableRow(doc, pdfLeakLabel(row.key), `${row.dimension.score}/100 - ${row.dimension.classification}. ${pdfCustomerText(row.dimension.businessMeaning)}`, index);
+      });
+      const nextIndex = leakRows.length;
+      writeEnterpriseTableRow(doc, "What Affects Revenue Most", pdfCustomerText(attribution?.summary ?? report.revenueIntelligence?.confidenceBasis ?? "No business impact link passed the current evidence threshold."), nextIndex);
+      (attribution?.profiles ?? []).slice(0, 3).forEach((profile, index) => {
+        const areas = Array.isArray(profile.impactAreas) ? profile.impactAreas.map((item) => item.replaceAll("_", " ")).join(", ") : "Business outcome";
+        writeEnterpriseTableRow(doc, `Attribution ${index + 1}`, `${areas}; ${profile.confidenceScore}% confidence. ${pdfCustomerText(profile.customerBehaviorExplanation)}`, nextIndex + index + 1);
+      });
+      const dependencyIndex = nextIndex + Math.min((attribution?.profiles ?? []).length, 3) + 1;
+      writeEnterpriseTableRow(doc, "What To Fix Before Other Work", pdfCustomerText(dependency?.summary ?? "No issue connection passed the evidence threshold."), dependencyIndex);
+      const sequenceSummary = sequenceActions.slice(0, 4).map((item) => `${item.bucket}: ${pdfCustomerText(item.action)}`).join(" ");
+      writeEnterpriseTableRow(doc, "Implementation Roadmap", sequenceSummary || "No sequenced recommendation passed the evidence threshold.", dependencyIndex + 1);
+    });
+  } else {
+    coverageNotes.push("Revenue Leakage And Implementation Roadmap was not expanded because no scored dimensions, business impact links, revenue estimates, or sequenced actions passed the evidence threshold.");
+  }
+
+  if (coverageNotes.length > 0) writeEnterpriseCoverageNotes(doc, report, coverageNotes);
+}
+
+function writeEnterpriseCoverageNotes(doc: PDFKit.PDFDocument, report: ReportSnapshot, notes: string[]): void {
+  if (notes.length === 0) return;
+  writeEnterpriseSectionLabel(doc, report, "Intelligence Coverage Notes");
+  writeEnterpriseBox(doc, report, "Sections Limited By Current Evidence", "gray", Math.max(88, 34 + notes.length * 28), () => {
+    notes.slice(0, 6).forEach((note, index) => writeEnterpriseTableRow(doc, `Coverage Note ${index + 1}`, note, index));
   });
 }
 function writeEnterpriseClientSuccessBlueprint(doc: PDFKit.PDFDocument, report: ReportSnapshot): void {
@@ -1836,6 +1888,16 @@ function pdfContentTypeRows(report: ReportSnapshot): Array<{ label: string; valu
   }));
 }
 
+function pdfMeaningfulContentTypeRows(report: ReportSnapshot): Array<{ label: string; value: string }> {
+  return pdfContentTypeRows(report).filter((row) => /^Visible in collected evidence/i.test(row.value));
+}
+
+function pdfHasEstimatedRevenue(report: ReportSnapshot): boolean {
+  const revenue = report.revenueIntelligence;
+  if (!revenue || revenue.status !== "estimated") return false;
+  const ranges = [revenue.revenueOpportunityRange, revenue.opportunityCostRange];
+  return ranges.some((range) => Boolean(range && (range.low > 0 || range.high > 0 || range.confidenceScore > 0 || (range.evidenceIds?.length ?? 0) > 0)));
+}
 function pdfSignalArea(signalKey: string): string {
   if (signalKey.includes("question")) return "Customer question coverage";
   if (signalKey.includes("trust")) return "Trust proof";

@@ -37,6 +37,35 @@ describe("enterprise PDF report rendering", () => {
     expect(text).not.toMatch(/EV-\d+|EO-\d+|REC-\d+|Snapshot ID/i);
   });
 
+  it("skips expanded optional sections when current evidence is unavailable instead of rendering empty blocks", async () => {
+    const report = makeEnterpriseReport();
+    report.evidenceObjects = [];
+    report.evidenceDatabase = [];
+    report.dimensions = [];
+    report.competitorComparison = [];
+    report.revenueIntelligence = {
+      ...report.revenueIntelligence,
+      status: "input_limited",
+      confidenceScore: 0,
+      confidenceBasis: "Not enough validated current-scan evidence.",
+      revenueOpportunityRange: estimate(),
+      opportunityCostRange: estimate()
+    };
+    (report as unknown as { gbpIdentity?: unknown }).gbpIdentity = undefined;
+    (report as unknown as { businessOutcomeAttributionLayer?: unknown }).businessOutcomeAttributionLayer = undefined;
+    (report as unknown as { dependencyIntelligenceLayer?: unknown }).dependencyIntelligenceLayer = undefined;
+    (report as unknown as { recommendationSequencingEngine?: unknown }).recommendationSequencingEngine = undefined;
+
+    const pdf = await renderReportPdf(report);
+    const text = decodePdfHexText(pdf.toString("latin1"));
+
+    expect(text).toContain("Intelligence Coverage Notes");
+    expect(text).toContain("Sections Limited By Current Evidence");
+    expect(text).not.toContain("Local Presence, Reviews, Profile Completeness, And Citations");
+    expect(text).not.toContain("Questions Customers Ask, Answered Questions, And Missing Answers");
+    expect(text).not.toContain("Why Competitors Are Winning");
+    expect(text).not.toContain("Business Outcome Bridge");
+  });
   it("sanitizes raw internal snapshot terms before customer PDF integrity validation", async () => {
     const report = makeEnterpriseReport();
     report.businessRiskStatus.explanation = "Parser success rawSignalTelemetry executionProvenance should remain internal.";
@@ -93,6 +122,17 @@ describe("enterprise PDF report rendering", () => {
 
 function pdfPageCount(text: string): number {
   return Number(text.match(/\/Count\s+(\d+)/)?.[1] ?? 0);
+}
+
+function decodePdfHexText(text: string): string {
+  return [...text.matchAll(/<([0-9A-Fa-f]{2,})>/g)]
+    .map((match) => {
+      const hex = match[1] ?? "";
+      if (hex.length % 2 !== 0) return "";
+      return Buffer.from(hex, "hex").toString("latin1");
+    })
+    .join("")
+    .replace(/\s+/g, " ");
 }
 
 function makeEnterpriseReport(): ReportSnapshot {

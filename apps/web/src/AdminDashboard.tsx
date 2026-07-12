@@ -213,6 +213,16 @@ export function AdminDashboard() {
   const connected = session !== null;
   const owner = session?.role === "owner";
 
+  async function refreshAdminAuthStatus() {
+    try {
+      const result = await adminAuthStatus();
+      setSetupRequired(result.setupRequired);
+      setStorageMode(result.storageMode);
+      return result;
+    } catch {
+      return null;
+    }
+  }
   useEffect(() => {
     if (!session) return;
     void refresh();
@@ -220,12 +230,7 @@ export function AdminDashboard() {
 
   useEffect(() => {
     if (session) return;
-    adminAuthStatus()
-      .then((result) => {
-        setSetupRequired(result.setupRequired);
-        setStorageMode(result.storageMode);
-      })
-      .catch(() => undefined);
+    void refreshAdminAuthStatus();
   }, [session]);
 
   useEffect(() => {
@@ -246,7 +251,9 @@ export function AdminDashboard() {
       setPassword("");
     } catch (err) {
       const baseMessage = err instanceof Error ? err.message : "Login failed";
-      setError(setupRequired ? `${baseMessage} First owner setup is required because no admin owner exists in the current store.` : baseMessage);
+      const latestStatus = await refreshAdminAuthStatus();
+      const needsSetup = latestStatus?.setupRequired ?? setupRequired;
+      setError(needsSetup ? `${baseMessage} First owner setup is required because no admin owner exists in the current store.` : baseMessage);
     } finally {
       setLoading(false);
     }
@@ -371,7 +378,7 @@ export function AdminDashboard() {
                   <KeyRound size={17} />
                   {loading ? "Creating owner..." : "Create Owner & Sign In"}
                 </button>
-                <button className="secondary-button" type="button" onClick={() => setSetupRequired(false)}>
+                <button className="secondary-button" type="button" onClick={() => { setError(""); setSetupRequired(false); void refreshAdminAuthStatus(); }}>
                   I already have an owner account
                 </button>
               </>
@@ -389,7 +396,7 @@ export function AdminDashboard() {
                   <KeyRound size={17} />
                   {loading ? "Signing in..." : "Sign In"}
                 </button>
-                <button className="secondary-button" type="button" onClick={() => setSetupRequired(true)}>
+                <button className="secondary-button" type="button" onClick={() => { setError(""); setSetupRequired(true); }}>
                   Create first owner account
                 </button>
               </>
