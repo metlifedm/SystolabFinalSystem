@@ -7,6 +7,7 @@ import { isMongoConnected } from "../db/mongoose.js";
 import { enqueuePlatformJob } from "./platformControlPlaneService.js";
 import { findSnapshotHistoryForTarget } from "./persistenceService.js";
 import {
+  createTenant,
   createWorkspace,
   getTenantBySlug,
   getWorkspace,
@@ -32,6 +33,7 @@ import {
   listBillingPlans,
   seedDefaultPlans
 } from "./billingService.js";
+import { sha256 } from "../utils/crypto.js";
 
 export type PortalRole = "owner" | "agency_admin" | "team_member" | "client" | "viewer";
 
@@ -54,6 +56,10 @@ export interface ProjectInput {
     enabled?: boolean;
   };
   clientAccessEnabled?: boolean;
+}
+
+export interface FirstAnalysisInput {
+  targetUrl: string;
 }
 
 export interface PortalProjectSummary {
@@ -154,6 +160,60 @@ export async function getPortalMe(user: AuthUserProfile): Promise<{
 
   const projects = await listProjectsForUser(user.userId);
   return { user, tenants, projects };
+}
+
+export async function ensureCustomerOrganization(user: AuthUserProfile, requestedName?: string): Promise<{
+  tenant: Awaited<ReturnType<typeof createTenant>>["tenant"];
+  membership: Awaited<ReturnType<typeof createTenant>>["membership"];
+  created: boolean;
+}> {
+  const memberships = await listUserTenants(user.userId);
+  const membership = memberships.find((item) => item.role === "owner" || item.role === "member");
+  const tenant = membership ? await getTenantBySlug(membership.tenantSlug) : null;
+  if (membership && tenant) return { tenant, membership, created: false };
+
+  const publicName = cleanString(requestedName) ?? defaultAgencyName(user);
+  const created = await createTenant(defaultAgencySlug(user), publicName, user.userId);
+  return { ...created, created: true };
+}
+
+export async function startFirstAnalysis(user: AuthUserProfile, input: FirstAnalysisInput): Promise<{
+  organization: { tenantId: string; tenantSlug: string; publicName: string; created: boolean };
+  website: PortalProjectSummary;
+  job: Awaited<ReturnType<typeof runProjectScan>>;
+}> {
+  const targetUrl = normalizeCustomerWebsiteUrl(input.targetUrl);
+  const organization = await ensureCustomerOrganization(user);
+  const { membership, tenant } = organization;
+
+  const projects = await listProjectsForUser(user.userId, membership.tenantSlug);
+  let website = projects.find((project) => canonicalWebsiteKey(project.targetUrl) === canonicalWebsiteKey(targetUrl));
+  if (!website) {
+    const businessName = deriveProjectName(targetUrl);
+    website = await createProjectForTenant(user.userId, {
+      tenantSlug: membership.tenantSlug,
+      targetUrl,
+      projectName: businessName,
+      clientCompanyName: businessName,
+      monitoringConfig: { cadence: "manual", enabled: false }
+    });
+  }
+
+  const job = await runProjectScan(website.workspaceId, String(tenant._id), user.userId, {
+    mode: "full_audit",
+    includeSeo: true
+  });
+
+  return {
+    organization: {
+      tenantId: String(tenant._id),
+      tenantSlug: membership.tenantSlug,
+      publicName: tenant.publicName,
+      created: organization.created
+    },
+    website,
+    job
+  };
 }
 
 export async function listProjectsForUser(userId: string, tenantSlug?: string): Promise<PortalProjectSummary[]> {
@@ -687,6 +747,37 @@ function cleanPoweredByMode(value: unknown): TenantBranding["poweredByMode"] | u
 
 function cleanCoverPageDesign(value: unknown): TenantBranding["coverPageDesign"] | undefined {
   return value === "classic" || value === "executive" || value === "minimal" ? value : undefined;
+}
+
+function normalizeCustomerWebsiteUrl(value: string): string {
+  const candidate = value.trim();
+  if (!candidate) throw new MembershipError("Website URL is required.", 400);
+  const parsed = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate) ? candidate : "https://" + candidate);
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new MembershipError("Website URL must use HTTP or HTTPS.", 400);
+  }
+  parsed.hash = "";
+  return parsed.toString();
+}
+
+function canonicalWebsiteKey(value: string): string {
+  try {
+    const parsed = new URL(value);
+    return parsed.hostname.toLowerCase() + (parsed.pathname.replace(/\/$/, "") || "/");
+  } catch {
+    return value.trim().toLowerCase().replace(/\/$/, "");
+  }
+}
+
+function defaultAgencyName(user: AuthUserProfile): string {
+  const name = cleanString(user.displayName) ?? cleanString(user.givenName);
+  return name ? name + "'s Agency" : "My Agency";
+}
+
+function defaultAgencySlug(user: AuthUserProfile): string {
+  const seed = cleanString(user.displayName) ?? cleanString(user.givenName) ?? cleanString(user.email?.split("@")[0]) ?? "my-agency";
+  const base = seed.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "my-agency";
+  return base + "-" + sha256(user.userId).slice(0, 8);
 }
 
 function deriveProjectName(targetUrl: string): string {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import zlib from "node:zlib";
+import { isAllowedCorsOrigin } from "./app.js";
 import {
   assertPublicHttpUrl,
   decodeResponseBody,
@@ -9,6 +10,15 @@ import {
 } from "./services/truth-engine/network.js";
 
 describe("SYSTOLAB Phase 1 security hardening", () => {
+  it("allows any loopback development port without weakening production CORS", () => {
+    const allowed = ["https://systolab.in", "http://127.0.0.1:5173"];
+
+    expect(isAllowedCorsOrigin("http://127.0.0.1:5175", allowed, "development")).toBe(true);
+    expect(isAllowedCorsOrigin("http://localhost:62000", allowed, "sandbox")).toBe(true);
+    expect(isAllowedCorsOrigin("http://127.0.0.1:5175", allowed, "production")).toBe(false);
+    expect(isAllowedCorsOrigin("https://untrusted.example.com", allowed, "development")).toBe(false);
+    expect(isAllowedCorsOrigin("https://systolab.in", allowed, "production")).toBe(true);
+  });
   it("normalizes scan URLs while keeping only HTTP and HTTPS protocols", () => {
     expect(normalizeUrl("example.com/path#section").toString()).toBe("https://example.com/path");
     expect(normalizeUrl("http://example.com").protocol).toBe("http:");

@@ -3,11 +3,13 @@ import { createTenant, updateTenant } from "./services/membershipService.js";
 import { recordScanUsage } from "./services/usageTrackingService.js";
 import {
   createProjectForTenant,
+  ensureCustomerOrganization,
   getPortalMe,
   getUsageOverview,
   listProjectsForUser,
   resolveWhiteLabelBranding,
   runProjectScan,
+  startFirstAnalysis,
   updateWhiteLabelBranding
 } from "./services/portalService.js";
 import { makeId } from "./utils/crypto.js";
@@ -17,6 +19,38 @@ function uniqueSlug(prefix: string) {
 }
 
 describe("portal service", () => {
+  it("delivers value first by provisioning hidden account resources and queuing the first report from one URL", async () => {
+    const userId = makeId("usr");
+    const user = {
+      userId,
+      email: "value-first@example.com",
+      displayName: "Amina Rahman",
+      providers: ["password"] as const,
+      emailVerified: true,
+      phoneVerified: false,
+      googleVerified: false,
+      lifecycleState: "VERIFIED" as const,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const started = await startFirstAnalysis(user, { targetUrl: "value-first.example.com" });
+
+    expect(started.organization.created).toBe(true);
+    expect(started.organization.publicName).toBe("Amina Rahman's Agency");
+    expect(started.website.targetUrl).toBe("https://value-first.example.com/");
+    expect(started.job.jobId).toMatch(/^job_/);
+    expect(started.job.status).toBe("queued");
+
+    const portal = await getPortalMe(user);
+    expect(portal.tenants).toHaveLength(1);
+    expect(portal.projects).toHaveLength(1);
+    expect(portal.projects[0]?.workspaceId).toBe(started.website.workspaceId);
+
+    const existing = await ensureCustomerOrganization(user, "A Different Name");
+    expect(existing.created).toBe(false);
+    expect(existing.membership.tenantSlug).toBe(started.organization.tenantSlug);
+  });
   it("creates tenant-scoped projects and lists them only for the owning user", async () => {
     const ownerId = makeId("usr");
     const outsiderId = makeId("usr");

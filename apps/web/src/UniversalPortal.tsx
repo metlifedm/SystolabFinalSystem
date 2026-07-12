@@ -1,14 +1,15 @@
-import { useEffect, useState, type ChangeEvent, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from "react";
 import type { AuthIdentifierType, AuthResponse, AuthSessionSummary, AuthTokenPair, AuthUserProfile, TenantBranding } from "@systolab/shared";
-import { CheckCircle2, KeyRound, Layers, LogOut, ShieldCheck } from "lucide-react";
+import { ArrowRight, Building2, CheckCircle2, FileText, Globe2, KeyRound, Layers, LogOut, Settings, Share2, ShieldCheck, Users } from "lucide-react";
 import {
   createProject,
   generateAgencyProposal,
-  createTenant,
   downloadReportPdf,
+  ensureAgency,
   getBillingOverview,
   getBillingPlans,
   getPortalMe,
+  getScanJob,
   getProject,
   getProjectReports,
   getUsageOverview,
@@ -20,6 +21,7 @@ import {
   registerPassword,
   requestOtp,
   runProjectScan,
+  startFirstAnalysis,
   updateAgencyKnowledgeBase,
   updateAgencyServiceCatalog,
   updateClientWorkspaceState,
@@ -52,13 +54,15 @@ type PortalPath =
   | "/billing"
   | "/white-label"
   | "/account"
-  | "/security";
+  | "/security"
+  | "/agency"
+  | "/settings";
 
 const publicPortalRoutes = new Set(["/", "/features", "/pricing", "/docs", "/help", "/demo", "/white-label", "/testimonials", "/contact", "/login", "/signup"]);
 
 export function isPortalRoute(pathname: string): boolean {
   const path = normalizePortalPath(pathname);
-  return publicPortalRoutes.has(path) || path === "/dashboard" || path === "/projects" || path.startsWith("/projects/") || ["/reports", "/monitoring", "/competitors", "/recommendations", "/team", "/clients", "/billing", "/white-label", "/account", "/security"].includes(path);
+  return publicPortalRoutes.has(path) || path === "/dashboard" || path === "/projects" || path.startsWith("/projects/") || ["/reports", "/monitoring", "/competitors", "/recommendations", "/team", "/clients", "/billing", "/white-label", "/account", "/security", "/agency", "/settings"].includes(path);
 }
 
 function normalizePortalPath(pathname: string): string {
@@ -129,13 +133,13 @@ export function UniversalPortal() {
 
   function applyAuth(result: AuthResponse) {
     if (!result.tokens || !result.session) {
-      setMessage(result.message);
+      setMessage(result.requiresVerification ? "Verify your account to continue." : "We could not complete sign in. Please try again.");
       return;
     }
     const nextAuth = { user: result.user, tokens: result.tokens, session: result.session };
     localStorage.setItem("systolab.auth", JSON.stringify(nextAuth));
     setAuth(nextAuth);
-    setMessage(result.message);
+    setMessage("Welcome to SYSTOLAB. Your account is ready.");
     navigate("/dashboard");
   }
 
@@ -178,25 +182,33 @@ function renderPortalPage(path: string, ctx: { auth: StoredPortalAuth | null; po
   if (path === "/reports") return <PortalReports projects={ctx.portal?.projects ?? []} navigate={ctx.navigate} />;
   if (path === "/clients") return <PortalClients tenant={ctx.tenant} agencyOperating={ctx.agencyOperating} refresh={ctx.refreshAgencyOperating} navigate={ctx.navigate} />;
   if (path === "/billing") return <PortalBilling tenant={ctx.tenant} plans={ctx.plans} />;
-  if (path === "/white-label") return <PortalWhiteLabel tenant={ctx.tenant} agencyOperating={ctx.agencyOperating} refresh={ctx.refreshPortal} refreshAgencyOperating={ctx.refreshAgencyOperating} />;
+  if (path === "/white-label" || path === "/agency") return <PortalWhiteLabel tenant={ctx.tenant} agencyOperating={ctx.agencyOperating} refresh={ctx.refreshPortal} refreshAgencyOperating={ctx.refreshAgencyOperating} />;
+  if (path === "/settings") return <PortalSettings auth={ctx.auth} tenant={ctx.tenant} navigate={ctx.navigate} />;
   if (path === "/account" || path === "/security") return <PortalAccountSecurity auth={ctx.auth} security={path === "/security"} />;
   return <PortalOperationsPage path={path as PortalPath} projects={ctx.portal?.projects ?? []} navigate={ctx.navigate} />;
 }
 function PortalTopNav({ auth, path, navigate, signOut }: { auth: StoredPortalAuth | null; path: string; navigate: (path: string) => void; signOut: () => void }) {
-  const items: Array<[string, string]> = auth
-    ? [["/dashboard", "Dashboard"], ["/projects", "Projects"], ["/reports", "Reports"], ["/clients", "Clients"], ["/team", "Team"], ["/billing", "Billing"], ["/white-label", "White Label"]]
-    : [["/features", "Features"], ["/pricing", "Pricing"], ["/demo", "Live Demo"], ["/docs", "Docs"], ["/white-label", "White Label"], ["/contact", "Contact"]];
+  const customerItems = [
+    { href: "/dashboard", label: "Dashboard", icon: <Layers size={16} /> },
+    { href: "/reports", label: "Reports", icon: <FileText size={16} /> },
+    { href: "/clients", label: "Clients", icon: <Users size={16} /> },
+    { href: "/agency", label: "Agency", icon: <Building2 size={16} /> },
+    { href: "/settings", label: "Settings", icon: <Settings size={16} /> }
+  ];
+  const publicItems: Array<[string, string]> = [["/features", "Features"], ["/pricing", "Pricing"], ["/demo", "Live Demo"], ["/docs", "Documentation"], ["/white-label", "White Label"], ["/help", "Help Center"], ["/contact", "Contact"]];
   return (
     <header className="portal-nav">
-      <button className="portal-brand" onClick={() => navigate(auth ? "/dashboard" : "/")}><img src="/systolab-icon.png" alt="SYSTOLAB" /><span>SYSTOLAB Cloud</span></button>
-      <nav>{items.map(([href, label]) => <button key={href} className={path === href ? "active" : ""} onClick={() => navigate(href)}>{label}</button>)}</nav>
+      <button className="portal-brand" onClick={() => navigate(auth ? "/dashboard" : "/")}><img src="/systolab-icon.png" alt="SYSTOLAB" /><span>SYSTOLAB</span></button>
+      <nav>{auth
+        ? customerItems.map((item) => <button key={item.href} className={path === item.href ? "active" : ""} onClick={() => navigate(item.href)}>{item.icon}{item.label}</button>)
+        : publicItems.map(([href, label]) => <button key={href} className={path === href ? "active" : ""} onClick={() => navigate(href)}>{label}</button>)}
+      </nav>
       <div className="portal-nav-actions">
-        {auth ? <><button className="portal-secondary" onClick={() => navigate("/account")}>{auth.user.displayName || auth.user.email || "Account"}</button><button className="portal-icon-button" onClick={signOut}><LogOut size={16} />Sign out</button></> : <><button className="portal-secondary" onClick={() => navigate("/login")}>Sign in</button><button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button></>}
+        {auth ? <><button className="portal-secondary portal-account-button" onClick={() => navigate("/settings")}>{auth.user.displayName || auth.user.email || "My Account"}</button><button className="portal-icon-button" onClick={signOut} title="Sign out" aria-label="Sign out"><LogOut size={16} /></button></> : <><button className="portal-secondary" onClick={() => navigate("/login")}>Sign in</button><button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button></>}
       </div>
     </header>
   );
-}
-function PortalLanding({ navigate }: { navigate: (path: string) => void }) {
+}function PortalLanding({ navigate }: { navigate: (path: string) => void }) {
   return (
     <main className="portal-landing">
       <section className="portal-hero">
@@ -209,7 +221,7 @@ function PortalLanding({ navigate }: { navigate: (path: string) => void }) {
         </div>
         <div className="portal-hero-panel">
           <div className="health-snapshot compact"><HealthRow label="Customer Acquisition" value="Website + SEO" /><HealthRow label="Customer Trust" value="Evidence-led" /><HealthRow label="Decision Support" value="Prioritized" /><HealthRow label="Competitive Position" value="Explained" /><HealthRow label="Revenue Opportunity" value="Attribution-ready" /></div>
-          <div className="portal-signal-grid"><MetricTile label="Account" value="Required" /><MetricTile label="Organization" value="MetifeDM LLC" /><MetricTile label="Projects" value="Client websites" /><MetricTile label="Reports" value="PDF / JSON" /></div>
+          <div className="portal-signal-grid"><MetricTile label="Account" value="Secure" /><MetricTile label="My Agency" value="Branded" /><MetricTile label="My Clients" value="Organized" /><MetricTile label="My Reports" value="Web + PDF" /></div>
         </div>
       </section>
       <section className="portal-band three-col">{featureCards.slice(0, 3).map((item) => <PortalInfoCard key={item.title} {...item} />)}</section>
@@ -245,10 +257,36 @@ function PortalAuthPage({ mode, onAuth }: { mode: "login" | "signup"; onAuth: (r
       onAuth(await googleAuth({ credential, displayName: fallbackName, deviceId, deviceLabel: "SYSTOLAB Portal" }));
     });
   }
+  async function continuePassword() {
+    await run(async () => {
+      const request = { identifierType, identifier, password, deviceId, deviceLabel: "SYSTOLAB Portal" };
+      if (mode === "login") {
+        onAuth(await loginPassword(request));
+        return;
+      }
+
+      const registered = await registerPassword({ ...request, displayName: displayName || identifier.split("@")[0] });
+      if (registered.tokens && registered.session) {
+        onAuth(registered);
+        return;
+      }
+
+      if (registered.requiresVerification) {
+        const challenge = registered.otpChallenge;
+        setOtpChallenge(challenge);
+        setOtpCode(challenge.simulatedDelivery.code ?? "");
+        setAuthMode("otp");
+        setStatus("Verify your account to continue.");
+        return;
+      }
+
+      onAuth(registered);
+    });
+  }
 
   return (
     <main className="portal-auth-layout">
-      <section className="portal-auth-copy"><span className="portal-eyebrow">Universal authentication</span><h1>{mode === "signup" ? "Create your SYSTOLAB Cloud account" : "Sign in to SYSTOLAB Cloud"}</h1><p>Use Google-first login, password, or self-contained OTP verification. Sessions, devices, and audit records are managed by the SYSTOLAB backend.</p><div className="portal-auth-proof"><span><ShieldCheck size={16} />Secure sessions</span><span><KeyRound size={16} />OTP throttling</span><span><Layers size={16} />Organization access</span></div></section>
+      <section className="portal-auth-copy"><span className="portal-eyebrow">{mode === "signup" ? "Start free" : "Welcome back"}</span><h1>{mode === "signup" ? "Create your SYSTOLAB account" : "Sign in to SYSTOLAB"}</h1><p>{mode === "signup" ? "Create your account, analyze your first website, and receive an executive report in minutes." : "Continue to your reports, clients, agency brand, and business intelligence."}</p><div className="portal-auth-proof"><span><ShieldCheck size={16} />Protected account</span><span><KeyRound size={16} />Flexible sign in</span><span><Layers size={16} />Your reports stay organized</span></div></section>
       <section className="portal-auth-card">
         <div className="portal-auth-tabs"><button className={authMode === "google" ? "active" : ""} onClick={() => setAuthMode("google")}>Google</button><button className={authMode === "password" ? "active" : ""} onClick={() => setAuthMode("password")}>Password</button><button className={authMode === "otp" ? "active" : ""} onClick={() => setAuthMode("otp")}>OTP</button></div>
         <div className="portal-form-grid">
@@ -259,7 +297,7 @@ function PortalAuthPage({ mode, onAuth }: { mode: "login" | "signup"; onAuth: (r
           {authMode === "otp" && otpChallenge && <label><span>OTP code</span><input value={otpCode} onChange={(event) => setOtpCode(event.target.value)} placeholder={otpChallenge.simulatedDelivery.code ?? "000000"} /></label>}
         </div>
         {authMode === "google" && <button className="portal-google" onClick={continueGoogle}><GoogleIcon />Continue with Google</button>}
-        {authMode === "password" && <button className="portal-primary full" disabled={!identifier || !password} onClick={() => run(async () => { const request = { identifierType, identifier, password, deviceId, deviceLabel: "SYSTOLAB Portal" }; onAuth(mode === "signup" ? await registerPassword({ ...request, displayName: displayName || identifier.split("@")[0] }) : await loginPassword(request)); })}>{mode === "signup" ? "Create account" : "Sign in"}</button>}
+        {authMode === "password" && <button className="portal-primary full" disabled={!identifier || !password} onClick={() => void continuePassword()}>{mode === "signup" ? "Create account" : "Sign in"}</button>}
         {authMode === "otp" && !otpChallenge && <button className="portal-primary full" disabled={!identifier} onClick={() => run(async () => { const challenge = await requestOtp({ identifierType, identifier, purpose: mode === "signup" ? "signup" : "login", deviceId }); setOtpChallenge(challenge); setOtpCode(challenge.simulatedDelivery.code ?? ""); })}>Send OTP</button>}
         {authMode === "otp" && otpChallenge && <button className="portal-primary full" disabled={!otpCode} onClick={() => run(async () => onAuth(await verifyOtp({ challengeId: otpChallenge.challengeId, code: otpCode, deviceId, deviceLabel: "SYSTOLAB Portal" })))}>Verify OTP</button>}
         {status && <div className="portal-status inline">{status}</div>}{error && <div className="portal-alert inline">{error}</div>}
@@ -270,55 +308,234 @@ function PortalAuthPage({ mode, onAuth }: { mode: "login" | "signup"; onAuth: (r
 
 function PortalDashboard({ portal, usage, agencyDashboard, agencyOperating, refresh, navigate }: { portal: PortalMeResponse | null; usage: PortalUsageOverview | null; agencyDashboard: AgencyDashboardResponse | null; agencyOperating: AgencyOperatingSystemResponse | null; refresh: () => Promise<void>; navigate: (path: string) => void }) {
   const organization = portal?.tenants[0] ?? null;
-  const projects = portal?.projects ?? [];
-  const latest = projects.find((project) => project.latestReport)?.latestReport;
-  const organizationName = organization?.branding.publicName ?? agencyOperating?.profile.companyName ?? organization?.tenantSlug ?? "No organization yet";
-  const progress = agencyOperating?.progress;
-  const activeServices = agencyOperating?.serviceCatalog.filter((service) => service.active).slice(0, 6) ?? [];
-  const clients = agencyOperating?.clients ?? [];
-  const knowledge = agencyOperating?.knowledgeBase;
-  const performance = agencyOperating?.performanceIntelligence;
-  const topConsultant = performance?.consultantPerformance[0];
-  const topIndustry = performance?.industryPerformance[0];
-  const topReport = performance?.reportConversion.bestConvertingReportProfiles[0];
-  const topRecommendation = performance?.recommendationImplementation.mostImplemented[0];
+  const websites = portal?.projects ?? [];
+  const reports = websites
+    .map((website) => website.latestReport)
+    .filter((report): report is PortalReportSummary => Boolean(report))
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+  const latest = reports[0];
+
+  if (!latest) {
+    return <PortalFirstValueJourney portal={portal} refresh={refresh} navigate={navigate} />;
+  }
+
+  const firstName = portal?.user.displayName?.split(" ")[0] || "there";
+  const branding = organization?.branding;
+  const milestones = [
+    { label: "First website analyzed", complete: reports.length > 0, path: "/reports" },
+    { label: "Upload your logo", complete: Boolean(branding?.logoUrl), path: "/agency" },
+    { label: "Complete agency details", complete: Boolean(branding?.supportEmail && branding?.websiteUrl && branding?.phoneNumber), path: "/agency" },
+    { label: "Invite team members", complete: (agencyOperating?.profile.teamMembers.length ?? 0) > 1, path: "/settings" },
+    { label: "Generate a branded report", complete: Boolean(branding?.logoUrl && reports.length), path: "/reports" },
+    { label: "Share your first client report", complete: websites.some((website) => website.clientAccessEnabled), path: "/clients" }
+  ];
+
   return (
     <main className="portal-main">
-      <PortalPageHeader eyebrow="Executive Dashboard" title={`Welcome back${portal?.user.displayName ? `, ${portal.user.displayName.split(" ")[0]}` : ""}.`} actions={<button className="portal-primary" onClick={() => navigate(organization ? "/projects" : "/dashboard")}>{organization ? "+ Add Website" : "Create Organization"}</button>} />
-      {!organization && <CreateOrganizationCard refresh={refresh} />}
-      <section className="portal-dashboard-grid">
-        <div className="portal-panel"><h2>Organization</h2><MetricTile label="Name" value={organizationName} /><MetricTile label="White Label" value={organization ? "Available" : "Create organization first"} /><MetricTile label="Team" value={agencyOperating ? `${agencyOperating.profile.teamMembers.length || 1} role profile` : "Pending"} /></div>
-        <div className="portal-panel"><h2>Usage</h2><MetricTile label="Reports this month" value={`${usage?.scanLimit.used ?? 0}/${usage?.scanLimit.limit === -1 ? "Unlimited" : usage?.scanLimit.limit ?? 0}`} /><MetricTile label="API calls" value={`${usage?.apiCallLimit.used ?? 0}/${usage?.apiCallLimit.limit === -1 ? "Unlimited" : usage?.apiCallLimit.limit ?? 0}`} /></div>
-        <div className="portal-panel wide"><h2>Business Health Snapshot</h2><div className="health-snapshot"><HealthRow label="Customer Acquisition" value={latest?.oss === null ? "Not scored" : latest ? "Tracked" : "Ready for first report"} /><HealthRow label="Customer Trust" value={latest?.businessRiskStatus ?? "Awaiting report"} /><HealthRow label="Customer Decision Support" value={latest ? latest.visualStateLabel : "Needs first report"} /><HealthRow label="Competitive Position" value={projects.some((project) => project.competitorUrls.length) ? "Competitors configured" : "Add competitors"} /><HealthRow label="Local Presence" value={projects.some((project) => project.gbpUrl) ? "GBP linked" : "Needs GBP URL"} /><HealthRow label="Priority" value={latest ? "Review latest decisions" : "Run first report"} /></div></div>
-        <div className="portal-panel wide"><h2>Projects</h2>{projects.length ? <ProjectList projects={projects} navigate={navigate} /> : <p className="portal-muted">Add a website to create your first project and generate a business intelligence report.</p>}</div>
-        <div className="portal-panel"><h2>Recent Reports</h2><MetricTile label="Latest" value={latest ? latest.visualStateLabel : "No reports yet"} /><MetricTile label="OSS" value={latest?.oss === null || latest?.oss === undefined ? "Not scored" : `${latest.oss}/100`} /></div>
-        <div className="portal-panel wide"><h2>Agency Analytics</h2><div className="portal-signal-grid"><MetricTile label="Reports generated" value={String(agencyDashboard?.analytics.reportsGenerated ?? progress?.reportsGenerated ?? 0)} /><MetricTile label="Leads created" value={String(agencyDashboard?.analytics.leadsCreated ?? clients.length)} /><MetricTile label="Report-to-client rate" value={`${agencyDashboard?.analytics.reportToClientConversionRate ?? 0}%`} /><MetricTile label="CRM outbox" value={agencyDashboard?.crm.enabled ? `${agencyDashboard.crm.provider} / ${agencyDashboard.crm.queuedLeadCount}` : "Disabled"} /></div><p className="portal-muted">{agencyDashboard?.analytics.mostCommonClientIssues.length ? `Common issues: ${agencyDashboard.analytics.mostCommonClientIssues.slice(0, 3).join("; ")}` : "Common client issues appear after reports are generated."}</p></div>
-        <div className="portal-panel wide"><h2>Agency Operating System</h2><div className="portal-signal-grid"><MetricTile label="Clients tracked" value={String(progress?.clientsTracked ?? clients.length)} /><MetricTile label="Improved clients" value={String(progress?.improvedClients ?? 0)} /><MetricTile label="Average score delta" value={progress?.averageScoreDelta === null || progress?.averageScoreDelta === undefined ? "No trend yet" : formatDelta(progress.averageScoreDelta)} /><MetricTile label="Remaining priorities" value={String(progress?.remainingPriorities ?? 0)} /></div><p className="portal-muted">{agencyOperating ? `Profile, client management, permissions, sharing controls, service catalog, proposals, and audit trail are active for ${agencyOperating.profile.companyName}.` : "Create an organization to activate agency operating controls."}</p></div>
-        <div className="portal-panel"><h2>Service Catalog</h2>{activeServices.length ? <div className="portal-timeline">{activeServices.map((service) => <span key={service.serviceId}>{service.name}</span>)}</div> : <p className="portal-muted">Configure agency services from white-label settings.</p>}</div>
-        <div className="portal-panel"><h2>Knowledge Base</h2><MetricTile label="Case studies" value={String(knowledge?.caseStudies.length ?? 0)} /><MetricTile label="FAQs" value={String(knowledge?.faqs.length ?? 0)} /><MetricTile label="Methodologies" value={String(knowledge?.methodologies.length ?? 0)} /></div>
-        <div className="portal-panel wide"><h2>Client Management</h2>{clients.length ? <div className="portal-table">{clients.slice(0, 5).map((client) => <button key={client.workspaceId} className="portal-table-row" onClick={() => navigate("/clients")}><span><strong>{client.clientName}</strong><small>{safeHostLabel(client.targetUrl)}</small></span><span>{titleCaseStatus(client.followUpStatus)}</span><span>{client.scoreDelta === null ? "No trend" : formatDelta(client.scoreDelta)}</span></button>)}</div> : <p className="portal-muted">Clients appear here after you add website projects.</p>}</div>
-        <div className="portal-panel wide"><h2>Agency Success Center</h2><div className="health-snapshot"><HealthRow label="Pitch first" value={agencyDashboard?.successCenter.servicesToPitchFirst.slice(0, 3).join(", ") || activeServices.slice(0, 3).map((service) => service.name).join(", ") || "Run reports to identify services"} /><HealthRow label="Estimated deal size" value={agencyDashboard?.successCenter.estimatedDealSize ?? "Pending report data"} /><HealthRow label="Suggested tier" value={agencyDashboard?.successCenter.suggestedPricingTier ?? "Pending report data"} /></div><p className="portal-muted">{agencyDashboard?.successCenter.personalizedSalesScript ?? "Sales script appears after reports create evidence-backed recommendations."}</p></div>
-        <div className="portal-panel wide"><h2>AI Sales Coach</h2><p className="portal-muted">Private agency-only guidance. This is never shown in client reports.</p><div className="portal-signal-grid"><MetricTile label="Easiest services" value={agencyOperating?.salesCoach.easiestServicesToSell.slice(0, 3).join(", ") || "Run reports"} /><MetricTile label="Implementation effort" value={agencyOperating?.salesCoach.estimatedImplementationEffort ?? "Pending"} /><MetricTile label="Playbooks" value={String(agencyOperating?.salesCoach.clientPlaybooks.length ?? 0)} /><MetricTile label="Coach status" value={agencyOperating?.salesCoach.status ?? "Limited"} /></div><div className="health-snapshot compact"><HealthRow label="Likely objection" value={agencyOperating?.salesCoach.likelyClientObjections[0] ?? "No objection model yet"} /><HealthRow label="Suggested response" value={agencyOperating?.salesCoach.suggestedResponses[0] ?? "Generate a report to create a response"} /><HealthRow label="Meeting agenda" value={agencyOperating?.salesCoach.suggestedMeetingAgenda[0] ?? "Review evidence and next steps"} /></div></div>
-        {performance && <div className="portal-panel wide"><h2>Agency Performance Intelligence</h2><p className="portal-muted">Private agency-only performance analytics. This is never shown to clients or included in customer reports.</p><div className="portal-signal-grid"><MetricTile label="Close rate" value={`${performance.reportConversion.reportToSaleRate}%`} /><MetricTile label="Report-to-proposal" value={`${performance.reportConversion.reportToProposalRate}%`} /><MetricTile label="Avg report-to-sale" value={performance.salesCycle.averageTimeReportToSaleDays === null ? "Not measured" : `${performance.salesCycle.averageTimeReportToSaleDays} days`} /><MetricTile label="Implementation rate" value={`${performance.recommendationImplementation.implementationRate}%`} /></div><div className="health-snapshot compact"><HealthRow label="Top consultant" value={topConsultant ? `${topConsultant.consultantName} (${topConsultant.wonClients} won)` : "Assign consultants"} /><HealthRow label="Best report profile" value={topReport ? `${topReport.reportProfile} (${topReport.closeRate}%)` : "Need report outcomes"} /><HealthRow label="Best industry" value={topIndustry ? `${topIndustry.industry} (${topIndustry.closeRate}%)` : "Need industry data"} /><HealthRow label="Most implemented" value={topRecommendation ? `${topRecommendation.recommendation} (${topRecommendation.implementedCount})` : "Track recommendations"} /></div>{performance.consultantPerformance.length ? <div className="portal-table">{performance.consultantPerformance.slice(0, 4).map((consultant) => <div key={consultant.consultantName} className="portal-table-row static"><span><strong>{consultant.consultantName}</strong><small>{consultant.assignedClients} clients / {consultant.proposalsGenerated} proposals / {consultant.topIndustry}</small></span><span>{consultant.closeRate}% close</span><span>{consultant.averageProjectValue}</span></div>)}</div> : <p className="portal-muted">Consultant performance appears after clients are assigned and follow-up outcomes are recorded.</p>}<p className="portal-muted">{performance.dataCoverage.limitation}</p></div>}
-        <div className="portal-panel wide"><h2>Audit Trail</h2>{agencyOperating?.auditTrail.length ? <div className="portal-table">{agencyOperating.auditTrail.slice(0, 5).map((event) => <div key={event.eventId} className="portal-table-row static"><span><strong>{event.summary}</strong><small>{event.action}</small></span><span>{formatDateLabel(event.createdAt)}</span></div>)}</div> : <p className="portal-muted">Agency profile, client, proposal, report, and recommendation activity will be recorded here.</p>}</div>
+      <PortalPageHeader
+        eyebrow="Executive Dashboard"
+        title={"Welcome, " + firstName + "."}
+        actions={<button className="portal-primary" onClick={() => navigate("/projects")}><Globe2 size={17} />Analyze another website</button>}
+      />
+      <section className="portal-dashboard-grid portal-dashboard-focus">
+        <div className="portal-panel wide portal-value-panel">
+          <div className="portal-section-heading"><div><span className="portal-eyebrow">Latest intelligence</span><h2>{safeHostLabel(latest.targetUrl)}</h2></div><a className="portal-secondary" href={latest.brandedReportUrl || latest.reportUrl}>Open report <ArrowRight size={16} /></a></div>
+          <div className="portal-signal-grid portal-four-up">
+            <MetricTile label="Business readiness" value={latest.oss === null ? "Not scored" : latest.oss + "/100"} />
+            <MetricTile label="Current position" value={latest.visualStateLabel} />
+            <MetricTile label="Evidence coverage" value={latest.evidenceCoveragePercent + "%"} />
+            <MetricTile label="Confidence" value={latest.confidenceLabel} />
+          </div>
+        </div>
+        <div className="portal-panel">
+          <h2>Business Health Snapshot</h2>
+          <div className="health-snapshot compact">
+            <HealthRow label="Customer Acquisition" value={latest.oss === null ? "Assessment limited" : "Measured"} />
+            <HealthRow label="Customer Trust" value={latest.businessRiskStatus} />
+            <HealthRow label="Decision Support" value={latest.visualStateLabel} />
+            <HealthRow label="Competitive Position" value={websites.some((website) => website.competitorUrls.length) ? "Tracked" : "Ready to enrich"} />
+            <HealthRow label="Local Presence" value={websites.some((website) => website.gbpUrl) ? "Connected" : "Ready to enrich"} />
+          </div>
+        </div>
+        <div className="portal-panel wide">
+          <div className="portal-section-heading"><div><h2>Recent Reports</h2><p className="portal-muted">Your latest executive intelligence is ready to review, download, and share.</p></div><button className="portal-secondary" onClick={() => navigate("/reports")}>View all</button></div>
+          <ReportList reports={reports.slice(0, 4)} />
+        </div>
+        <div className="portal-panel">
+          <h2>Agency Setup</h2>
+          <div className="portal-checklist">{milestones.map((milestone) => <button key={milestone.label} onClick={() => navigate(milestone.path)} className={milestone.complete ? "complete" : ""}><CheckCircle2 size={18} /><span>{milestone.label}</span></button>)}</div>
+        </div>
+        <div className="portal-panel wide">
+          <div className="portal-section-heading"><div><h2>Clients</h2><p className="portal-muted">Monitor active websites and open the next decision report.</p></div><button className="portal-secondary" onClick={() => navigate("/clients")}>Manage clients</button></div>
+          <ProjectList projects={websites.slice(0, 5)} navigate={navigate} />
+        </div>
+        <div className="portal-panel">
+          <h2>Report Capacity</h2>
+          <MetricTile label="Used this month" value={String(usage?.scanLimit.used ?? reports.length)} />
+          <MetricTile label="Available" value={usage?.scanLimit.limit === -1 ? "Unlimited" : String(Math.max(0, (usage?.scanLimit.limit ?? 0) - (usage?.scanLimit.used ?? 0)))} />
+        </div>
+      </section>
+      <AdvancedAgencyOverview agencyDashboard={agencyDashboard} agencyOperating={agencyOperating} />
+    </main>
+  );
+}
+
+const intelligenceJourneyStages = [
+  "Understanding Your Business",
+  "Understanding Your Customers",
+  "Understanding Your Competitors",
+  "Evaluating Customer Trust",
+  "Analyzing Local Visibility",
+  "Estimating Business Opportunities",
+  "Prioritizing Executive Decisions",
+  "Preparing Your Executive Business Intelligence Report"
+];
+
+function PortalFirstValueJourney({ portal, refresh, navigate }: { portal: PortalMeResponse | null; refresh: () => Promise<void>; navigate: (path: string) => void }) {
+  const [targetUrl, setTargetUrl] = useState(portal?.projects[0]?.targetUrl ?? "");
+  const [phase, setPhase] = useState<"ready" | "running" | "complete" | "failed">("ready");
+  const [stageIndex, setStageIndex] = useState(0);
+  const [progressLabel, setProgressLabel] = useState("");
+  const [error, setError] = useState("");
+  const mounted = useRef(true);
+
+  useEffect(() => () => { mounted.current = false; }, []);
+
+  async function beginAnalysis() {
+    setError("");
+    const normalizedUrl = normalizeWebsiteEntry(targetUrl);
+    if (!normalizedUrl) {
+      setError("Enter a valid public website address.");
+      return;
+    }
+
+    setPhase("running");
+    setStageIndex(0);
+    setProgressLabel(intelligenceJourneyStages[0] ?? "");
+
+    try {
+      const started = await startFirstAnalysis(normalizedUrl);
+      await refresh();
+      const maxPolls = 120;
+
+      for (let poll = 0; poll < maxPolls && mounted.current; poll += 1) {
+        await portalDelay(2500);
+        let job;
+        try {
+          job = await getScanJob(started.job.jobId);
+        } catch (pollError) {
+          const status = (pollError as Error & { status?: number }).status;
+          if (status === 429) {
+            await portalDelay((pollError as Error & { retryAfterMs?: number }).retryAfterMs ?? 5000);
+            continue;
+          }
+          throw pollError;
+        }
+
+        if (job.status === "completed") {
+          const snapshotId = typeof job.result?.["snapshotId"] === "string" ? job.result["snapshotId"] : "";
+          if (!snapshotId) throw new Error("The analysis completed, but the report could not be opened.");
+          setStageIndex(intelligenceJourneyStages.length - 1);
+          setProgressLabel(intelligenceJourneyStages[intelligenceJourneyStages.length - 1] ?? "");
+          setPhase("complete");
+          await refresh();
+          window.location.assign("/reports/" + encodeURIComponent(snapshotId));
+          return;
+        }
+
+        if (["failed", "dead_letter", "cancelled"].includes(job.status)) {
+          throw new Error(job.errorMessage || "The website analysis could not be completed. Please try again.");
+        }
+
+        const completedSteps = job.progress?.completedSteps ?? 0;
+        const totalSteps = job.progress?.totalSteps ?? 0;
+        const progressStage = totalSteps > 0
+          ? Math.floor((completedSteps / Math.max(totalSteps, 1)) * intelligenceJourneyStages.length)
+          : Math.floor(poll / 5);
+        const nextStage = Math.min(intelligenceJourneyStages.length - 1, Math.max(stageIndex, progressStage));
+        setStageIndex(nextStage);
+        setProgressLabel(intelligenceJourneyStages[nextStage] ?? intelligenceJourneyStages[0] ?? "");
+      }
+
+      throw new Error("Your report is taking longer than expected. It is still being prepared and will appear in Reports when complete.");
+    } catch (analysisError) {
+      if (!mounted.current) return;
+      setPhase("failed");
+      setError(analysisError instanceof Error ? analysisError.message : "Unable to analyze this website.");
+    }
+  }
+
+  const firstName = portal?.user.displayName?.split(" ")[0] || "there";
+  const progressPercent = phase === "ready" ? 0 : Math.round(((stageIndex + 1) / intelligenceJourneyStages.length) * 100);
+
+  return (
+    <main className="portal-main portal-first-value">
+      <section className="portal-welcome-stage">
+        <div className="portal-welcome-copy">
+          <span className="portal-eyebrow">Welcome, {firstName}</span>
+          <h1>Let's discover what may be costing this business customers.</h1>
+          <p>Enter the website you want to understand. SYSTOLAB will prepare a complete Website and SEO Executive Business Intelligence Report.</p>
+          <div className="portal-url-bar portal-first-url">
+            <Globe2 size={21} />
+            <input value={targetUrl} onChange={(event) => setTargetUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && phase !== "running") void beginAnalysis(); }} placeholder="https://yourwebsite.com" aria-label="Website URL" disabled={phase === "running"} />
+            <button disabled={phase === "running" || !targetUrl.trim()} onClick={() => void beginAnalysis()}>{phase === "running" ? "Preparing intelligence" : "Generate Executive Business Intelligence"}</button>
+          </div>
+          <div className="portal-hero-actions portal-secondary-actions">
+            <button className="portal-secondary" onClick={() => navigate("/demo")}>See a Sample Report</button>
+            <button className="portal-secondary" onClick={() => navigate("/agency")}>Set Up My Agency</button>
+          </div>
+          {error && <div className="portal-alert inline">{error}</div>}
+        </div>
+        <div className={"portal-intelligence-journey " + (phase === "running" || phase === "complete" ? "active" : "")}>
+          <div className="portal-journey-header"><span>{phase === "ready" ? "Your intelligence journey" : progressLabel}</span><strong>{progressPercent}%</strong></div>
+          <div className="portal-progress-track"><span style={{ width: progressPercent + "%" }} /></div>
+          <div className="portal-stage-list">{intelligenceJourneyStages.map((stage, index) => <div key={stage} className={index < stageIndex ? "complete" : index === stageIndex && phase !== "ready" ? "active" : ""}><CheckCircle2 size={18} /><span>{stage}</span></div>)}</div>
+        </div>
       </section>
     </main>
   );
 }
-function CreateOrganizationCard({ refresh }: { refresh: () => Promise<void> }) {
-  const [slug, setSlug] = useState("");
-  const [name, setName] = useState("");
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
+
+function AdvancedAgencyOverview({ agencyDashboard, agencyOperating }: { agencyDashboard: AgencyDashboardResponse | null; agencyOperating: AgencyOperatingSystemResponse | null }) {
+  const performance = agencyOperating?.performanceIntelligence;
   return (
-    <section className="portal-panel portal-first-run"><div><span className="portal-eyebrow">First organization</span><h2>Create your organization</h2><p>This becomes the secure home for projects, reports, team access, billing, API keys, referrals, and white-label settings.</p></div><div className="portal-inline-form"><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Organization name, e.g. MetifeDM LLC" /><input value={slug} onChange={(event) => setSlug(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))} placeholder="organization-slug" /><button className="portal-primary" disabled={!slug || !name} onClick={async () => { setStatus(""); setError(""); try { await createTenant(slug, name); setStatus("Organization created."); await refresh(); } catch (organizationError) { setError(organizationError instanceof Error ? organizationError.message : "Unable to create organization."); } }}>Create organization</button></div>{status && <div className="portal-status inline">{status}</div>}{error && <div className="portal-alert inline">{error}</div>}</section>
+    <details className="portal-advanced-overview">
+      <summary>Advanced agency intelligence <span>Sales, performance, and operating insights</span></summary>
+      <div className="portal-signal-grid portal-four-up">
+        <MetricTile label="Reports generated" value={String(agencyDashboard?.analytics.reportsGenerated ?? agencyOperating?.progress.reportsGenerated ?? 0)} />
+        <MetricTile label="Clients tracked" value={String(agencyOperating?.progress.clientsTracked ?? 0)} />
+        <MetricTile label="Report-to-sale rate" value={performance ? performance.reportConversion.reportToSaleRate + "%" : "Not measured"} />
+        <MetricTile label="Implementation rate" value={performance ? performance.recommendationImplementation.implementationRate + "%" : "Not measured"} />
+      </div>
+      <div className="health-snapshot compact">
+        <HealthRow label="Services to pitch first" value={agencyDashboard?.successCenter.servicesToPitchFirst.slice(0, 3).join(", ") || "Generated after client reports"} />
+        <HealthRow label="Estimated deal size" value={agencyDashboard?.successCenter.estimatedDealSize || "Pending outcome data"} />
+        <HealthRow label="Sales coach status" value={agencyOperating?.salesCoach.status || "Limited"} />
+        <HealthRow label="Remaining priorities" value={String(agencyOperating?.progress.remainingPriorities ?? 0)} />
+      </div>
+    </details>
   );
 }
-function PortalProjects({ portal, refresh, navigate }: { portal: PortalMeResponse | null; refresh: () => Promise<void>; navigate: (path: string) => void }) {
-  return <main className="portal-main"><PortalPageHeader eyebrow="Projects" title="Client websites, competitors, local visibility, and reports" /><section className="portal-dashboard-grid"><ProjectCreatePanel organizations={portal?.tenants ?? []} refresh={refresh} /><div className="portal-panel wide"><h2>Client Websites</h2><ProjectList projects={portal?.projects ?? []} navigate={navigate} /></div></section></main>;
+
+function normalizeWebsiteEntry(value: string): string {
+  const candidate = value.trim();
+  if (!candidate) return "";
+  try {
+    const parsed = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(candidate) ? candidate : "https://" + candidate);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.toString() : "";
+  } catch {
+    return "";
+  }
 }
 
-function ProjectCreatePanel({ organizations, refresh }: { organizations: PortalTenantSummary[]; refresh: () => Promise<void> }) {
+function portalDelay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+function PortalProjects({ portal, refresh, navigate }: { portal: PortalMeResponse | null; refresh: () => Promise<void>; navigate: (path: string) => void }) {
+  return <main className="portal-main"><PortalPageHeader eyebrow="Clients" title="Add a website and prepare its next executive report" /><section className="portal-dashboard-grid"><ProjectCreatePanel organizations={portal?.tenants ?? []} refresh={refresh} navigate={navigate} /><div className="portal-panel wide"><h2>Client Websites</h2><ProjectList projects={portal?.projects ?? []} navigate={navigate} /></div></section></main>;
+}
+
+function ProjectCreatePanel({ organizations, refresh, navigate }: { organizations: PortalTenantSummary[]; refresh: () => Promise<void>; navigate: (path: string) => void }) {
   const [form, setForm] = useState({
     targetUrl: "",
     projectName: "",
@@ -336,31 +553,45 @@ function ProjectCreatePanel({ organizations, refresh }: { organizations: PortalT
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const tenantSlug = organizations[0]?.tenantSlug ?? "";
-  if (!tenantSlug) return <div className="portal-panel"><h2>Add Website</h2><p className="portal-muted">Create an organization before adding websites and reports.</p></div>;
-  const competitorUrls = form.competitorUrls.split(/\n|,/).map((item) => item.trim()).filter(Boolean);
+
+  if (!tenantSlug) {
+    return <div className="portal-panel wide"><h2>Add a client website</h2><p className="portal-muted">Set up your agency identity first, then add as many client websites as your plan supports.</p><button className="portal-primary" onClick={() => navigate("/agency")}>Set Up My Agency</button></div>;
+  }
+
+  const competitorUrls = form.competitorUrls.replaceAll(String.fromCharCode(10), ",").split(",").map((item) => item.trim()).filter(Boolean);
+
   return (
-    <div className="portal-panel wide">
-      <h2>+ Add Website</h2>
-      <div className="portal-form-grid">
-        <label><span>Website URL</span><input value={form.targetUrl} onChange={(e) => setForm({ ...form, targetUrl: e.target.value })} placeholder="https://example.com" /></label>
-        <label><span>Project name</span><input value={form.projectName} onChange={(e) => setForm({ ...form, projectName: e.target.value })} placeholder="Client or business name" /></label>
-        <label><span>Client company</span><input value={form.clientCompanyName} onChange={(e) => setForm({ ...form, clientCompanyName: e.target.value })} placeholder="XYZ Company" /></label>
-        <label><span>Contact person</span><input value={form.contactPerson} onChange={(e) => setForm({ ...form, contactPerson: e.target.value })} placeholder="Client contact" /></label>
-        <label><span>Business type</span><input value={form.businessType} onChange={(e) => setForm({ ...form, businessType: e.target.value })} placeholder="Dentist, SaaS, law firm" /></label>
-        <label><span>Country</span><input value={form.targetCountry} onChange={(e) => setForm({ ...form, targetCountry: e.target.value })} placeholder="US, IN, UK" /></label>
-        <label><span>City</span><input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value, targetLocation: e.target.value })} placeholder="City / market" /></label>
-        <label><span>Service area</span><input value={form.serviceArea} onChange={(e) => setForm({ ...form, serviceArea: e.target.value })} placeholder="Metro area, regions, branches" /></label>
-        <label><span>Client logo URL</span><input value={form.clientLogoUrl} onChange={(e) => setForm({ ...form, clientLogoUrl: e.target.value })} placeholder="Optional image URL" /></label>
-        <label><span>GBP URL</span><input value={form.gbpUrl} onChange={(e) => setForm({ ...form, gbpUrl: e.target.value })} placeholder="Optional Google profile URL" /></label>
-        <label className="full"><span>Competitors</span><textarea value={form.competitorUrls} onChange={(e) => setForm({ ...form, competitorUrls: e.target.value })} placeholder="One competitor URL per line" /></label>
-      </div>
-      <button className="portal-primary full" disabled={!form.targetUrl} onClick={async () => {
+    <div className="portal-panel wide portal-add-website">
+      <span className="portal-eyebrow">New client intelligence</span>
+      <h2>Add a client website</h2>
+      <label className="portal-simple-field"><span>Website URL</span><input value={form.targetUrl} onChange={(event) => setForm({ ...form, targetUrl: event.target.value })} placeholder="https://clientwebsite.com" /></label>
+      <details className="portal-form-advanced">
+        <summary>Add optional client and market context</summary>
+        <div className="portal-form-grid">
+          <label><span>Client or business name</span><input value={form.projectName} onChange={(event) => setForm({ ...form, projectName: event.target.value })} placeholder="Client name" /></label>
+          <label><span>Client company</span><input value={form.clientCompanyName} onChange={(event) => setForm({ ...form, clientCompanyName: event.target.value })} placeholder="Company name" /></label>
+          <label><span>Contact person</span><input value={form.contactPerson} onChange={(event) => setForm({ ...form, contactPerson: event.target.value })} placeholder="Client contact" /></label>
+          <label><span>Business type</span><input value={form.businessType} onChange={(event) => setForm({ ...form, businessType: event.target.value })} placeholder="Dentist, SaaS, law firm" /></label>
+          <label><span>Country</span><input value={form.targetCountry} onChange={(event) => setForm({ ...form, targetCountry: event.target.value })} placeholder="US, IN, UK" /></label>
+          <label><span>City</span><input value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value, targetLocation: event.target.value })} placeholder="City or market" /></label>
+          <label><span>Service area</span><input value={form.serviceArea} onChange={(event) => setForm({ ...form, serviceArea: event.target.value })} placeholder="Regions or branches" /></label>
+          <label><span>Client logo URL</span><input value={form.clientLogoUrl} onChange={(event) => setForm({ ...form, clientLogoUrl: event.target.value })} placeholder="Optional image URL" /></label>
+          <label><span>Google Business Profile URL</span><input value={form.gbpUrl} onChange={(event) => setForm({ ...form, gbpUrl: event.target.value })} placeholder="Optional profile URL" /></label>
+          <label className="full"><span>Competitor websites</span><textarea value={form.competitorUrls} onChange={(event) => setForm({ ...form, competitorUrls: event.target.value })} placeholder="One competitor URL per line" /></label>
+        </div>
+      </details>
+      <button className="portal-primary" disabled={!form.targetUrl.trim()} onClick={async () => {
         setStatus("");
         setError("");
+        const targetUrl = normalizeWebsiteEntry(form.targetUrl);
+        if (!targetUrl) {
+          setError("Enter a valid public website address.");
+          return;
+        }
         try {
-          await createProject({
+          const created = await createProject({
             tenantSlug,
-            targetUrl: form.targetUrl,
+            targetUrl,
             projectName: form.projectName,
             clientCompanyName: form.clientCompanyName,
             contactPerson: form.contactPerson,
@@ -374,12 +605,13 @@ function ProjectCreatePanel({ organizations, refresh }: { organizations: PortalT
             competitorUrls,
             monitoringConfig: { cadence: "weekly", enabled: false }
           });
-          setStatus("Website project created.");
+          setStatus("Website added.");
           await refresh();
+          navigate("/projects/" + encodeURIComponent(created.project.workspaceId));
         } catch (projectError) {
-          setError(projectError instanceof Error ? projectError.message : "Unable to create project.");
+          setError(projectError instanceof Error ? projectError.message : "Unable to add this website.");
         }
-      }}>Create project</button>
+      }}><Globe2 size={17} />Add Website</button>
       {status && <div className="portal-status inline">{status}</div>}
       {error && <div className="portal-alert inline">{error}</div>}
     </div>
@@ -388,60 +620,108 @@ function ProjectCreatePanel({ organizations, refresh }: { organizations: PortalT
 function PortalProjectDetail({ workspaceId, navigate }: { workspaceId: string; navigate: (path: string) => void }) {
   const [project, setProject] = useState<PortalProjectSummary | null>(null);
   const [reports, setReports] = useState<PortalReportSummary[]>([]);
+  const [generating, setGenerating] = useState(false);
+  const [journeyIndex, setJourneyIndex] = useState(0);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+
   useEffect(() => {
     if (!workspaceId) return;
-    getProject(workspaceId).then((payload) => setProject(payload.project)).catch((err) => setError(err instanceof Error ? err.message : "Unable to load project."));
+    getProject(workspaceId).then((payload) => setProject(payload.project)).catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Unable to load this website."));
     getProjectReports(workspaceId).then((payload) => setReports(payload.items)).catch(() => setReports([]));
   }, [workspaceId]);
-  if (!project) return <main className="portal-main"><PortalPageHeader eyebrow="Project" title="Loading project" /><div className="portal-alert">{error || "Loading..."}</div></main>;
+
+  async function generateIntelligence() {
+    if (!project) return;
+    setGenerating(true);
+    setError("");
+    setJourneyIndex(0);
+    setStatus(intelligenceJourneyStages[0] ?? "Preparing intelligence");
+
+    try {
+      const started = await runProjectScan(project.workspaceId, { mode: "full_audit", includeSeo: true });
+      for (let poll = 0; poll < 120; poll += 1) {
+        await portalDelay(2500);
+        let job;
+        try {
+          job = await getScanJob(started.jobId);
+        } catch (pollError) {
+          if ((pollError as Error & { status?: number }).status === 429) {
+            await portalDelay((pollError as Error & { retryAfterMs?: number }).retryAfterMs ?? 5000);
+            continue;
+          }
+          throw pollError;
+        }
+
+        if (job.status === "completed") {
+          const snapshotId = typeof job.result?.["snapshotId"] === "string" ? job.result["snapshotId"] : "";
+          if (!snapshotId) throw new Error("The report was prepared but could not be opened.");
+          setJourneyIndex(intelligenceJourneyStages.length - 1);
+          setStatus("Your Executive Business Intelligence Report is ready.");
+          const updatedReports = await getProjectReports(project.workspaceId);
+          setReports(updatedReports.items);
+          window.location.assign("/reports/" + encodeURIComponent(snapshotId));
+          return;
+        }
+
+        if (["failed", "dead_letter", "cancelled"].includes(job.status)) {
+          throw new Error(job.errorMessage || "The report could not be prepared. Please try again.");
+        }
+
+        const completed = job.progress?.completedSteps ?? 0;
+        const total = job.progress?.totalSteps ?? 0;
+        const index = total > 0 ? Math.floor((completed / Math.max(total, 1)) * intelligenceJourneyStages.length) : Math.floor(poll / 5);
+        const nextIndex = Math.min(intelligenceJourneyStages.length - 1, Math.max(0, index));
+        setJourneyIndex(nextIndex);
+        setStatus(intelligenceJourneyStages[nextIndex] ?? "Preparing intelligence");
+      }
+      throw new Error("Your report is taking longer than expected. It will appear in Reports when complete.");
+    } catch (generationError) {
+      setError(generationError instanceof Error ? generationError.message : "Unable to prepare this report.");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  if (!project) return <main className="portal-main"><PortalPageHeader eyebrow="Client Website" title="Loading website" /><div className="portal-alert">{error || "Loading..."}</div></main>;
+
   return (
     <main className="portal-main">
-      <PortalPageHeader eyebrow="Project" title={project.projectName} actions={<button className="portal-secondary" onClick={() => navigate("/projects")}>Back to projects</button>} />
+      <PortalPageHeader eyebrow="Client Website" title={project.projectName} actions={<button className="portal-secondary" onClick={() => navigate("/clients")}>Back to clients</button>} />
       <section className="portal-dashboard-grid">
         <div className="portal-panel wide">
           <h2>{safeHostLabel(project.targetUrl)}</h2>
           <div className="portal-signal-grid">
             <MetricTile label="Client" value={project.clientCompanyName ?? project.projectName} />
             <MetricTile label="Contact" value={project.contactPerson ?? "Not set"} />
-            <MetricTile label="Business type" value={project.businessType ?? "Not set"} />
-            <MetricTile label="City" value={project.city ?? project.targetLocation ?? "Not set"} />
-            <MetricTile label="Service area" value={project.serviceArea ?? project.targetLocation ?? "Not set"} />
-            <MetricTile label="Country" value={project.targetCountry ?? "Not set"} />
-            <MetricTile label="Competitors" value={String(project.competitorUrls.length)} />
-            <MetricTile label="Monitoring" value={project.monitoringConfig.enabled ? project.monitoringConfig.cadence : "Manual"} />
+            <MetricTile label="Business type" value={project.businessType ?? "Detected during analysis"} />
+            <MetricTile label="Location" value={project.city ?? project.targetLocation ?? "Detected when available"} />
+            <MetricTile label="Service area" value={project.serviceArea ?? project.targetLocation ?? "Detected when available"} />
+            <MetricTile label="Competitors" value={project.competitorUrls.length ? String(project.competitorUrls.length) : "Detected when available"} />
           </div>
-          <button className="portal-primary" onClick={async () => {
-            setStatus("");
-            setError("");
-            try {
-              const job = await runProjectScan(project.workspaceId, { mode: "full_audit", includeSeo: true });
-              setStatus(`Scan queued. Job ${job.jobId}.`);
-            } catch (scanError) {
-              setError(scanError instanceof Error ? scanError.message : "Unable to run project scan.");
-            }
-          }}>Run full website + SEO scan</button>
-          {status && <div className="portal-status inline">{status}</div>}
+          <button className="portal-primary" disabled={generating} onClick={() => void generateIntelligence()}>{generating ? "Preparing intelligence" : "Generate Executive Business Intelligence"}</button>
+          {generating && <div className="portal-compact-progress"><div><span>{status}</span><strong>{Math.round(((journeyIndex + 1) / intelligenceJourneyStages.length) * 100)}%</strong></div><div className="portal-progress-track"><span style={{ width: Math.round(((journeyIndex + 1) / intelligenceJourneyStages.length) * 100) + "%" }} /></div></div>}
+          {!generating && status && <div className="portal-status inline">{status}</div>}
           {error && <div className="portal-alert inline">{error}</div>}
         </div>
-        <div className="portal-panel wide"><h2>Reports</h2><ReportList reports={reports} /></div>
+        <div className="portal-panel wide"><h2>Executive Reports</h2><ReportList reports={reports} /></div>
       </section>
     </main>
   );
 }
 function ProjectList({ projects, navigate }: { projects: PortalProjectSummary[]; navigate: (path: string) => void }) {
-  if (!projects.length) return <p className="portal-muted">No projects yet.</p>;
+  if (!projects.length) return <p className="portal-muted">No client websites yet.</p>;
   return <div className="portal-table">{projects.map((project) => <button key={project.workspaceId} className="portal-table-row" onClick={() => navigate(`/projects/${project.workspaceId}`)}><span><strong>{project.projectName}</strong><small>{safeHostLabel(project.targetUrl)}</small></span><span>{project.latestReport?.visualStateLabel ?? "No report yet"}</span><span>{project.latestReport?.oss === null || project.latestReport?.oss === undefined ? "Not scored" : `${project.latestReport.oss}/100`}</span></button>)}</div>;
 }
 
 function PortalReports({ projects, navigate }: { projects: PortalProjectSummary[]; navigate: (path: string) => void }) {
   const reports = projects.map((project) => project.latestReport).filter((report): report is PortalReportSummary => Boolean(report));
-  return <main className="portal-main"><PortalPageHeader eyebrow="Reports" title="Customer-safe decision reports and exports" /><section className="portal-panel wide"><ReportList reports={reports} />{!reports.length && <button className="portal-primary" onClick={() => navigate("/projects")}>Create or scan a project</button>}</section></main>;
+  return <main className="portal-main"><PortalPageHeader eyebrow="Reports" title="Executive intelligence reports" actions={<button className="portal-primary" onClick={() => navigate("/projects")}><Globe2 size={17} />Analyze a website</button>} /><section className="portal-panel wide"><ReportList reports={reports} />{!reports.length && <div className="portal-empty-action"><p className="portal-muted">Your reports will appear here after the first website analysis.</p><button className="portal-primary" onClick={() => navigate("/dashboard")}>Analyze Your First Website</button></div>}</section></main>;
 }
 
 function ReportList({ reports }: { reports: PortalReportSummary[] }) {
   const [downloadingId, setDownloadingId] = useState("");
+  const [sharedId, setSharedId] = useState("");
   const [error, setError] = useState("");
 
   async function downloadPdf(report: PortalReportSummary) {
@@ -449,7 +729,7 @@ function ReportList({ reports }: { reports: PortalReportSummary[] }) {
     setDownloadingId(report.snapshotId);
     try {
       const blob = await downloadReportPdf(report.snapshotId);
-      savePortalBlob(blob, `${report.snapshotId}.pdf`);
+      savePortalBlob(blob, report.snapshotId + ".pdf");
     } catch (downloadError) {
       setError(downloadError instanceof Error ? downloadError.message : "PDF download failed.");
     } finally {
@@ -457,11 +737,44 @@ function ReportList({ reports }: { reports: PortalReportSummary[] }) {
     }
   }
 
+  async function shareReport(report: PortalReportSummary) {
+    setError("");
+    const reportPath = report.brandedReportUrl || report.reportUrl;
+    const url = new URL(reportPath, window.location.origin).toString();
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "Executive Business Intelligence Report", text: "Your SYSTOLAB executive report is ready.", url });
+      } else {
+        await copyPortalText(url);
+      }
+      setSharedId(report.snapshotId);
+      window.setTimeout(() => setSharedId(""), 2500);
+    } catch (shareError) {
+      if ((shareError as DOMException).name === "AbortError") return;
+      setError(shareError instanceof Error ? shareError.message : "Unable to share this report.");
+    }
+  }
+
   if (!reports.length) return <p className="portal-muted">No reports available yet.</p>;
   return <><div className="portal-table">{reports.map((report) => {
     const openUrl = report.brandedReportUrl || report.reportUrl;
-    return <div key={report.snapshotId} className="portal-table-row static"><span><strong>{safeHostLabel(report.targetUrl)}</strong><small>{new Date(report.createdAt).toLocaleString()}{report.expiresAt ? ` | Valid until ${new Date(report.expiresAt).toLocaleDateString()}` : ""}</small>{report.brandedReportUrl && <small>{report.brandedReportUrl}</small>}</span><span>{report.visualStateLabel}</span><span>{report.oss === null ? "Not scored" : `${report.oss}/100`}</span><a className="portal-secondary" href={openUrl}>Open</a><button className="portal-secondary" type="button" disabled={downloadingId === report.snapshotId} onClick={() => void downloadPdf(report)}>{downloadingId === report.snapshotId ? "Preparing" : "PDF"}</button></div>;
+    return <div key={report.snapshotId} className="portal-table-row static"><span><strong>{safeHostLabel(report.targetUrl)}</strong><small>{new Date(report.createdAt).toLocaleString()}{report.expiresAt ? " | Valid until " + new Date(report.expiresAt).toLocaleDateString() : ""}</small>{report.brandedReportUrl && <small>{report.brandedReportUrl}</small>}</span><span>{report.visualStateLabel}</span><span>{report.oss === null ? "Not scored" : report.oss + "/100"}</span><a className="portal-secondary" href={openUrl}>Open <ArrowRight size={15} /></a><button className="portal-secondary" type="button" onClick={() => void shareReport(report)}><Share2 size={15} />{sharedId === report.snapshotId ? "Shared" : "Share"}</button><button className="portal-secondary" type="button" disabled={downloadingId === report.snapshotId} onClick={() => void downloadPdf(report)}><FileText size={15} />{downloadingId === report.snapshotId ? "Preparing" : "PDF"}</button></div>;
   })}</div>{error && <div className="portal-alert inline">{error}</div>}</>;
+}
+
+async function copyPortalText(value: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }
 function savePortalBlob(blob: Blob, filename: string) {
   const href = URL.createObjectURL(blob);
@@ -476,8 +789,38 @@ function savePortalBlob(blob: Blob, filename: string) {
 function PortalBilling({ tenant, plans }: { tenant: PortalTenantSummary | null; plans: PortalBillingPlan[] }) {
   const [overview, setOverview] = useState<{ plans: PortalBillingPlan[]; subscription: Record<string, unknown> | null; usage: PortalUsageOverview } | null>(null);
   useEffect(() => { if (tenant) getBillingOverview(tenant.tenantSlug).then(setOverview).catch(() => setOverview(null)); }, [tenant?.tenantSlug]);
-  return <main className="portal-main"><PortalPageHeader eyebrow="Billing" title="Plan, usage, limits, and API capacity" /><section className="portal-band pricing-grid">{(overview?.plans ?? plans).map((plan) => <PricingCard key={plan.planId} plan={plan} />)}</section><section className="portal-panel"><h2>Current usage</h2><div className="portal-signal-grid"><MetricTile label="Organization" value={tenant?.branding.publicName ?? tenant?.tenantSlug ?? "No organization"} /><MetricTile label="Reports" value={`${overview?.usage.scanLimit.used ?? 0}/${overview?.usage.scanLimit.limit ?? 0}`} /><MetricTile label="API calls" value={`${overview?.usage.apiCallLimit.used ?? 0}/${overview?.usage.apiCallLimit.limit ?? 0}`} /></div></section></main>;
+  return <main className="portal-main"><PortalPageHeader eyebrow="Billing" title="Plan, report capacity, and API access" /><section className="portal-band pricing-grid">{(overview?.plans ?? plans).map((plan) => <PricingCard key={plan.planId} plan={plan} />)}</section><section className="portal-panel"><h2>Current usage</h2><div className="portal-signal-grid"><MetricTile label="Agency" value={tenant?.branding.publicName ?? "Not set up"} /><MetricTile label="Reports" value={`${overview?.usage.scanLimit.used ?? 0}/${overview?.usage.scanLimit.limit ?? 0}`} /><MetricTile label="API calls" value={`${overview?.usage.apiCallLimit.used ?? 0}/${overview?.usage.apiCallLimit.limit ?? 0}`} /></div></section></main>;
 }
+function PortalAgencyStart({ refresh }: { refresh: () => Promise<void> }) {
+  const [name, setName] = useState("My Agency");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <main className="portal-main">
+      <PortalPageHeader eyebrow="My Agency" title="Set up your agency identity" />
+      <section className="portal-panel portal-agency-start">
+        <div><h2>Start with your agency name</h2><p className="portal-muted">You can add your logo, colors, contact details, and report footer next.</p></div>
+        <div className="portal-inline-form">
+          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Agency name" />
+          <button className="portal-primary" disabled={!name.trim() || saving} onClick={async () => {
+            setSaving(true);
+            setError("");
+            try {
+              await ensureAgency(name.trim());
+              await refresh();
+            } catch (agencyError) {
+              setError(agencyError instanceof Error ? agencyError.message : "Unable to set up your agency.");
+            } finally {
+              setSaving(false);
+            }
+          }}>{saving ? "Setting up" : "Set Up My Agency"}</button>
+        </div>
+        {error && <div className="portal-alert inline">{error}</div>}
+      </section>
+    </main>
+  );
+}
+
 function PortalWhiteLabel({ tenant, agencyOperating, refresh, refreshAgencyOperating }: { tenant: PortalTenantSummary | null; agencyOperating: AgencyOperatingSystemResponse | null; refresh: () => Promise<void>; refreshAgencyOperating: () => Promise<void> }) {
   const [branding, setBranding] = useState<TenantBranding | null>(() => tenant?.branding ?? null);
   const [status, setStatus] = useState("");
@@ -517,7 +860,7 @@ function PortalWhiteLabel({ tenant, agencyOperating, refresh, refreshAgencyOpera
   const parseLines = (value: string) => value.split(/\n|,/).map((item) => item.trim()).filter(Boolean);
   const listText = (items?: string[]) => (items ?? []).join("\n");
 
-  if (!tenant || !branding) return <main className="portal-main"><PortalPageHeader eyebrow="White Label" title="Create an organization first" /></main>;
+  if (!tenant || !branding) return <PortalAgencyStart refresh={refresh} />;
   const services = branding.serviceOfferings?.length ? branding.serviceOfferings : ["SEO", "Website Development", "Google Ads", "CRO", "Local SEO", "AI Search Optimization"];
   const poweredByMode = branding.poweredByMode ?? "systolab_standard";
   const crm = branding.crmIntegration ?? { enabled: false, provider: "none" as const, deliveryMode: "internal_outbox" as const };
@@ -525,10 +868,41 @@ function PortalWhiteLabel({ tenant, agencyOperating, refresh, refreshAgencyOpera
   const followUp = branding.followUpAssets ?? {};
   const successCenter = branding.agencySuccessCenter ?? { enabled: true, salesScriptTone: "consultative" as const };
 
+  async function saveBranding() {
+    if (!tenant || !branding) return;
+    setStatus("");
+    setError("");
+    try {
+      await updateWhiteLabelBranding(tenant.tenantSlug, whiteLabelEditablePayload(branding));
+      setStatus("Agency settings saved.");
+      await refresh();
+    } catch (brandingError) {
+      setError(brandingError instanceof Error ? brandingError.message : "Unable to update your agency settings.");
+    }
+  }
+
   return (
     <main className="portal-main">
-      <PortalPageHeader eyebrow="White Label" title="Agency branding and report identity" />
-      <section className="portal-dashboard-grid">
+      <PortalPageHeader eyebrow="My Agency" title="Your brand, contact details, and client experience" />
+      <section className="portal-panel portal-agency-quick">
+        <div className="portal-section-heading"><div><span className="portal-eyebrow">Quick setup</span><h2>Complete your client-facing identity</h2></div><span className="portal-setup-time">Core agency setup</span></div>
+        <div className="portal-form-grid portal-agency-core-grid">
+          <label><span>Company name</span><input value={branding.publicName} onChange={(event) => setBranding({ ...branding, publicName: event.target.value })} /></label>
+          <label><span>Company website</span><input value={branding.websiteUrl ?? ""} onChange={(event) => setBranding({ ...branding, websiteUrl: event.target.value })} placeholder="https://agency.com" /></label>
+          <label><span>Support email</span><input value={branding.supportEmail ?? ""} onChange={(event) => setBranding({ ...branding, supportEmail: event.target.value })} placeholder="support@agency.com" /></label>
+          <label><span>Phone number</span><input value={branding.phoneNumber ?? ""} onChange={(event) => setBranding({ ...branding, phoneNumber: event.target.value })} placeholder="+1 555 123 4567" /></label>
+          <label><span>Upload logo</span><input type="file" accept="image/*" onChange={(event) => readImageUpload(event, "logoUrl")} /></label>
+          <label><span>Primary color</span><input type="color" value={branding.primaryColor} onChange={(event) => setBranding({ ...branding, primaryColor: event.target.value })} /></label>
+          <label><span>Accent color</span><input type="color" value={branding.accentColor} onChange={(event) => setBranding({ ...branding, accentColor: event.target.value })} /></label>
+          <label className="full"><span>Report footer</span><textarea value={branding.reportFooter ?? ""} onChange={(event) => setBranding({ ...branding, reportFooter: event.target.value })} placeholder="Agency contact and report footer text" /></label>
+        </div>
+        <button className="portal-primary" onClick={() => void saveBranding()}>Save Agency Branding</button>
+        {status && <div className="portal-status inline">{status}</div>}
+        {error && <div className="portal-alert inline">{error}</div>}
+      </section>
+      <details className="portal-advanced-setup">
+        <summary><span>Advanced Setup</span><small>Domains, report design, proposals, CRM, PDF security, sales assets, and agency knowledge</small></summary>
+        <section className="portal-dashboard-grid">
         <div className="portal-panel wide">
           <h2>Partner Information</h2>
           <div className="portal-form-grid">
@@ -642,9 +1016,7 @@ function PortalWhiteLabel({ tenant, agencyOperating, refresh, refreshAgencyOpera
             setStatus("");
             setError("");
             try {
-              await updateWhiteLabelBranding(tenant.tenantSlug, whiteLabelEditablePayload(branding));
-              setStatus("White-label settings saved.");
-              await refresh();
+              await saveBranding();
             } catch (brandingError) {
               setError(brandingError instanceof Error ? brandingError.message : "Unable to update branding.");
             }
@@ -698,7 +1070,8 @@ function PortalWhiteLabel({ tenant, agencyOperating, refresh, refreshAgencyOpera
           </div>
           <button>{branding.reportTitle || "Website Growth & Decision Intelligence Report"}</button>
         </div>
-      </section>
+        </section>
+      </details>
     </main>
   );
 }
@@ -720,7 +1093,7 @@ function PortalClients({ tenant, agencyOperating, refresh, navigate }: { tenant:
       setActionStatus(`${client.clientName} updated.`);
       await refresh();
     } catch (clientError) {
-      setError(clientError instanceof Error ? clientError.message : "Unable to update client workspace.");
+      setError(clientError instanceof Error ? clientError.message : "Unable to update this client.");
     }
   }
 
@@ -737,10 +1110,10 @@ function PortalClients({ tenant, agencyOperating, refresh, navigate }: { tenant:
     }
   }
 
-  if (!tenant) return <main className="portal-main"><PortalPageHeader eyebrow="Clients" title="Create an organization before managing clients" /></main>;
+  if (!tenant) return <main className="portal-main"><PortalPageHeader eyebrow="Clients" title="Set up your agency before managing clients" actions={<button className="portal-primary" onClick={() => navigate("/agency")}>Set Up My Agency</button>} /></main>;
   return (
     <main className="portal-main">
-      <PortalPageHeader eyebrow="Client Management" title="Client workspaces, progress, proposals, and sharing controls" actions={<button className="portal-secondary" onClick={() => navigate("/projects")}>Add website</button>} />
+      <PortalPageHeader eyebrow="Clients" title="Client progress, proposals, and report sharing" actions={<button className="portal-secondary" onClick={() => navigate("/projects")}>Add website</button>} />
       <section className="portal-dashboard-grid">
         <div className="portal-panel wide"><h2>Progress Tracking</h2><div className="portal-signal-grid"><MetricTile label="Clients" value={String(agencyOperating?.progress.clientsTracked ?? clients.length)} /><MetricTile label="Reports" value={String(agencyOperating?.progress.reportsGenerated ?? 0)} /><MetricTile label="Improved" value={String(agencyOperating?.progress.improvedClients ?? 0)} /><MetricTile label="Completed recommendations" value={String(agencyOperating?.progress.completedRecommendations ?? 0)} /></div></div>
         <div className="portal-panel wide"><h2>AI Sales Coach</h2><p className="portal-muted">Private agency-only sales coaching based on the latest client reports.</p><div className="portal-table">{(agencyOperating?.salesCoach.clientPlaybooks ?? []).slice(0, 4).map((playbook) => <div key={playbook.workspaceId} className="portal-table-row static"><span><strong>{playbook.clientName}</strong><small>{playbook.nextMeetingFocus}</small></span><span>{playbook.servicesToPitch.slice(0, 2).join(", ") || "Services pending"}</span><span>{playbook.estimatedEffort}</span></div>)}</div>{!(agencyOperating?.salesCoach.clientPlaybooks.length) && <p className="portal-muted">Run client reports to generate service pitches, objections, responses, agenda, and follow-up sequence.</p>}</div>
@@ -754,8 +1127,8 @@ function PortalClients({ tenant, agencyOperating, refresh, navigate }: { tenant:
               <MetricTile label="Website" value={safeHostLabel(client.targetUrl)} />
               <MetricTile label="Consultant" value={client.assignedConsultant ?? "Not assigned"} />
               <MetricTile label="Follow-up" value={titleCaseStatus(client.followUpStatus)} />
-              <MetricTile label="First scan" value={client.firstScan?.oss === null || client.firstScan?.oss === undefined ? "Not scored" : `${client.firstScan.oss}/100`} />
-              <MetricTile label="Latest scan" value={client.latestScan?.oss === null || client.latestScan?.oss === undefined ? "Not scored" : `${client.latestScan.oss}/100`} />
+              <MetricTile label="First report" value={client.firstScan?.oss === null || client.firstScan?.oss === undefined ? "Not scored" : `${client.firstScan.oss}/100`} />
+              <MetricTile label="Latest report" value={client.latestScan?.oss === null || client.latestScan?.oss === undefined ? "Not scored" : `${client.latestScan.oss}/100`} />
               <MetricTile label="Score delta" value={client.scoreDelta === null ? "No trend" : formatDelta(client.scoreDelta)} />
               <MetricTile label="Competitors" value={String(client.competitors.length)} />
               <MetricTile label="Remaining priorities" value={String(client.remainingPriorities)} />
@@ -765,40 +1138,80 @@ function PortalClients({ tenant, agencyOperating, refresh, navigate }: { tenant:
               <label><span>Follow-up status</span><select value={statusByClient[client.workspaceId] ?? client.followUpStatus} onChange={(event) => setStatusByClient((current) => ({ ...current, [client.workspaceId]: event.target.value as ClientFollowUpStatus }))}>{followUpOptions.map((option) => <option key={option} value={option}>{titleCaseStatus(option)}</option>)}</select></label>
               <label className="full"><span>Add note</span><textarea value={noteByClient[client.workspaceId] ?? ""} onChange={(event) => setNoteByClient((current) => ({ ...current, [client.workspaceId]: event.target.value }))} placeholder="Follow-up notes, client requests, renewal reminders, or implementation context" /></label>
             </div>
-            <div className="portal-hero-actions"><button className="portal-primary" onClick={() => void saveClientState(client)}>Save client state</button><button className="portal-secondary" onClick={() => void createProposal(client)}>Generate proposal</button><button className="portal-secondary" onClick={() => navigate(`/projects/${client.workspaceId}`)}>Open project</button></div>
+            <div className="portal-hero-actions"><button className="portal-primary" onClick={() => void saveClientState(client)}>Save client state</button><button className="portal-secondary" onClick={() => void createProposal(client)}>Generate proposal</button><button className="portal-secondary" onClick={() => navigate(`/projects/${client.workspaceId}`)}>Open client</button></div>
             {client.notes.length > 0 && <div className="portal-table">{client.notes.slice(0, 3).map((note) => <div key={note.noteId} className="portal-table-row static"><span><strong>{note.body}</strong><small>{formatDateLabel(note.createdAt)}</small></span></div>)}</div>}
           </article>
-        )) : <div className="portal-panel wide"><h2>No clients yet</h2><p className="portal-muted">Add website projects to create client workspaces with scan history, reports, competitors, notes, proposals, and progress tracking.</p><button className="portal-primary" onClick={() => navigate("/projects")}>Add website</button></div>}
+        )) : <div className="portal-panel wide"><h2>No clients yet</h2><p className="portal-muted">Add a client website to track reports, competitors, notes, proposals, recommendations, and progress over time.</p><button className="portal-primary" onClick={() => navigate("/projects")}>Add website</button></div>}
       </section>
     </main>
   );
 }
+function PortalSettings({ auth, tenant, navigate }: { auth: StoredPortalAuth | null; tenant: PortalTenantSummary | null; navigate: (path: string) => void }) {
+  return (
+    <main className="portal-main">
+      <PortalPageHeader eyebrow="Settings" title="Account and agency controls" />
+      <section className="portal-dashboard-grid portal-settings-grid">
+        <div className="portal-panel">
+          <h2>My Account</h2>
+          <MetricTile label="Name" value={auth?.user.displayName || "Not set"} />
+          <MetricTile label="Email" value={auth?.user.email || "Not set"} />
+          <button className="portal-secondary full" onClick={() => navigate("/account")}>Manage account</button>
+        </div>
+        <div className="portal-panel">
+          <h2>Security</h2>
+          <MetricTile label="Account status" value={auth?.user.lifecycleState || "Unavailable"} />
+          <MetricTile label="Google" value={auth?.user.googleVerified ? "Connected" : "Not connected"} />
+          <button className="portal-secondary full" onClick={() => navigate("/security")}>Review sessions</button>
+        </div>
+        <div className="portal-panel">
+          <h2>Agency</h2>
+          <MetricTile label="Name" value={tenant?.branding.publicName || "Not set up"} />
+          <MetricTile label="Branding" value={tenant?.branding.logoUrl ? "Logo added" : "Needs logo"} />
+          <button className="portal-secondary full" onClick={() => navigate("/agency")}>Agency settings</button>
+        </div>
+      </section>
+      <details className="portal-advanced-overview portal-settings-advanced">
+        <summary>Advanced Setup <span>Team, billing, integrations, domains, and enterprise controls</span></summary>
+        <div className="portal-band three-col">
+          <PortalInfoCard title="Team & Permissions" body="Manage roles and access for owners, consultants, sales users, specialists, and viewers." />
+          <PortalInfoCard title="Billing & Capacity" body="Review report limits, API capacity, and plan controls." />
+          <PortalInfoCard title="Brand & Integrations" body="Configure domains, proposals, CRM delivery, PDF security, and agency knowledge." />
+        </div>
+        <div className="portal-hero-actions">
+          <button className="portal-secondary" onClick={() => navigate("/team")}>Team</button>
+          <button className="portal-secondary" onClick={() => navigate("/billing")}>Billing</button>
+          <button className="portal-secondary" onClick={() => navigate("/agency")}>Enterprise agency controls</button>
+        </div>
+      </details>
+    </main>
+  );
+}
 function PortalAccountSecurity({ auth, security }: { auth: StoredPortalAuth | null; security: boolean }) {
-  return <main className="portal-main"><PortalPageHeader eyebrow={security ? "Security" : "Account"} title={security ? "Sessions, devices, and authentication controls" : "Profile and authentication identity"} /><section className="portal-dashboard-grid"><div className="portal-panel"><h2>{auth?.user.displayName || auth?.user.email || "SYSTOLAB user"}</h2><MetricTile label="Email" value={auth?.user.email ?? "Not linked"} /><MetricTile label="Phone" value={auth?.user.phone ?? "Not linked"} /><MetricTile label="Lifecycle" value={auth?.user.lifecycleState ?? "Unknown"} /></div><div className="portal-panel"><h2>Session</h2><MetricTile label="Device" value={auth?.session.deviceLabel ?? "Current browser"} /><MetricTile label="Provider" value={auth?.session.provider ?? "Unknown"} /><MetricTile label="Expires" value={auth?.session.expiresAt ? new Date(auth.session.expiresAt).toLocaleString() : "Unknown"} /></div></section></main>;
+  return <main className="portal-main"><PortalPageHeader eyebrow={security ? "Security" : "Account"} title={security ? "Sessions, devices, and sign-in controls" : "Profile and account identity"} /><section className="portal-dashboard-grid"><div className="portal-panel"><h2>{auth?.user.displayName || auth?.user.email || "SYSTOLAB user"}</h2><MetricTile label="Email" value={auth?.user.email ?? "Not linked"} /><MetricTile label="Phone" value={auth?.user.phone ?? "Not linked"} /><MetricTile label="Account status" value={auth?.user.lifecycleState ?? "Unknown"} /></div><div className="portal-panel"><h2>Current Sign In</h2><MetricTile label="Device" value={auth?.session.deviceLabel ?? "Current browser"} /><MetricTile label="Method" value={auth?.session.provider ?? "Unknown"} /><MetricTile label="Expires" value={auth?.session.expiresAt ? new Date(auth.session.expiresAt).toLocaleString() : "Unknown"} /></div></section></main>;
 }
 
 function PortalOperationsPage({ path, projects, navigate }: { path: PortalPath; projects: PortalProjectSummary[]; navigate: (path: string) => void }) {
   const labels: Record<string, { eyebrow: string; title: string; intro: string; items: Array<{ title: string; body: string }> }> = {
-    "/monitoring": { eyebrow: "Monitoring", title: "Scheduled scans, changes, and alert readiness", intro: "Track score movement, competitor movement, report freshness, and evidence coverage across projects.", items: [{ title: "Cadence", body: "Daily, weekly, and monthly monitoring settings are stored per project." }, { title: "Alerts", body: "Dashboard alerts can surface score drops, competitor improvements, and monitoring due states." }] },
-    "/competitors": { eyebrow: "Competitors", title: "Competitor intelligence by project", intro: "Compare client websites against competitors and explain why competitors may be winning decisions.", items: [{ title: "Configured competitors", body: `${projects.reduce((sum, project) => sum + project.competitorUrls.length, 0)} competitor URLs across active projects.` }, { title: "Business implication", body: "Reports explain information gaps, trust gaps, and decision-support gaps, not just score differences." }] },
-    "/recommendations": { eyebrow: "Recommendations", title: "Recommendation sequencing and outcome tracking", intro: "Prioritize what to fix now, this month, and monitor later based on validated evidence.", items: [{ title: "Outcome loop", body: "Recommendations map to reports, rescans, deltas, and business outcome attribution in the backend." }, { title: "Implementation view", body: "Developer-facing tasks stay available without diluting the executive summary." }] },
-    "/team": { eyebrow: "Team", title: "Roles, users, and access boundaries", intro: "Owner, member, guest, editor, and viewer permissions isolate organization and project data.", items: [{ title: "Organization roles", body: "Owners manage billing, team, API keys, and white-label settings." }, { title: "Project roles", body: "Project owners and editors can run scans; viewers can read reports." }] },
-    "/clients": { eyebrow: "Client Portal", title: "Client-safe reporting and white-label delivery", intro: "Clients can receive project dashboards, decision reports, exports, and progress history.", items: [{ title: "Client access", body: "Each project can enable or disable client visibility." }, { title: "Exports", body: "Reports link to customer-safe PDF exports and web views." }] }
+    "/monitoring": { eyebrow: "Monitoring", title: "Scheduled intelligence and change alerts", intro: "Track business-readiness movement, competitor changes, report freshness, and evidence coverage across client websites.", items: [{ title: "Cadence", body: "Daily, weekly, and monthly monitoring can be configured for each client website." }, { title: "Alerts", body: "Dashboard alerts highlight score drops, competitor improvements, and reports that need refreshing." }] },
+    "/competitors": { eyebrow: "Competitors", title: "Competitive intelligence by client", intro: "Compare client websites against competitors and understand why competitors may be winning customer decisions.", items: [{ title: "Configured competitors", body: String(projects.reduce((sum, project) => sum + project.competitorUrls.length, 0)) + " competitor websites are currently tracked." }, { title: "Business implication", body: "Reports explain information gaps, trust gaps, and decision-support gaps, not just score differences." }] },
+    "/recommendations": { eyebrow: "Recommendations", title: "Priorities and outcome tracking", intro: "See what to improve now, this month, and later based on validated evidence.", items: [{ title: "Outcome loop", body: "Recommendations connect to future reports, measured changes, and business outcome attribution." }, { title: "Implementation view", body: "Detailed implementation tasks remain available without diluting the executive summary." }] },
+    "/team": { eyebrow: "Team", title: "Team roles and access", intro: "Control who can manage agency branding, clients, reports, billing, and account settings.", items: [{ title: "Agency roles", body: "Owners control billing, team, integrations, and agency settings." }, { title: "Client access", body: "Consultants and viewers receive only the access required for their work." }] },
+    "/clients": { eyebrow: "Clients", title: "Client reporting and delivery", intro: "Give clients access to live reports, exports, progress history, and completed work.", items: [{ title: "Client access", body: "Visibility can be controlled separately for each client website." }, { title: "Exports", body: "Executive reports can be viewed online and downloaded as branded PDFs." }] }
   };
   const meta = labels[path] ?? labels["/monitoring"]!;
-  return <main className="portal-main"><PortalPageHeader eyebrow={meta.eyebrow} title={meta.title} actions={<button className="portal-secondary" onClick={() => navigate("/projects")}>Open projects</button>} /><section className="portal-panel wide"><p>{meta.intro}</p></section><section className="portal-band two-col">{meta.items.map((item) => <PortalInfoCard key={item.title} title={item.title} body={item.body} />)}</section></main>;
+  return <main className="portal-main"><PortalPageHeader eyebrow={meta.eyebrow} title={meta.title} actions={<button className="portal-secondary" onClick={() => navigate("/projects")}>View client websites</button>} /><section className="portal-panel wide"><p>{meta.intro}</p></section><section className="portal-band two-col">{meta.items.map((item) => <PortalInfoCard key={item.title} title={item.title} body={item.body} />)}</section></main>;
 }
 
 function PortalWhiteLabelMarketing({ navigate }: { navigate: (path: string) => void }) {
-  return <main className="portal-main public"><PortalPageHeader eyebrow="White Label" title="Agency-branded client portals and reports" actions={<button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button>} /><section className="portal-band three-col"><PortalInfoCard title="Upload Logo" body="Use your agency identity across the portal, report pages, and customer-safe PDF exports." /><PortalInfoCard title="Brand Colors" body="Set primary and accent colors so the client experience feels owned by your organization." /><PortalInfoCard title="Client Portal" body="Create projects for client websites and deliver reports from a branded workspace." /></section></main>;
+  return <main className="portal-main public"><PortalPageHeader eyebrow="White Label" title="Agency-branded client portals and reports" actions={<button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button>} /><section className="portal-band three-col"><PortalInfoCard title="Upload Logo" body="Use your agency identity across the portal, report pages, and customer-safe PDF exports." /><PortalInfoCard title="Brand Colors" body="Set primary and accent colors so the client experience feels owned by your organization." /><PortalInfoCard title="Client Portal" body="Add client websites and deliver reports through a fully branded client experience." /></section></main>;
 }
 
 function PortalTestimonials({ navigate }: { navigate: (path: string) => void }) {
-  return <main className="portal-main public"><PortalPageHeader eyebrow="Testimonials" title="Built for agencies, operators, and decision makers" actions={<button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button>} /><section className="portal-band three-col"><PortalInfoCard title="Agency Owner" body="SYSTOLAB turns audits into business conversations clients understand." /><PortalInfoCard title="Growth Team" body="The report explains what to fix first and why it matters commercially." /><PortalInfoCard title="Consultant" body="White-label delivery makes the platform feel like part of our own service stack." /></section></main>;
+  return <main className="portal-main public"><PortalPageHeader eyebrow="Testimonials" title="Built for agencies, operators, and decision makers" actions={<button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button>} /><section className="portal-band three-col"><PortalInfoCard title="Agency Owner" body="SYSTOLAB turns complex findings into business conversations clients understand." /><PortalInfoCard title="Growth Team" body="The report explains what to fix first and why it matters commercially." /><PortalInfoCard title="Consultant" body="White-label delivery makes the platform feel like part of our own service stack." /></section></main>;
 }
 
 function PortalContact({ navigate }: { navigate: (path: string) => void }) {
-  return <main className="portal-main public"><PortalPageHeader eyebrow="Contact" title="Talk to SYSTOLAB" actions={<button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button>} /><section className="portal-band two-col"><PortalInfoCard title="Sales" body="Create an account to evaluate complimentary reports, white-label branding, projects, and client delivery." /><PortalInfoCard title="Support" body="Use the Help Center for scan setup, report reading, white-label configuration, and account guidance." /></section></main>;
+  return <main className="portal-main public"><PortalPageHeader eyebrow="Contact" title="Talk to SYSTOLAB" actions={<button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button>} /><section className="portal-band two-col"><PortalInfoCard title="Sales" body="Create an account to evaluate complimentary reports, agency branding, client management, and report delivery." /><PortalInfoCard title="Support" body="Use the Help Center for website analysis, report reading, agency branding, and account guidance." /></section></main>;
 }
 function PortalPricing({ plans, navigate }: { plans: PortalBillingPlan[]; navigate: (path: string) => void }) {
   return <main className="portal-main public"><PortalPageHeader eyebrow="Pricing" title="Plans for owners, agencies, partners, and enterprise teams" /><section className="portal-band pricing-grid">{plans.map((plan) => <PricingCard key={plan.planId} plan={plan} />)}</section><button className="portal-primary" onClick={() => navigate("/signup")}>Start free</button></main>;
@@ -813,17 +1226,54 @@ function PortalStaticPage({ eyebrow, title, items }: { eyebrow: string; title: s
 }
 
 function PortalDocs() {
-  return <PortalStaticPage eyebrow="Documentation" title="SYSTOLAB-owned API, portal, and report workflow" items={[{ title: "Authentication", body: "JWT sessions, refresh tokens, OTP, password, device tracking, and Google-first login are handled by the backend." }, { title: "Projects", body: "Projects connect website, SEO, GBP, competitors, monitoring, reports, and client delivery." }, { title: "API", body: "The SYSTOLAB API supports authenticated scan creation and customer-safe report retrieval without paid third-party APIs." }]} />;
+  return <PortalStaticPage eyebrow="Documentation" title="SYSTOLAB reports, client portal, and API" items={[{ title: "Authentication", body: "Google-first sign in, password access, one-time codes, and device sessions protect each account." }, { title: "Clients", body: "Each client website connects Website, SEO, local visibility, competitors, monitoring, reports, and delivery." }, { title: "API", body: "The SYSTOLAB API supports authenticated report generation and retrieval without paid third-party data APIs." }]} />;
 }
 
 function PortalHelp() {
-  return <PortalStaticPage eyebrow="Help Center" title="Support for owners, agencies, and client users" items={[{ title: "Run a scan", body: "Create an organization, add a website project, add competitors and GBP URL, then run a full website and SEO report." }, { title: "Read reports", body: "Start with the executive narrative, health snapshot, competitor explanation, and prioritized recommendations." }, { title: "White-label", body: "Set brand colors, logo, support identity, report labels, and custom domain from the portal." }]} />;
+  return <PortalStaticPage eyebrow="Help Center" title="Support for owners, agencies, and client users" items={[{ title: "Generate a report", body: "Enter a website to receive Website and SEO intelligence. Add competitor and local profile context whenever it is useful." }, { title: "Read reports", body: "Start with the executive narrative, health snapshot, competitor explanation, and prioritized recommendations." }, { title: "White-label", body: "Set brand colors, logo, support identity, report labels, and custom domain from the portal." }]} />;
 }
 
 function PortalDemo({ navigate }: { navigate: (path: string) => void }) {
-  return <main className="portal-main public"><PortalPageHeader eyebrow="Live Demo" title="Preview the SYSTOLAB workflow" actions={<button className="portal-primary" onClick={() => navigate("/signup")}>Start with your site</button>} /><section className="portal-dashboard-grid"><div className="portal-panel wide"><h2>Demo flow</h2><div className="portal-timeline"><span>1. Add website</span><span>2. Add competitors</span><span>3. Run website + SEO scan</span><span>4. Review decision report</span><span>5. Track outcomes</span></div></div><div className="portal-panel"><h2>Demo signals</h2><MetricTile label="Trust" value="Strong" /><MetricTile label="Decision Support" value="Moderate" /><MetricTile label="Competitive Gap" value="Content clarity" /></div></section></main>;
+  const [view, setView] = useState<"executive" | "evidence">("executive");
+  return (
+    <main className="portal-main public">
+      <PortalPageHeader eyebrow="Interactive Sample Report" title="Experience the report before analyzing your website" actions={<button className="portal-primary" onClick={() => navigate("/signup")}>Analyze Your Website</button>} />
+      <div className="portal-demo-toolbar">
+        <div className="portal-segmented"><button className={view === "executive" ? "active" : ""} onClick={() => setView("executive")}>Executive View</button><button className={view === "evidence" ? "active" : ""} onClick={() => setView("evidence")}>Forensic View</button></div>
+        <span>Illustrative sample</span>
+      </div>
+      {view === "executive" ? (
+        <section className="portal-dashboard-grid portal-demo-report">
+          <div className="portal-panel wide portal-value-panel">
+            <span className="portal-eyebrow">Executive Summary</span>
+            <h2>A strong business foundation with a clear opportunity to reduce customer decision friction.</h2>
+            <p>The website explains its services clearly and provides visible contact paths. The largest opportunity is helping evaluating customers compare options, understand the process, and reach local trust evidence earlier.</p>
+          </div>
+          <div className="portal-panel">
+            <h2>Business Health Snapshot</h2>
+            <div className="health-snapshot compact"><HealthRow label="Customer Acquisition" value="Strong" /><HealthRow label="Customer Trust" value="Strong" /><HealthRow label="Decision Support" value="Moderate" /><HealthRow label="Competitive Position" value="Competitive" /><HealthRow label="Local Presence" value="Needs attention" /></div>
+          </div>
+          <div className="portal-panel wide">
+            <h2>Why Competitors Are Winning</h2>
+            <p>Competitors provide more decision-support content, including clearer process explanations, customer questions, and trust examples. This can reduce uncertainty before a prospect makes contact.</p>
+            <div className="portal-signal-grid"><MetricTile label="Client decision support" value="Moderate" /><MetricTile label="Competitor decision support" value="Strong" /><MetricTile label="Priority" value="Close information gaps" /></div>
+          </div>
+          <div className="portal-panel">
+            <h2>90-Day Priority</h2>
+            <div className="portal-timeline"><span>Week 1: Clarify priority contact paths</span><span>Weeks 2-4: Answer high-intent questions</span><span>Month 2: Strengthen trust evidence</span><span>Month 3: Expand competitive authority</span></div>
+          </div>
+        </section>
+      ) : (
+        <section className="portal-panel portal-demo-evidence">
+          <div className="portal-section-heading"><div><h2>Evidence behind the decisions</h2><p className="portal-muted">Expand each item to inspect the illustrative source observation and how it supports the conclusion.</p></div><span className="portal-evidence-strength">Evidence strength: High</span></div>
+          <details><summary><span>Primary contact path is visible</span><strong>Validated</strong></summary><p>Observed in the primary navigation and first viewport. This supports a strong contact-access finding.</p><code>Header action: Request a consultation</code></details>
+          <details><summary><span>Service process lacks a clear sequence</span><strong>Validated</strong></summary><p>Service pages explain outcomes but do not show what happens after a customer makes contact. This supports a decision-friction opportunity.</p><code>Observed process steps: 0 structured steps</code></details>
+          <details><summary><span>Competitor answers more pre-contact questions</span><strong>Comparative</strong></summary><p>The illustrative competitor covers pricing guidance, timelines, and preparation questions that the client example does not answer.</p><code>Question families covered: client 3, competitor 7</code></details>
+        </section>
+      )}
+    </main>
+  );
 }
-
 function PortalPageHeader({ eyebrow, title, actions }: { eyebrow: string; title: string; actions?: ReactNode }) {
   return <section className="portal-page-header"><div><span className="portal-eyebrow">{eyebrow}</span><h1>{title}</h1></div>{actions && <div className="portal-header-actions">{actions}</div>}</section>;
 }
@@ -981,9 +1431,9 @@ function safeHostLabel(url: string) {
 
 const featureCards = [
   { title: "Business Decision Reports", body: "Website and SEO findings are translated into executive decisions, health snapshots, competitor implications, and next actions." },
-  { title: "Universal Authentication", body: "Google-first login, password, OTP, sessions, device tracking, and audit logs live inside the SYSTOLAB backend." },
+  { title: "Secure Account Access", body: "Google-first sign in, password access, one-time codes, and device controls protect customer accounts." },
   { title: "White-Label Portals", body: "Partners can configure brand identity, report labels, custom domains, support identity, and client-safe dashboards." },
-  { title: "Project Intelligence", body: "Each project stores website, GBP, competitors, location, monitoring cadence, reports, and history inside an organization." },
-  { title: "Usage and Billing Controls", body: "Free, Pro, Agency, and Enterprise style limits are enforced through scan and API usage tracking." },
-  { title: "SYSTOLAB API", body: "A first-party API lets approved users create scans and retrieve reports without third-party paid data dependencies." }
+  { title: "Client Intelligence", body: "Each client keeps its website, local visibility, competitors, location, monitoring, reports, and history together." },
+  { title: "Usage and Billing Controls", body: "Free, Pro, Agency, and Enterprise plan limits are enforced through report and API usage tracking." },
+  { title: "SYSTOLAB API", body: "A first-party API lets approved users generate intelligence and retrieve reports without paid data dependencies." }
 ];

@@ -350,6 +350,19 @@ export interface CreateScanResponse {
   queuedAt: string;
 }
 
+export interface FirstAnalysisResponse {
+  organization: {
+    tenantId: string;
+    tenantSlug: string;
+    publicName: string;
+    created: boolean;
+  };
+  website: PortalProjectSummary;
+  job: CreateScanResponse & {
+    usage?: { used: number; limit: number; allowed: boolean };
+  };
+}
+
 export interface ScanJobResponse {
   jobId: string;
   status: string;
@@ -520,6 +533,14 @@ export async function getPortalMe(): Promise<PortalMeResponse> {
   const response = await fetch(`${API_URL}/api/me`, { headers: storedAuthHeader() });
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
+}
+
+export async function startFirstAnalysis(targetUrl: string): Promise<FirstAnalysisResponse> {
+  return postJson("/api/me/first-analysis", { targetUrl }, readStoredAccessToken());
+}
+
+export async function ensureAgency(publicName?: string): Promise<{ organization: FirstAnalysisResponse["organization"] }> {
+  return postJson("/api/me/agency", { publicName }, readStoredAccessToken());
 }
 
 export async function createTenant(slug: string, publicName: string): Promise<{ tenant: Record<string, unknown>; membership: Record<string, unknown> }> {

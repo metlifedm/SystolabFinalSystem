@@ -38,6 +38,7 @@ import {
   MapPinned,
   RefreshCw,
   Search,
+  Share2,
   ShieldCheck,
   SlidersHorizontal,
   Smartphone,
@@ -208,6 +209,7 @@ function Header({ report }: { report: ReportSnapshot | null }) {
   const title = report?.tenantBranding?.reportTitle ?? "SYSTOLAB Revenue Health Diagnosis";
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [pdfError, setPdfError] = useState("");
+  const [shareStatus, setShareStatus] = useState("");
 
   async function downloadPdf() {
     if (!report) return;
@@ -224,6 +226,34 @@ function Header({ report }: { report: ReportSnapshot | null }) {
     }
   }
 
+  async function shareReport() {
+    if (!report) return;
+    setShareStatus("");
+    const url = window.location.href;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title, text: "Your Executive Business Intelligence Report is ready.", url });
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = url;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        textarea.remove();
+      }
+      setShareStatus("Report link ready to share");
+      window.setTimeout(() => setShareStatus(""), 2500);
+    } catch (shareError) {
+      if ((shareError as DOMException).name !== "AbortError") {
+        setShareStatus(shareError instanceof Error ? shareError.message : "Unable to share this report.");
+      }
+    }
+  }
+
   return (
     <header className="topbar">
       <div className="brand">
@@ -236,6 +266,11 @@ function Header({ report }: { report: ReportSnapshot | null }) {
       {report && (
         <div className="header-actions">
           {pdfError && <span className="status-line error compact">{pdfError}</span>}
+          {shareStatus && <span className="status-line compact">{shareStatus}</span>}
+          <button className="icon-button text-button share-report-button" type="button" onClick={() => void shareReport()}>
+            <Share2 size={18} />
+            Share with Client
+          </button>
           <button className="icon-button text-button" type="button" disabled={pdfDownloading} onClick={() => void downloadPdf()}>
             <Download size={18} />
             {pdfDownloading ? "Preparing PDF" : "Full PDF"}

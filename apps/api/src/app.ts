@@ -35,6 +35,17 @@ import { tenantsRouter } from "./routes/tenants.js";
 import { workspacesRouter } from "./routes/workspaces.js";
 import { vilRouter } from "./routes/vil.js";
 
+export function isAllowedCorsOrigin(origin: string, allowedOrigins: string[], nodeEnv: string): boolean {
+  if (allowedOrigins.includes(origin)) return true;
+  if (nodeEnv === "production") return false;
+
+  try {
+    const parsed = new URL(origin);
+    return parsed.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
 export function createApp(): express.Express {
   const app = express();
 
@@ -66,7 +77,7 @@ export function createApp(): express.Express {
           return callback(null, true);
         }
 
-        if (allowedOrigins.includes(origin)) {
+        if (isAllowedCorsOrigin(origin, allowedOrigins, env.nodeEnv)) {
           return callback(null, true);
         }
 
