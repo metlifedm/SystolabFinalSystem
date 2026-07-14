@@ -98,6 +98,14 @@ export interface PortalReportSummary {
   businessRiskStatus: string;
   evidenceCoveragePercent: number;
   confidenceLabel: string;
+  clientReady: {
+    status: "ready" | "review" | "not_ready";
+    label: "Ready to Share" | "Review Recommended" | "Not Ready";
+    reason: string;
+  };
+  whatToSayToClient: string;
+  highestRoiAction: string;
+  implementationTime: string;
   reportUrl: string;
   pdfUrl: string;
   brandedReportUrl?: string;
@@ -570,9 +578,28 @@ function summarizeReport(report: ReportSnapshot): PortalReportSummary {
   const expiresAt = reportExpiresAt(report);
   const coveredPages = report.evidenceCoverageSummary.pages.filter((page) => page.evidenceCount > 0).length;
   const evidenceCoveragePercent = totalPages > 0 ? Math.round((coveredPages / totalPages) * 100) : 0;
-  const averageConfidence = report.confidenceLayer.length
-    ? Math.round(report.confidenceLayer.reduce((sum, item) => sum + item.confidenceScore, 0) / report.confidenceLayer.length)
-    : 0;
+  const averageConfidence = Math.round(
+    report.confidenceEngine?.overallConfidenceScore ??
+      (report.confidenceLayer.length
+        ? report.confidenceLayer.reduce((sum, item) => sum + item.confidenceScore, 0) / report.confidenceLayer.length
+        : 0)
+  );
+  const contentUnavailable = report.status === "content_unavailable" || report.oss?.scoringStatus === "not_scored" || report.oss?.score === null;
+  const evidenceCount = report.evidenceCoverageSummary?.totalEvidenceObjects ?? report.evidenceObjects?.length ?? 0;
+  const recommendation = report.recommendationEngine?.recommendations?.[0];
+  const recommendationAction = recommendation?.action ?? report.actionFirstPanel?.fallbackAction ?? "Improve the strongest validated customer decision opportunity.";
+  const recommendationReason = recommendation?.revenueIntelligenceMapping || recommendation?.issue || report.businessRiskStatus?.primaryRiskDriver || "Validated evidence supports this priority.";
+  const highestRoiAction = contentUnavailable
+    ? "Restore assessment access and establish a validated baseline."
+    : portalBusinessExplanationForAction(recommendationAction, recommendationReason);
+  const clientReady = contentUnavailable || evidenceCount <= 0
+    ? { status: "not_ready" as const, label: "Not Ready" as const, reason: "Website content was unavailable. Re-run the assessment before presenting business conclusions." }
+    : averageConfidence >= 70
+      ? { status: "ready" as const, label: "Ready to Share" as const, reason: "Validated current-scan evidence supports the customer-facing conclusions." }
+      : { status: "review" as const, label: "Review Recommended" as const, reason: "Review evidence limitations and confidence before presenting this report." };
+  const whatToSayToClient = contentUnavailable
+    ? "The assessment could not collect enough current website evidence to support a reliable business conclusion. We should restore access and re-run it before recommending investment."
+    : "The validated report shows a " + portalReadinessPhrase(report.oss.score) + " business foundation. The first conversation should focus on this opportunity: " + highestRoiAction + " The expected result is a clearer customer decision path, and progress should be confirmed with a follow-up scan.";
   return {
     snapshotId: report.snapshotId,
     createdAt: report.createdAt,
@@ -583,12 +610,40 @@ function summarizeReport(report: ReportSnapshot): PortalReportSummary {
     businessRiskStatus: report.verdictCard.businessRiskStatus,
     evidenceCoveragePercent,
     confidenceLabel: confidenceLabel(averageConfidence),
+    clientReady,
+    whatToSayToClient,
+    highestRoiAction,
+    implementationTime: contentUnavailable ? "Depends on website access configuration" : portalImplementationTimeForAction(recommendationAction),
     reportUrl: `/reports/${report.snapshotId}`,
     pdfUrl: `/api/reports/${report.snapshotId}/pdf`,
     brandedReportUrl: brandedBaseUrl ? `${brandedBaseUrl}/reports/${report.snapshotId}` : undefined,
     brandedPdfUrl: brandedBaseUrl ? `${brandedBaseUrl}/api/reports/${report.snapshotId}/pdf` : undefined,
     expiresAt
   };
+}
+function portalBusinessExplanationForAction(action: string, reason: string): string {
+  const text = (action + " " + reason).toLowerCase();
+  if (/primary cta|call to action|contact visibility|request a quote/.test(text)) return "Make it immediately clear how interested visitors can contact the business or request a quote.";
+  if (/viewport|resource|mobile|speed|responsive/.test(text)) return "Make it easier for mobile visitors to understand the offer and reach the next step with less friction.";
+  if (/trust|review|testimonial|proof|credib|guarantee|certif/.test(text)) return "Give visitors stronger reasons to trust the business before they compare alternatives.";
+  if (/competitor|compare|comparison|alternative|versus/.test(text)) return "Close the information gap that may make competitors easier or safer to choose.";
+  if (/question|faq|answer|pricing|cost|process|objection/.test(text)) return "Answer the buying-stage questions that currently send potential customers elsewhere for information.";
+  if (/visibility|search|local|schema|entity|citation|discover/.test(text)) return "Help customers find the right pages and understand the business faster when searching for a solution.";
+  return "Improve the customer decision path so visitors can understand the offer, trust the business, and act with less hesitation.";
+}
+
+function portalImplementationTimeForAction(action: string): string {
+  const text = action.toLowerCase();
+  if (/redesign|architecture|migration|checkout|booking/.test(text)) return "2-6 weeks";
+  if (/schema|entity|citation|local|resource|speed|technical|render|responsive/.test(text)) return "1-2 weeks";
+  return "1-3 business days";
+}
+
+function portalReadinessPhrase(score: number | null | undefined): string {
+  if (typeof score !== "number") return "not yet assessed";
+  if (score >= 75) return "strong";
+  if (score >= 55) return "workable";
+  return "constrained";
 }
 async function findTenantForBranding(slug?: string, domain?: string) {
   if (!isMongoConnected()) {

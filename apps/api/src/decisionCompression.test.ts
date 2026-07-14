@@ -140,10 +140,14 @@ describe("content-unavailable customer report mapping", () => {
     const hesitations = payload["customerHesitationAreas"] as unknown[];
     const competitorNarrative = payload["customerCompetitorNarrative"] as { summary: string; momentum: string; costOfDelay: string };
     const topPriority = payload["customerTopPriority"] as { recommendedPriority: string; whyItMatters: string; expectedBusinessBenefit: string; effort: string };
+    const decisionCard = payload["customerExecutiveDecisionCard"] as { headline: string; metrics: Array<{ label: string }>; highestRoiAction: string; implementationTime: string };
+    const executiveConversation = payload["customerExecutiveConversation"] as { title: string; narrative: string; leadershipActions: string[] };
+    const executiveRecommendation = payload["customerExecutiveRecommendation"] as { headline: string; recommendation: string; evidenceBoundary: string };
+    const clientReady = payload["customerClientReadyIndicator"] as { status: string; label: string; reason: string };
     const outcomes = payload["customerExpectedBusinessOutcomes"] as Array<{ improvement: string; expectedOutcome: string }>;
     const initiatives = payload["customerBusinessInitiatives"] as Array<{ title: string; actions: string[] }>;
     const seoQuestions = payload["customerSeoBusinessQuestions"] as Array<{ question: string; businessMeaning: string }>;
-    const engine = payload["recommendationEngine"] as { recommendations: Array<{ action: string; businessExplanation: string; technicalTasks: string[] }> };
+    const engine = payload["recommendationEngine"] as { recommendations: Array<{ action: string; businessExplanation: string; technicalTasks: string[]; implementationTime: string }> };
     const json = JSON.stringify(payload);
 
     expect(narrative).toContain("foundation for customer trust and conversion");
@@ -157,6 +161,17 @@ describe("content-unavailable customer report mapping", () => {
     expect(topPriority.whyItMatters).toContain("key decision point");
     expect(topPriority.expectedBusinessBenefit).toBeTruthy();
     expect(topPriority.effort).toBeTruthy();
+    expect(decisionCard.headline).toContain("validated");
+    expect(decisionCard.metrics.map((item) => item.label)).toEqual(expect.arrayContaining(["Business Readiness", "Revenue Risk", "Competitive Position", "Customer Confidence"]));
+    expect(decisionCard.highestRoiAction).toContain("mobile visitors");
+    expect(decisionCard.implementationTime).toBe("1-2 weeks");
+    expect(executiveConversation.title).toBe("If I Had 15 Minutes With Your Leadership Team");
+    expect(executiveConversation.leadershipActions).toHaveLength(3);
+    expect(executiveRecommendation.headline).toContain("strongest validated opportunity");
+    expect(executiveRecommendation.recommendation).toContain("mobile visitors");
+    expect(executiveRecommendation.evidenceBoundary).toContain("follow-up evidence");
+    expect(clientReady.status).toBe("ready");
+    expect(clientReady.label).toBe("Ready to Share");
     expect(outcomes.map((item) => item.improvement)).toEqual(expect.arrayContaining(["Customer decision path", "Trust signals", "Local presence", "Customer question coverage"]));
     expect(initiatives.map((item) => item.title)).toEqual(expect.arrayContaining(["Business Initiative 1 - Increase Customer Enquiries", "Business Initiative 2 - Build Customer Confidence", "Business Initiative 3 - Increase Discoverability"]));
     expect(initiatives.every((item) => item.actions.length > 0)).toBe(true);
@@ -164,6 +179,7 @@ describe("content-unavailable customer report mapping", () => {
     expect(engine.recommendations[0]?.action).toContain("Improve viewport, resource weight, and mobile contact/action paths.");
     expect(engine.recommendations[0]?.businessExplanation).toContain("mobile visitors");
     expect(engine.recommendations[0]?.technicalTasks).toEqual(expect.arrayContaining(["Improve viewport and responsive layout behavior.", "Reduce resource weight and loading friction."]));
+    expect(engine.recommendations[0]?.implementationTime).toBe("1-2 weeks");
     expect(json).toContain("SEO improvements");
     expect(json).not.toContain("Which Visibility improvements");
   });
@@ -240,11 +256,17 @@ describe("content-unavailable customer report mapping", () => {
     const payload = buildCustomerReportPayload(makeUnavailableReport()) as Record<string, unknown>;
     const oss = payload["oss"] as { score: number | null; scoringStatus?: string; classification?: string };
     const customerAssessment = payload["customerAssessment"] as { oss: string; status: string };
+    const decisionCard = payload["customerExecutiveDecisionCard"] as { status: string; highestRoiAction: string; estimatedConfidence: string };
+    const clientReady = payload["customerClientReadyIndicator"] as { status: string; label: string };
 
     expect(oss.score).toBeNull();
     expect(oss.scoringStatus).toBe("not_scored");
     expect(customerAssessment.oss).toBe("Not Scored");
     expect(customerAssessment.status).toBe("Content Unavailable");
+    expect(decisionCard.status).toBe("content_unavailable");
+    expect(decisionCard.highestRoiAction).toContain("Review website access");
+    expect(decisionCard.estimatedConfidence).toBe("Very Limited");
+    expect(clientReady).toEqual(expect.objectContaining({ status: "not_ready", label: "Not Ready" }));
     expect(JSON.stringify(payload)).not.toContain("0/100");
   });
 

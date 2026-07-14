@@ -930,6 +930,32 @@ interface CustomerBusinessReport {
   verdict: string;
   verdictExplanation: string;
   executiveNarrative: string;
+  executiveDecisionCard: {
+    status: string;
+    headline: string;
+    metrics: Array<{ label: string; value: string; meaning: string }>;
+    highestRoiAction: string;
+    expectedResult: string;
+    estimatedConfidence: string;
+    implementationTime: string;
+  };
+  executiveConversation: {
+    title: string;
+    narrative: string;
+    leadershipActions: string[];
+  };
+  executiveRecommendation: {
+    headline: string;
+    recommendation: string;
+    rationale: string;
+    nextStep: string;
+    evidenceBoundary: string;
+  };
+  clientReadyIndicator: {
+    status: "ready" | "review" | "not_ready";
+    label: string;
+    reason: string;
+  };
   businessDecisionSnapshot: Array<{ area: string; status: string; meaning: string }>;
   businessHealthSnapshot: Array<{ area: string; status: string; meaning: string }>;
   hesitationAreas: Array<{ area: string; whatIsHappening: string; whyItMatters: string; action: string; confidence: string }>;
@@ -1055,7 +1081,7 @@ interface CustomerBusinessReport {
       phase: string;
       timeframe: string;
       focus: string;
-      items: Array<{ action: string; expectedBusinessOutcome: string; estimatedEffort: string; dependencies: string; successMetric: string; confidence: string }>;
+      items: Array<{ action: string; expectedBusinessOutcome: string; estimatedEffort: string; implementationTime: string; dependencies: string; successMetric: string; confidence: string }>;
     }>;
   };
   psychology: Array<{
@@ -1070,6 +1096,7 @@ interface CustomerBusinessReport {
     reason: string;
     businessExplanation: string;
     technicalTasks: string[];
+    implementationTime: string;
     confidence: string;
   }>;
   competitorGaps: Array<{
@@ -1121,237 +1148,322 @@ function CustomerBusinessReportView({ report, style }: { report: ReportSnapshot;
           </div>
         </div>
         <div className="business-score" style={{ borderColor: scoreColor }}>
-          <strong style={{ color: scoreColor }}>{customer.businessReadinessScore === null ? "Not Scored" : `${customer.businessReadinessScore}/100`}</strong>
+          <strong style={{ color: scoreColor }}>{customer.businessReadinessScore === null ? "Not Scored" : customer.businessReadinessScore + "/100"}</strong>
           <span>Business Readiness Score</span>
           <em>{customer.scoreLabel}</em>
         </div>
       </section>
 
-      <CustomerExecutiveNarrativeSection narrative={customer.executiveNarrative} />
-      <CustomerBusinessDecisionSnapshotSection snapshot={customer.businessDecisionSnapshot} />
+      <CustomerExecutiveDecisionCardSection card={customer.executiveDecisionCard} readiness={customer.clientReadyIndicator} />
+      <CustomerExecutiveConversationSection conversation={customer.executiveConversation} />
       <CustomerHesitationAreasSection areas={customer.hesitationAreas} />
       <CustomerCompetitorNarrativeSection narrative={customer.competitorNarrative} />
-      <CustomerRevenueLeakageSection leakage={customer.revenueLeakage} />
-      <CustomerTopPrioritySection priority={customer.topPriority} />
-      <CustomerExpectedBusinessOutcomesSection outcomes={customer.expectedBusinessOutcomes} />
-      <CustomerBusinessInitiativesSection initiatives={customer.businessInitiatives} />
       <CustomerSuccessBlueprintSection blueprint={customer.clientSuccessBlueprint} />
 
-      <CustomerBusinessDecisionSummary summary={customer.businessDecisionSummary} />
-      <CustomerDecisionTimelineSection timeline={customer.decisionTimeline} />
-
-      <CustomerCategoryHeader
-        title="Website Intelligence"
-        description="Customer trust, conversion readiness, decision confidence, usability, and revenue-impacting website factors."
-      />
-
-      <section className="report-section">
-        <div className="section-title">
-          <DollarSign size={18} />
-          <h2>Top Three Revenue Leaks</h2>
-        </div>
-        <div className="revenue-leak-grid">
-          {customer.revenueLeaks.map((leak, index) => (
-            <div className="revenue-leak-card" key={leak.title}>
-              <span>Leak {index + 1}</span>
-              <h3>{leak.title}</h3>
-              <p>{leak.issue}</p>
-              <small>{leak.customerImpact}</small>
-              <strong>{leak.action}</strong>
-              <em>{leak.confidence}</em>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="report-section">
-        <div className="section-title">
-          <AlertTriangle size={18} />
-          <h2>Top Three Business Risks</h2>
-        </div>
-        <div className="revenue-leak-grid">
-          {customer.businessRisks.map((risk, index) => (
-            <div className="revenue-leak-card" key={risk.title}>
-              <span>Risk {index + 1}</span>
-              <h3>{risk.title}</h3>
-              <p>{risk.risk}</p>
-              <small>{risk.customerImpact}</small>
-              <strong>{risk.action}</strong>
-              <em>{risk.confidence}</em>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <CustomerIntelligenceSummary
-        title="Decision Confidence Summary"
-        icon={<ShieldCheck size={18} />}
-        items={customer.intelligenceSummaries.filter((item) => item.section === "confidence")}
-      />
-      <CustomerIntelligenceSummary
-        title="Trust Proof Coverage Summary"
-        icon={<CheckCircle2 size={18} />}
-        items={customer.intelligenceSummaries.filter((item) => item.section === "trustProof")}
-      />
-      <CustomerIntelligenceSummary
-        title="Customer Journey Breakpoint Summary"
-        icon={<MapPinned size={18} />}
-        items={customer.intelligenceSummaries.filter((item) => item.section === "journey")}
-      />
-
-      <CustomerCategoryHeader
-        title="Visibility Intelligence"
-        description="Search visibility readiness, topical coverage, discoverability, local presence, freshness, and organic growth opportunities."
-      />
-
-      <CustomerSeoBusinessQuestionsSection questions={customer.seoBusinessQuestions} />
-      <CustomerIntelligenceSummary
-        title="Visibility Opportunity Summary"
-        icon={<Search size={18} />}
-        items={customer.intelligenceSummaries.filter((item) => item.section === "search")}
-      />
-      <CustomerLocalVisibilitySection localVisibility={customer.localVisibility} />
-      <CustomerQuestionCoverageSection coverage={customer.questionCoverage} />
-
-      <section className="report-section">
-        <div className="section-title">
-          <Activity size={18} />
-          <h2>Customer Psychology Analysis</h2>
-        </div>
-        <div className="psychology-grid">
-          {customer.psychology.map((item) => (
-            <div className="psychology-card" key={item.label}>
-              <span>{item.label}</span>
-              <strong>{item.reading}</strong>
-              <p>{item.businessMeaning}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="report-section">
-        <div className="section-title">
-          <MapPinned size={18} />
-          <h2>Visual Intelligence</h2>
-        </div>
-        <div className="visual-intelligence-grid">
-          <div className="visual-summary-card">
-            <span>{customer.visualSummary.status}</span>
-            <strong>{customer.visualSummary.confidence}</strong>
-            <p>{customer.visualSummary.detail}</p>
-          </div>
-          {customer.visualMarkers.map((marker) => (
-            <div className="visual-marker-card" key={`${marker.label}-${marker.status}`}>
-              <span>{marker.label}</span>
-              <strong>{marker.status}</strong>
-              <p>{marker.decisionImpact}</p>
-              <small>{marker.action}</small>
-              <em>{marker.confidence}</em>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="report-section">
-        <div className="section-title">
-          <BarChart3 size={18} />
-          <h2>Business Impact Summary</h2>
-        </div>
-        <div className="business-impact-list">
-          {customer.impactSummary.map((item) => (
-            <p key={item}>{item}</p>
-          ))}
-        </div>
-      </section>
-
-      <CustomerOutcomeAttributionSection attribution={customer.outcomeAttribution} />
-      <CustomerDependencySummarySection dependency={customer.dependencySummary} />
-      <CustomerRecommendationRoadmapSection roadmap={customer.recommendationRoadmap} />
-
-      {customer.isEcommerce && (
-        <section className="report-section">
-          <div className="section-title">
-            <Gauge size={18} />
-            <h2>E-commerce Intelligence</h2>
-          </div>
-          <div className="data-table compact">
-            {customer.commerceSignals.map((signal) => (
-              <div className="table-row" key={signal.label}>
-                <span>{signal.label}</span>
-                <strong>{signal.status}</strong>
-                <small>{signal.action}</small>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section className="report-section">
-        <div className="section-title">
-          <CheckCircle2 size={18} />
-          <h2>Supporting Recommendation Detail</h2>
-        </div>
-        <div className="data-table compact customer-actions-table">
-          {customer.recommendedActions.map((action) => (
-            <div className="table-row action-with-details" key={action.title}>
-              <span>{action.title}</span>
-              <strong>{action.businessExplanation}</strong>
-              <small>Evidence basis: {customerRecommendationEvidenceNote(action.reason)} Confidence: {action.confidence}.</small>
-              <details className="evidence-implementation-panel">
-                <summary>Evidence & Implementation</summary>
-                <p>{action.action}</p>
-                <ul className="implementation-task-list">
-                  {action.technicalTasks.map((task) => <li key={task}>{task}</li>)}
-                </ul>
-              </details>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="report-section">
-        <div className="section-title">
-          <ShieldCheck size={18} />
-          <h2>Competitor Gap Analysis</h2>
-        </div>
-        {customer.competitorGaps.length > 0 ? (
-          <div className="data-table compact">
-            {customer.competitorGaps.map((gap) => (
-              <div className="table-row" key={`${gap.competitor}-${gap.area}`}>
-                <span>{gap.area}</span>
-                <strong>{gap.position}</strong>
-                <small>{gap.competitor}: {gap.decisionImpact}</small>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="muted">No validated competitor gap was available in this scan. Add competitor URLs to compare trust, clarity, confidence, conversion readiness, and mobile experience.</p>
-        )}
-      </section>
-
-      <CustomerCompetitorContentComparisonSection comparison={customer.competitorContentComparison} />
-      <CustomerCompetitorWinReasonsSection winReasons={customer.competitorWinReasons} />
-
-      <details className="report-section customer-evidence-details">
+      <details className="customer-report-depth">
         <summary>
-          <span>Supporting Evidence (Optional)</span>
-          <strong>{customer.evidenceItems.length} supporting finding{customer.evidenceItems.length === 1 ? "" : "s"}</strong>
+          <span>Detailed Business Intelligence</span>
+          <strong>Website, SEO, local, competitor, evidence, and implementation detail</strong>
         </summary>
-        <p className="muted">Explore the observations that support each business conclusion. This section is intended for technical teams and implementation partners who want additional context behind the recommendations.</p>
-        <div className="data-table compact">
-          {customer.evidenceItems.map((item, index) => (
-            <div className="table-row" key={item.id}>
-              <span>Finding {index + 1}</span>
-              <strong>{item.title}</strong>
-              <small>{item.meaning} Confidence: {item.confidence}.</small>
+        <div className="customer-report-depth-body">
+          <CustomerBusinessDecisionSnapshotSection snapshot={customer.businessDecisionSnapshot} />
+          <CustomerRevenueLeakageSection leakage={customer.revenueLeakage} />
+          <CustomerExpectedBusinessOutcomesSection outcomes={customer.expectedBusinessOutcomes} />
+          <CustomerBusinessInitiativesSection initiatives={customer.businessInitiatives} />
+          <CustomerBusinessDecisionSummary summary={customer.businessDecisionSummary} />
+          <CustomerDecisionTimelineSection timeline={customer.decisionTimeline} />
+
+          <CustomerCategoryHeader
+            title="Website Intelligence"
+            description="Customer trust, conversion readiness, decision confidence, usability, and revenue-impacting website factors."
+          />
+
+          <section className="report-section">
+            <div className="section-title">
+              <DollarSign size={18} />
+              <h2>Top Three Revenue Leaks</h2>
             </div>
-          ))}
+            <div className="revenue-leak-grid">
+              {customer.revenueLeaks.map((leak, index) => (
+                <div className="revenue-leak-card" key={leak.title}>
+                  <span>Leak {index + 1}</span>
+                  <h3>{leak.title}</h3>
+                  <p>{leak.issue}</p>
+                  <small>{leak.customerImpact}</small>
+                  <strong>{leak.action}</strong>
+                  <em>{leak.confidence}</em>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="report-section">
+            <div className="section-title">
+              <AlertTriangle size={18} />
+              <h2>Top Three Business Risks</h2>
+            </div>
+            <div className="revenue-leak-grid">
+              {customer.businessRisks.map((risk, index) => (
+                <div className="revenue-leak-card" key={risk.title}>
+                  <span>Risk {index + 1}</span>
+                  <h3>{risk.title}</h3>
+                  <p>{risk.risk}</p>
+                  <small>{risk.customerImpact}</small>
+                  <strong>{risk.action}</strong>
+                  <em>{risk.confidence}</em>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <CustomerIntelligenceSummary
+            title="Decision Confidence Summary"
+            icon={<ShieldCheck size={18} />}
+            items={customer.intelligenceSummaries.filter((item) => item.section === "confidence")}
+          />
+          <CustomerIntelligenceSummary
+            title="Trust Proof Coverage Summary"
+            icon={<CheckCircle2 size={18} />}
+            items={customer.intelligenceSummaries.filter((item) => item.section === "trustProof")}
+          />
+          <CustomerIntelligenceSummary
+            title="Customer Journey Breakpoint Summary"
+            icon={<MapPinned size={18} />}
+            items={customer.intelligenceSummaries.filter((item) => item.section === "journey")}
+          />
+
+          <CustomerCategoryHeader
+            title="Visibility Intelligence"
+            description="Search visibility readiness, topical coverage, discoverability, local presence, freshness, and organic growth opportunities."
+          />
+
+          <CustomerSeoBusinessQuestionsSection questions={customer.seoBusinessQuestions} />
+          <CustomerIntelligenceSummary
+            title="Visibility Opportunity Summary"
+            icon={<Search size={18} />}
+            items={customer.intelligenceSummaries.filter((item) => item.section === "search")}
+          />
+          <CustomerLocalVisibilitySection localVisibility={customer.localVisibility} />
+          <CustomerQuestionCoverageSection coverage={customer.questionCoverage} />
+
+          <section className="report-section">
+            <div className="section-title">
+              <Activity size={18} />
+              <h2>Customer Psychology Analysis</h2>
+            </div>
+            <div className="psychology-grid">
+              {customer.psychology.map((item) => (
+                <div className="psychology-card" key={item.label}>
+                  <span>{item.label}</span>
+                  <strong>{item.reading}</strong>
+                  <p>{item.businessMeaning}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="report-section">
+            <div className="section-title">
+              <MapPinned size={18} />
+              <h2>Visual Intelligence</h2>
+            </div>
+            <div className="visual-intelligence-grid">
+              <div className="visual-summary-card">
+                <span>{customer.visualSummary.status}</span>
+                <strong>{customer.visualSummary.confidence}</strong>
+                <p>{customer.visualSummary.detail}</p>
+              </div>
+              {customer.visualMarkers.map((marker) => (
+                <div className="visual-marker-card" key={marker.label + "-" + marker.status}>
+                  <span>{marker.label}</span>
+                  <strong>{marker.status}</strong>
+                  <p>{marker.decisionImpact}</p>
+                  <small>{marker.action}</small>
+                  <em>{marker.confidence}</em>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="report-section">
+            <div className="section-title">
+              <BarChart3 size={18} />
+              <h2>Business Impact Summary</h2>
+            </div>
+            <div className="business-impact-list">
+              {customer.impactSummary.map((item) => <p key={item}>{item}</p>)}
+            </div>
+          </section>
+
+          <CustomerOutcomeAttributionSection attribution={customer.outcomeAttribution} />
+          <CustomerDependencySummarySection dependency={customer.dependencySummary} />
+          <CustomerRecommendationRoadmapSection roadmap={customer.recommendationRoadmap} />
+
+          {customer.isEcommerce && (
+            <section className="report-section">
+              <div className="section-title">
+                <Gauge size={18} />
+                <h2>E-commerce Intelligence</h2>
+              </div>
+              <div className="data-table compact">
+                {customer.commerceSignals.map((signal) => (
+                  <div className="table-row" key={signal.label}>
+                    <span>{signal.label}</span>
+                    <strong>{signal.status}</strong>
+                    <small>{signal.action}</small>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section className="report-section">
+            <div className="section-title">
+              <CheckCircle2 size={18} />
+              <h2>Detailed Implementation Appendix</h2>
+            </div>
+            <div className="data-table compact customer-actions-table">
+              {customer.recommendedActions.map((action) => (
+                <div className="table-row action-with-details" key={action.title}>
+                  <span>{action.title}</span>
+                  <strong>{action.businessExplanation}</strong>
+                  <small>Expected implementation time: {action.implementationTime}. Evidence basis: {customerRecommendationEvidenceNote(action.reason)} Confidence: {action.confidence}.</small>
+                  <details className="evidence-implementation-panel">
+                    <summary>Evidence & Implementation</summary>
+                    <p>{action.action}</p>
+                    <ul className="implementation-task-list">
+                      {action.technicalTasks.map((task) => <li key={task}>{task}</li>)}
+                    </ul>
+                  </details>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="report-section">
+            <div className="section-title">
+              <ShieldCheck size={18} />
+              <h2>Competitor Gap Analysis</h2>
+            </div>
+            {customer.competitorGaps.length > 0 ? (
+              <div className="data-table compact">
+                {customer.competitorGaps.map((gap) => (
+                  <div className="table-row" key={gap.competitor + "-" + gap.area}>
+                    <span>{gap.area}</span>
+                    <strong>{gap.position}</strong>
+                    <small>{gap.competitor}: {gap.decisionImpact}</small>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">No validated competitor gap was available in this scan. Add competitor URLs to compare trust, clarity, confidence, conversion readiness, and mobile experience.</p>
+            )}
+          </section>
+
+          <CustomerCompetitorContentComparisonSection comparison={customer.competitorContentComparison} />
+          <CustomerCompetitorWinReasonsSection winReasons={customer.competitorWinReasons} />
+
+          <details className="report-section customer-evidence-details">
+            <summary>
+              <span>Supporting Evidence (Optional)</span>
+              <strong>{customer.evidenceItems.length} supporting finding{customer.evidenceItems.length === 1 ? "" : "s"}</strong>
+            </summary>
+            <p className="muted">Explore the observations that support each business conclusion. This section is intended for technical teams and implementation partners who want additional context behind the recommendations.</p>
+            <div className="data-table compact">
+              {customer.evidenceItems.map((item, index) => (
+                <div className="table-row" key={item.id}>
+                  <span>Finding {index + 1}</span>
+                  <strong>{item.title}</strong>
+                  <small>{item.meaning} Confidence: {item.confidence}.</small>
+                </div>
+              ))}
+            </div>
+          </details>
         </div>
       </details>
+
+      <CustomerExecutiveRecommendationSection recommendation={customer.executiveRecommendation} />
     </article>
   );
 }
 
+function CustomerExecutiveDecisionCardSection({
+  card,
+  readiness
+}: {
+  card: CustomerBusinessReport["executiveDecisionCard"];
+  readiness: CustomerBusinessReport["clientReadyIndicator"];
+}) {
+  return (
+    <section className="report-section executive-decision-card">
+      <div className="executive-decision-card-heading">
+        <div>
+          <span className="panel-kicker">Executive Decision Card</span>
+          <h2>The decision leadership can act on</h2>
+        </div>
+        <span className={"client-ready-indicator " + readiness.status}>{readiness.label}</span>
+      </div>
+      <p className="executive-opening">{card.headline}</p>
+      <div className="executive-decision-metrics">
+        {card.metrics.map((metric) => (
+          <div className="executive-decision-metric" key={metric.label}>
+            <span>{metric.label}</span>
+            <strong>{metric.value}</strong>
+            <p>{metric.meaning}</p>
+          </div>
+        ))}
+      </div>
+      <div className="executive-roi-action">
+        <div>
+          <span>Highest ROI Action</span>
+          <strong>{card.highestRoiAction}</strong>
+          <p>{card.expectedResult}</p>
+        </div>
+        <div className="executive-roi-meta">
+          <Metric label="Implementation Time" value={card.implementationTime} />
+          <Metric label="Estimated Confidence" value={card.estimatedConfidence} />
+        </div>
+      </div>
+      <p className="executive-readiness-note">{readiness.reason}</p>
+    </section>
+  );
+}
+
+function CustomerExecutiveConversationSection({ conversation }: { conversation: CustomerBusinessReport["executiveConversation"] }) {
+  return (
+    <section className="report-section executive-conversation">
+      <div className="section-title">
+        <FileText size={18} />
+        <h2>{conversation.title}</h2>
+      </div>
+      <blockquote>{conversation.narrative}</blockquote>
+      <ol>
+        {conversation.leadershipActions.map((action) => <li key={action}>{action}</li>)}
+      </ol>
+    </section>
+  );
+}
+
+function CustomerExecutiveRecommendationSection({ recommendation }: { recommendation: CustomerBusinessReport["executiveRecommendation"] }) {
+  return (
+    <section className="report-section executive-recommendation">
+      <span className="panel-kicker">Executive Recommendation</span>
+      <h2>{recommendation.headline}</h2>
+      <p className="decision-summary">{recommendation.recommendation}</p>
+      <div className="executive-recommendation-grid">
+        <div>
+          <span>Why This Decision</span>
+          <p>{recommendation.rationale}</p>
+        </div>
+        <div>
+          <span>Next Step</span>
+          <p>{recommendation.nextStep}</p>
+        </div>
+      </div>
+      <small>{recommendation.evidenceBoundary}</small>
+    </section>
+  );
+}
 function CustomerExecutiveNarrativeSection({ narrative }: { narrative: string }) {
   if (!narrative.trim()) return null;
   return (
@@ -1516,7 +1628,7 @@ function CustomerSuccessBlueprintSection({ blueprint }: { blueprint: CustomerBus
                 <li key={`${phase.phase}-${item.action}`}>
                   <b>{item.action}</b><br />
                   Outcome: {item.expectedBusinessOutcome}<br />
-                  Effort: {item.estimatedEffort}; Depends on: {item.dependencies}; Metric: {item.successMetric}; {item.confidence}
+                  Effort: {item.estimatedEffort}; Implementation time: {item.implementationTime}; Depends on: {item.dependencies}; Metric: {item.successMetric}; {item.confidence}
                 </li>
               ))}
             </ul>
@@ -1983,6 +2095,10 @@ function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessRe
     verdict: customerVerdict(score, weakest),
     verdictExplanation: customerVerdictExplanation(report, weakest, strongest),
     executiveNarrative: buildCustomerExecutiveNarrative(report, score, weakest, strongest, competitorGaps),
+    executiveDecisionCard: buildCustomerExecutiveDecisionCard(report, score, weakest, confidenceScore),
+    executiveConversation: buildCustomerExecutiveConversation(report, score, weakest),
+    executiveRecommendation: buildCustomerExecutiveRecommendation(report, score, weakest),
+    clientReadyIndicator: buildCustomerClientReadyIndicator(report, score, confidenceScore),
     businessDecisionSnapshot: buildBusinessDecisionSnapshot(report, score, weakest, competitorGaps),
     businessHealthSnapshot: buildBusinessDecisionSnapshot(report, score, weakest, competitorGaps),
     hesitationAreas: buildCustomerHesitationAreas(report),
@@ -2019,6 +2135,7 @@ function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessRe
       reason: item.reason,
       businessExplanation: businessExplanationForAction(item.action, item.reason),
       technicalTasks: technicalTasksForAction(item.action),
+      implementationTime: implementationTimeForAction(item.action),
       confidence: `${Math.round(item.score)}%`
     })),
     competitorGaps,
@@ -2029,6 +2146,163 @@ function buildCustomerBusinessReport(report: ReportSnapshot): CustomerBusinessRe
   };
 }
 
+function buildCustomerExecutiveDecisionCard(
+  report: ReportSnapshot,
+  score: number | null,
+  weakest: ReportSnapshot["dimensions"][number] | undefined,
+  confidenceScore: number
+): CustomerBusinessReport["executiveDecisionCard"] {
+  const payload = (report as unknown as { customerExecutiveDecisionCard?: Partial<CustomerBusinessReport["executiveDecisionCard"]> }).customerExecutiveDecisionCard;
+  const payloadMetrics = normalizeRows<CustomerBusinessReport["executiveDecisionCard"]["metrics"][number]>(payload?.metrics);
+  if (payload && payloadMetrics.length) {
+    return {
+      status: customerSafeText(payload.status ?? "available"),
+      headline: customerSafeText(payload.headline ?? ""),
+      metrics: payloadMetrics.map((item) => ({
+        label: customerSafeText(item.label),
+        value: customerSafeText(item.value),
+        meaning: customerSafeText(item.meaning)
+      })),
+      highestRoiAction: customerSafeText(payload.highestRoiAction ?? ""),
+      expectedResult: customerSafeText(payload.expectedResult ?? ""),
+      estimatedConfidence: customerSafeText(payload.estimatedConfidence ?? ""),
+      implementationTime: customerSafeText(payload.implementationTime ?? "")
+    };
+  }
+
+  if (score === null || customerValidatedFindingCount(report) <= 0) {
+    return {
+      status: "content_unavailable",
+      headline: "A reliable business decision cannot be made until current website content is available for validation.",
+      metrics: [
+        { label: "Business Readiness", value: "Not Assessed", meaning: "Website content could not be collected." },
+        { label: "Revenue Risk", value: "Not Assessed", meaning: "Business impact was not inferred without validated evidence." },
+        { label: "Competitive Position", value: "Not Assessed", meaning: "A comparative conclusion requires current website evidence." },
+        { label: "Customer Confidence", value: "Very Limited", meaning: "Trust and decision-path signals could not be validated." }
+      ],
+      highestRoiAction: "Review website access, security, and robots settings, then re-run the assessment.",
+      expectedResult: "A complete scan can establish a reliable baseline for business decisions.",
+      estimatedConfidence: "Very Limited",
+      implementationTime: "Depends on website access configuration"
+    };
+  }
+
+  const top = buildCustomerTopPriority(report, dedupeCustomerActions(report)[0], weakest, confidenceScore);
+  const customerConfidence = averageNullable([
+    scoreForDimension(report, "trust"),
+    scoreForDimension(report, "informationClarity"),
+    scoreForDimension(report, "conversionReadiness"),
+    scoreForDimension(report, "mobileExperience")
+  ]);
+  return {
+    status: "available",
+    headline: customerExecutiveOpening(score, weakest),
+    metrics: [
+      { label: "Business Readiness", value: healthStatusForScore(score), meaning: "Validated business readiness is " + Math.round(score) + "/100." },
+      { label: "Revenue Risk", value: customerSafeText(report.businessRiskStatus?.level ?? "Not Assessed"), meaning: customerSafeText(report.businessRiskStatus?.primaryRiskDriver ?? "No primary risk driver was validated.") },
+      { label: "Competitive Position", value: customerSafeText(report.decisionIntelligenceBrief?.executiveDecisionMatrix?.competitivePosition ?? "Benchmark Data Unavailable"), meaning: customerSafeText(report.decisionIntelligenceBrief?.competitivePositionAnalysis?.summary ?? "Position is limited to available comparison evidence.") },
+      { label: "Customer Confidence", value: healthStatusForScore(customerConfidence), meaning: customerConfidence === null ? "Not assessed." : "Trust, clarity, mobile experience, and action-path evidence average " + Math.round(customerConfidence) + "/100." }
+    ],
+    highestRoiAction: businessExplanationForAction(top.recommendedPriority, top.whyItMatters),
+    expectedResult: top.expectedBusinessBenefit,
+    estimatedConfidence: Math.round(confidenceScore) + "% " + customerEvidenceStrengthLabel(report),
+    implementationTime: implementationTimeForAction(top.recommendedPriority)
+  };
+}
+
+function buildCustomerExecutiveConversation(
+  report: ReportSnapshot,
+  score: number | null,
+  weakest: ReportSnapshot["dimensions"][number] | undefined
+): CustomerBusinessReport["executiveConversation"] {
+  const payload = (report as unknown as { customerExecutiveConversation?: Partial<CustomerBusinessReport["executiveConversation"]> }).customerExecutiveConversation;
+  if (payload?.narrative) {
+    return {
+      title: customerSafeText(payload.title ?? "If I Had 15 Minutes With Your Leadership Team"),
+      narrative: customerSafeText(payload.narrative),
+      leadershipActions: textArray(payload.leadershipActions)
+    };
+  }
+  if (score === null) {
+    return {
+      title: "If I Had 15 Minutes With Your Leadership Team",
+      narrative: "I would not recommend a growth decision from this scan yet. Current website content was unavailable, so the responsible first step is to establish a validated baseline.",
+      leadershipActions: ["Review website access and security settings.", "Re-run the assessment after access is restored.", "Use completed evidence to prioritize investment."]
+    };
+  }
+  const top = buildCustomerTopPriority(report, dedupeCustomerActions(report)[0], weakest, averageConfidence(report));
+  return {
+    title: "If I Had 15 Minutes With Your Leadership Team",
+    narrative: customerExecutiveOpening(score, weakest) + " The first investment should address this priority: " + businessExplanationForAction(top.recommendedPriority, top.whyItMatters),
+    leadershipActions: [top.firstAction, "Validate the result through a follow-up scan.", "Keep lower-confidence opportunities in review until stronger evidence is available."]
+  };
+}
+
+function buildCustomerExecutiveRecommendation(
+  report: ReportSnapshot,
+  score: number | null,
+  weakest: ReportSnapshot["dimensions"][number] | undefined
+): CustomerBusinessReport["executiveRecommendation"] {
+  const payload = (report as unknown as { customerExecutiveRecommendation?: Partial<CustomerBusinessReport["executiveRecommendation"]> }).customerExecutiveRecommendation;
+  if (payload?.recommendation) {
+    return {
+      headline: customerSafeText(payload.headline ?? "Executive Recommendation"),
+      recommendation: customerSafeText(payload.recommendation),
+      rationale: customerSafeText(payload.rationale ?? ""),
+      nextStep: customerSafeText(payload.nextStep ?? ""),
+      evidenceBoundary: customerSafeText(payload.evidenceBoundary ?? "")
+    };
+  }
+  if (score === null) {
+    return {
+      headline: "Establish a validated baseline before making an investment decision.",
+      recommendation: "Review website access, security, and robots settings, then re-run the assessment.",
+      rationale: "Business impact was not inferred without collected page evidence.",
+      nextStep: "Restore content access and generate a complete assessment.",
+      evidenceBoundary: "No business-impact conclusion was generated from unavailable content."
+    };
+  }
+  const top = buildCustomerTopPriority(report, dedupeCustomerActions(report)[0], weakest, averageConfidence(report));
+  return {
+    headline: "Prioritize the strongest validated opportunity before expanding lower-confidence initiatives.",
+    recommendation: businessExplanationForAction(top.recommendedPriority, top.whyItMatters),
+    rationale: top.whyItMatters,
+    nextStep: top.firstAction + " Re-scan after implementation to validate the result.",
+    evidenceBoundary: "Expected outcomes are directional and must be confirmed through implementation and follow-up evidence."
+  };
+}
+
+function buildCustomerClientReadyIndicator(
+  report: ReportSnapshot,
+  score: number | null,
+  confidenceScore: number
+): CustomerBusinessReport["clientReadyIndicator"] {
+  const payload = (report as unknown as { customerClientReadyIndicator?: Partial<CustomerBusinessReport["clientReadyIndicator"]> }).customerClientReadyIndicator;
+  if (payload?.status === "ready" || payload?.status === "review" || payload?.status === "not_ready") {
+    return {
+      status: payload.status,
+      label: customerSafeText(payload.label ?? "Review Recommended"),
+      reason: customerSafeText(payload.reason ?? "")
+    };
+  }
+  if (score === null || customerValidatedFindingCount(report) <= 0) {
+    return { status: "not_ready", label: "Not Ready", reason: "Re-run the assessment after website content is available." };
+  }
+  if (confidenceScore >= 70) {
+    return { status: "ready", label: "Ready to Share", reason: "Validated current-scan evidence supports the report's conclusions." };
+  }
+  return { status: "review", label: "Review Recommended", reason: "Review evidence limitations before presenting the report." };
+}
+
+function customerExecutiveOpening(
+  score: number,
+  weakest: ReportSnapshot["dimensions"][number] | undefined
+): string {
+  const weakestLabel = businessDimensionLabel(weakest?.label ?? "customer decision support").toLowerCase();
+  if (score >= 75) return "Your website has a strong foundation, but validated evidence shows that " + weakestLabel + " is the clearest remaining source of customer hesitation.";
+  if (score >= 55) return "Your website provides a workable foundation, but validated gaps in " + weakestLabel + " are making customer decisions harder than they need to be.";
+  return "Validated evidence shows that " + weakestLabel + " is limiting how confidently customers can understand the offer and take the next step.";
+}
 function buildCustomerExecutiveNarrative(
   report: ReportSnapshot,
   score: number | null,
@@ -2530,6 +2804,7 @@ function buildCustomerSuccessBlueprint(report: ReportSnapshot): CustomerBusiness
     action: customerSafeText(action),
     expectedBusinessOutcome: expectedOutcomeForAction(action),
     estimatedEffort: effortForAction(action),
+    implementationTime: implementationTimeForAction(action),
     dependencies: customerSafeText(dependencies),
     successMetric: customerSafeText(metric),
     confidence: confidence || customerRecommendationEvidenceNote(reason)
@@ -2614,6 +2889,12 @@ function effortForAction(action: string): string {
   return "Low";
 }
 
+function implementationTimeForAction(action: string): string {
+  const effort = effortForAction(action);
+  if (effort === "Low") return "1-3 business days";
+  if (effort === "Medium") return "1-2 weeks";
+  return "2-6 weeks";
+}
 function firstActionForRecommendation(action: string): string {
   const text = action.toLowerCase();
   if (/primary cta|cta presence|call to action|contact visibility|request a quote/.test(text)) return "Make the main contact or quote action visible near the first customer decision point.";

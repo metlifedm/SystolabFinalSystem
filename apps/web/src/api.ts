@@ -91,6 +91,14 @@ export interface PortalReportSummary {
   businessRiskStatus: string;
   evidenceCoveragePercent: number;
   confidenceLabel: string;
+  clientReady: {
+    status: "ready" | "review" | "not_ready";
+    label: "Ready to Share" | "Review Recommended" | "Not Ready";
+    reason: string;
+  };
+  whatToSayToClient: string;
+  highestRoiAction: string;
+  implementationTime: string;
   reportUrl: string;
   pdfUrl: string;
   brandedReportUrl?: string;

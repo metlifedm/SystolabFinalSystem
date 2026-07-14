@@ -121,6 +121,10 @@ export function buildCustomerReportPayload(report: ReportSnapshot): Record<strin
     freshness: stripInternalFields(report.freshness),
     customerAssessment: buildCustomerAssessment(report, contentUnavailable),
     customerExecutiveNarrative: buildCustomerExecutiveNarrative(report, contentUnavailable),
+    customerExecutiveDecisionCard: buildCustomerExecutiveDecisionCard(report, contentUnavailable),
+    customerExecutiveConversation: buildCustomerExecutiveConversation(report, contentUnavailable),
+    customerExecutiveRecommendation: buildCustomerExecutiveRecommendation(report, contentUnavailable),
+    customerClientReadyIndicator: buildCustomerClientReadyIndicator(report, contentUnavailable),
     customerBusinessDecisionSnapshot: buildCustomerBusinessDecisionSnapshot(report, contentUnavailable),
     customerBusinessHealthSnapshot: buildCustomerBusinessDecisionSnapshot(report, contentUnavailable),
     customerHesitationAreas: buildCustomerHesitationAreas(report, contentUnavailable),
@@ -214,6 +218,132 @@ function buildCustomerExecutiveNarrative(report: ReportSnapshot, contentUnavaila
   return `Your business presents a ${foundation} foundation for customer trust and conversion. ${strongestText} The largest opportunity is improving ${weakLabel} so visitors reach key information and act with less friction. ${competitorText}`;
 }
 
+function buildCustomerExecutiveDecisionCard(report: ReportSnapshot, contentUnavailable: boolean): Record<string, unknown> {
+  const confidence = Math.round(report.confidenceEngine?.overallConfidenceScore ?? average(report.confidenceLayer?.map((item) => item.confidenceScore) ?? []));
+  if (contentUnavailable) {
+    return {
+      status: "content_unavailable",
+      headline: "A reliable business decision cannot be made until current website content is available for validation.",
+      metrics: [
+        { label: "Business Readiness", value: "Not Assessed", meaning: "Website content could not be collected." },
+        { label: "Revenue Risk", value: "Not Assessed", meaning: "Business impact was not inferred without validated evidence." },
+        { label: "Competitive Position", value: "Not Assessed", meaning: "A comparative conclusion requires current website evidence." },
+        { label: "Customer Confidence", value: "Very Limited", meaning: "Trust and decision-path signals could not be validated." }
+      ],
+      highestRoiAction: "Review website access, security, and robots settings, then re-run the assessment.",
+      expectedResult: "A complete scan can establish a reliable baseline for business decisions.",
+      estimatedConfidence: "Very Limited",
+      implementationTime: "Depends on website access configuration"
+    };
+  }
+
+  const score = typeof report.oss?.score === "number" ? report.oss.score : null;
+  const customerConfidence = averageNullable([
+    scoreForDimension(report, "trust"),
+    scoreForDimension(report, "informationClarity"),
+    scoreForDimension(report, "conversionReadiness"),
+    scoreForDimension(report, "mobileExperience")
+  ]);
+  const topPriority = buildCustomerTopPriority(report, false);
+  const action = sanitizeCustomerText(topPriority["recommendedPriority"] ?? report.actionFirstPanel?.fallbackAction ?? "Improve the weakest validated customer decision area.");
+  const reason = sanitizeCustomerText(topPriority["whyItMatters"] ?? report.businessRiskStatus?.primaryRiskDriver ?? "Validated evidence supports this priority.");
+  const competitivePosition = sanitizeCustomerText(
+    report.decisionIntelligenceBrief?.executiveDecisionMatrix?.competitivePosition ?? "Benchmark Data Unavailable"
+  );
+  const risk = sanitizeCustomerText(report.businessRiskStatus?.level ?? "Not Assessed");
+
+  return {
+    status: "available",
+    headline: buildCustomerExecutiveOpening(report),
+    metrics: [
+      { label: "Business Readiness", value: healthStatusForScore(score), meaning: score === null ? "Not assessed." : "Validated business readiness is " + Math.round(score) + "/100." },
+      { label: "Revenue Risk", value: risk, meaning: sanitizeCustomerText(report.businessRiskStatus?.primaryRiskDriver ?? "No primary revenue-risk driver was validated.") },
+      { label: "Competitive Position", value: competitivePosition, meaning: sanitizeCustomerText(report.decisionIntelligenceBrief?.competitivePositionAnalysis?.summary ?? "Competitive position is limited to available comparison evidence.") },
+      { label: "Customer Confidence", value: healthStatusForScore(customerConfidence), meaning: customerConfidence === null ? "Not assessed." : "Trust, clarity, mobile experience, and action-path evidence average " + Math.round(customerConfidence) + "/100." }
+    ],
+    highestRoiAction: businessExplanationForAction(action, reason),
+    expectedResult: sanitizeCustomerText(topPriority["expectedBusinessBenefit"] ?? expectedOutcomeForAction(action)),
+    estimatedConfidence: String(confidence) + "% " + sanitizeCustomerText(report.confidenceEngine?.confidenceLevel ?? summarizeCustomerEvidenceStrength(report)),
+    implementationTime: implementationTimeForAction(action)
+  };
+}
+
+function buildCustomerExecutiveConversation(report: ReportSnapshot, contentUnavailable: boolean): Record<string, unknown> {
+  if (contentUnavailable) {
+    return {
+      title: "If I Had 15 Minutes With Your Leadership Team",
+      narrative: "I would not recommend a growth decision from this scan yet. Current website content was unavailable, so the responsible first step is to restore assessment access and establish a validated baseline.",
+      leadershipActions: ["Review website access and security settings.", "Re-run the assessment after access is restored.", "Use the completed evidence set to prioritize investment."]
+    };
+  }
+
+  const topPriority = buildCustomerTopPriority(report, false);
+  const action = sanitizeCustomerText(topPriority["recommendedPriority"] ?? report.actionFirstPanel?.fallbackAction ?? "Improve the weakest validated customer decision area.");
+  const reason = sanitizeCustomerText(topPriority["whyItMatters"] ?? report.businessRiskStatus?.primaryRiskDriver ?? "Validated evidence supports this priority.");
+  const competitorNarrative = buildCustomerCompetitorNarrative(report, false);
+  return {
+    title: "If I Had 15 Minutes With Your Leadership Team",
+    narrative: buildCustomerExecutiveOpening(report) + " The first investment should be to " + lowercaseSentenceStart(businessExplanationForAction(action, reason)) + " " + sanitizeCustomerText(competitorNarrative["summary"] ?? "Validate the result through a follow-up scan after implementation."),
+    leadershipActions: [
+      sanitizeCustomerText(topPriority["firstAction"] ?? firstActionForRecommendation(action)),
+      "Measure success through a follow-up scan and this expected outcome: " + sanitizeCustomerText(topPriority["expectedBusinessBenefit"] ?? expectedOutcomeForAction(action)),
+      "Keep lower-confidence opportunities in review until stronger evidence is available."
+    ]
+  };
+}
+
+function buildCustomerExecutiveRecommendation(report: ReportSnapshot, contentUnavailable: boolean): Record<string, unknown> {
+  if (contentUnavailable) {
+    return {
+      headline: "Establish a validated baseline before making an investment decision.",
+      recommendation: "Review website access, security, and robots settings, then re-run the assessment.",
+      rationale: "SYSTOLAB did not infer structural failure, customer loss, or revenue impact without collected page evidence.",
+      nextStep: "Restore content access and generate a complete assessment.",
+      evidenceBoundary: "No business-impact conclusion was generated from unavailable content."
+    };
+  }
+
+  const topPriority = buildCustomerTopPriority(report, false);
+  const action = sanitizeCustomerText(topPriority["recommendedPriority"] ?? report.actionFirstPanel?.fallbackAction ?? "Improve the weakest validated customer decision area.");
+  const reason = sanitizeCustomerText(topPriority["whyItMatters"] ?? report.businessRiskStatus?.primaryRiskDriver ?? "Validated evidence supports this priority.");
+  return {
+    headline: "Prioritize the strongest validated opportunity before expanding lower-confidence initiatives.",
+    recommendation: businessExplanationForAction(action, reason),
+    rationale: reason,
+    nextStep: sanitizeCustomerText(topPriority["firstAction"] ?? firstActionForRecommendation(action)) + " Re-scan after implementation to validate the result.",
+    evidenceBoundary: "Expected outcomes are directional and must be confirmed through implementation and follow-up evidence."
+  };
+}
+
+function buildCustomerClientReadyIndicator(report: ReportSnapshot, contentUnavailable: boolean): Record<string, string> {
+  if (contentUnavailable) {
+    return { status: "not_ready", label: "Not Ready", reason: "Website content was unavailable. Re-run the assessment before sharing business conclusions." };
+  }
+  const evidenceCount = report.evidenceCoverageSummary?.totalEvidenceObjects ?? report.evidenceObjects?.filter(isCustomerEvidence).length ?? 0;
+  const confidence = report.confidenceEngine?.overallConfidenceScore ?? average(report.confidenceLayer?.map((item) => item.confidenceScore) ?? []);
+  if (evidenceCount > 0 && confidence >= 70) {
+    return { status: "ready", label: "Ready to Share", reason: "The report contains validated current-scan evidence with sufficient decision confidence." };
+  }
+  return { status: "review", label: "Review Recommended", reason: "The report is evidence-bound, but its confidence or evidence coverage should be reviewed before presentation." };
+}
+
+function buildCustomerExecutiveOpening(report: ReportSnapshot): string {
+  const score = typeof report.oss?.score === "number" ? report.oss.score : null;
+  const weakest = (report.dimensions ?? []).slice().sort((a, b) => a.score - b.score)[0];
+  const weakestLabel = sanitizeCustomerText(weakest?.label ?? "customer decision support").toLowerCase();
+  if (score !== null && score >= 75) {
+    return "Your website has a strong foundation, but validated evidence shows that " + weakestLabel + " is the clearest remaining source of customer hesitation.";
+  }
+  if (score !== null && score >= 55) {
+    return "Your website provides a workable foundation, but validated gaps in " + weakestLabel + " are making customer decisions harder than they need to be.";
+  }
+  return "Validated evidence shows that " + weakestLabel + " is limiting how confidently customers can understand the offer and take the next step.";
+}
+
+function lowercaseSentenceStart(value: string): string {
+  if (!value) return value;
+  return value.charAt(0).toLowerCase() + value.slice(1);
+}
 function buildCustomerBusinessDecisionSnapshot(report: ReportSnapshot, contentUnavailable: boolean): Array<Record<string, string>> {
   if (contentUnavailable) {
     return [
@@ -748,6 +878,7 @@ function sanitizeRecommendationEngine(report: ReportSnapshot): Record<string, un
       revenueIntelligenceMapping: sanitizeCustomerText(recommendation.revenueIntelligenceMapping),
       businessExplanation: businessExplanationForAction(recommendation.action, recommendation.revenueIntelligenceMapping || recommendation.issue),
       technicalTasks: technicalTasksForAction(recommendation.action),
+      implementationTime: implementationTimeForAction(recommendation.action),
       confidenceScore: recommendation.confidenceScore,
       changeValidationPlan: sanitizeCustomerText(recommendation.changeValidationPlan)
     })),
@@ -1134,6 +1265,7 @@ function buildCustomerClientSuccessBlueprint(report: ReportSnapshot, contentUnav
     action: sanitizeCustomerText(action),
     expectedBusinessOutcome: expectedOutcomeForAction(action),
     estimatedEffort: effortForAction(action),
+    implementationTime: implementationTimeForAction(action),
     dependencies: sanitizeCustomerText(dependencies),
     successMetric: sanitizeCustomerText(successMetric),
     confidence: confidence || sanitizeCustomerText(reason)
@@ -1294,6 +1426,12 @@ function effortForAction(action: string): string {
   return "Low";
 }
 
+function implementationTimeForAction(action: string): string {
+  const effort = effortForAction(action);
+  if (effort === "Low") return "1-3 business days";
+  if (effort === "Medium") return "1-2 weeks";
+  return "2-6 weeks";
+}
 function firstActionForRecommendation(action: string): string {
   const text = action.toLowerCase();
   if (/primary cta|cta presence|call to action|contact visibility|request a quote/.test(text)) return "Make the main contact or quote action visible near the first customer decision point.";

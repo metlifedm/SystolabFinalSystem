@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from "react";
 import type { AuthIdentifierType, AuthResponse, AuthSessionSummary, AuthTokenPair, AuthUserProfile, TenantBranding } from "@systolab/shared";
-import { ArrowRight, Building2, CheckCircle2, FileText, Globe2, KeyRound, Layers, LogOut, Settings, Share2, ShieldCheck, Users } from "lucide-react";
+import { ArrowRight, Building2, CheckCircle2, FileText, Globe2, KeyRound, Layers, LogOut, Menu, Settings, Share2, ShieldCheck, Users } from "lucide-react";
 import {
   createProject,
   generateAgencyProposal,
@@ -196,6 +196,11 @@ function PortalTopNav({ auth, path, navigate, signOut }: { auth: StoredPortalAut
     { href: "/settings", label: "Settings", icon: <Settings size={16} /> }
   ];
   const publicItems: Array<[string, string]> = [["/features", "Features"], ["/pricing", "Pricing"], ["/demo", "Live Demo"], ["/docs", "Documentation"], ["/white-label", "White Label"], ["/help", "Help Center"], ["/contact", "Contact"]];
+  const selectMobileRoute = (event: React.MouseEvent<HTMLButtonElement>, href: string) => {
+    event.currentTarget.closest("details")?.removeAttribute("open");
+    navigate(href);
+  };
+
   return (
     <header className="portal-nav">
       <button className="portal-brand" onClick={() => navigate(auth ? "/dashboard" : "/")}><img src="/systolab-icon.png" alt="SYSTOLAB" /><span>SYSTOLAB</span></button>
@@ -203,6 +208,25 @@ function PortalTopNav({ auth, path, navigate, signOut }: { auth: StoredPortalAut
         ? customerItems.map((item) => <button key={item.href} className={path === item.href ? "active" : ""} onClick={() => navigate(item.href)}>{item.icon}{item.label}</button>)
         : publicItems.map(([href, label]) => <button key={href} className={path === href ? "active" : ""} onClick={() => navigate(href)}>{label}</button>)}
       </nav>
+      <details className="portal-mobile-menu">
+        <summary title="Open navigation" aria-label="Open navigation"><Menu size={19} /></summary>
+        <div>
+          {auth
+            ? customerItems.map((item) => <button key={item.href} className={path === item.href ? "active" : ""} onClick={(event) => selectMobileRoute(event, item.href)}>{item.icon}{item.label}</button>)
+            : publicItems.map(([href, label]) => <button key={href} className={path === href ? "active" : ""} onClick={(event) => selectMobileRoute(event, href)}>{label}</button>)}
+          {auth ? (
+            <>
+              <button onClick={(event) => selectMobileRoute(event, "/settings")}><Settings size={16} />{auth.user.displayName || auth.user.email || "My Account"}</button>
+              <button onClick={() => { signOut(); }}><LogOut size={16} />Sign out</button>
+            </>
+          ) : (
+            <>
+              <button onClick={(event) => selectMobileRoute(event, "/login")}>Sign in</button>
+              <button className="primary" onClick={(event) => selectMobileRoute(event, "/signup")}>Start Free</button>
+            </>
+          )}
+        </div>
+      </details>
       <div className="portal-nav-actions">
         {auth ? <><button className="portal-secondary portal-account-button" onClick={() => navigate("/settings")}>{auth.user.displayName || auth.user.email || "My Account"}</button><button className="portal-icon-button" onClick={signOut} title="Sign out" aria-label="Sign out"><LogOut size={16} /></button></> : <><button className="portal-secondary" onClick={() => navigate("/login")}>Sign in</button><button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button></>}
       </div>
@@ -214,8 +238,8 @@ function PortalTopNav({ auth, path, navigate, signOut }: { auth: StoredPortalAut
       <section className="portal-hero">
         <div className="portal-hero-copy">
           <span className="portal-eyebrow">Executive Business Decision Intelligence</span>
-          <h1>Make Better Business Decisions With Validated Website, SEO, Local, and Competitor Intelligence</h1>
-          <p>SYSTOLAB helps organizations turn website evidence, search visibility, competitor movement, revenue signals, and recommendation outcomes into clear executive decisions.</p>
+          <h1>The World's First Executive Business Decision Intelligence Platform</h1>
+          <p>Reduce customer hesitation, uncover decision friction, and focus teams on the actions with the strongest supported business impact. SYSTOLAB explains each decision through validated website, search, local, and competitor evidence.</p>
           <div className="portal-hero-actions"><button className="portal-primary" onClick={() => navigate("/signup")}>Start Free</button><button className="portal-secondary" onClick={() => navigate("/demo")}>View live demo</button></div>
           <p className="portal-muted">Includes 5 complimentary Business Intelligence Reports after account creation.</p>
         </div>
@@ -756,12 +780,54 @@ function ReportList({ reports }: { reports: PortalReportSummary[] }) {
   }
 
   if (!reports.length) return <p className="portal-muted">No reports available yet.</p>;
-  return <><div className="portal-table">{reports.map((report) => {
-    const openUrl = report.brandedReportUrl || report.reportUrl;
-    return <div key={report.snapshotId} className="portal-table-row static"><span><strong>{safeHostLabel(report.targetUrl)}</strong><small>{new Date(report.createdAt).toLocaleString()}{report.expiresAt ? " | Valid until " + new Date(report.expiresAt).toLocaleDateString() : ""}</small>{report.brandedReportUrl && <small>{report.brandedReportUrl}</small>}</span><span>{report.visualStateLabel}</span><span>{report.oss === null ? "Not scored" : report.oss + "/100"}</span><a className="portal-secondary" href={openUrl}>Open <ArrowRight size={15} /></a><button className="portal-secondary" type="button" onClick={() => void shareReport(report)}><Share2 size={15} />{sharedId === report.snapshotId ? "Shared" : "Share"}</button><button className="portal-secondary" type="button" disabled={downloadingId === report.snapshotId} onClick={() => void downloadPdf(report)}><FileText size={15} />{downloadingId === report.snapshotId ? "Preparing" : "PDF"}</button></div>;
-  })}</div>{error && <div className="portal-alert inline">{error}</div>}</>;
+  return (
+    <>
+      <div className="portal-table portal-report-list">
+        {reports.map((report) => {
+          const openUrl = report.brandedReportUrl || report.reportUrl;
+          const readiness = report.clientReady ?? {
+            status: "review" as const,
+            label: "Review Recommended" as const,
+            reason: "Review report evidence before presentation."
+          };
+          return (
+            <div key={report.snapshotId} className="portal-table-row static portal-report-row">
+              <span>
+                <strong>{safeHostLabel(report.targetUrl)}</strong>
+                <small>{new Date(report.createdAt).toLocaleString()}{report.expiresAt ? " | Valid until " + new Date(report.expiresAt).toLocaleDateString() : ""}</small>
+                {report.brandedReportUrl && <small>{report.brandedReportUrl}</small>}
+              </span>
+              <span>{report.visualStateLabel}</span>
+              <span>{report.oss === null ? "Not scored" : report.oss + "/100"}</span>
+              <a className="portal-secondary" href={openUrl}>Open <ArrowRight size={15} /></a>
+              <button className="portal-secondary" type="button" onClick={() => void shareReport(report)}><Share2 size={15} />{sharedId === report.snapshotId ? "Shared" : "Share"}</button>
+              <button className="portal-secondary" type="button" disabled={downloadingId === report.snapshotId} onClick={() => void downloadPdf(report)}><FileText size={15} />{downloadingId === report.snapshotId ? "Preparing" : "PDF"}</button>
+              <details className="portal-report-guidance">
+                <summary>
+                  <span className={"portal-client-ready " + readiness.status}>{readiness.label}</span>
+                  <strong>Agency-only client conversation</strong>
+                </summary>
+                <div className="portal-report-guidance-body">
+                  <div className="portal-client-script">
+                    <span>What to Say to Your Client</span>
+                    <p>{report.whatToSayToClient || "Open the report and review its validated findings before the client conversation."}</p>
+                  </div>
+                  <div className="portal-guidance-metrics">
+                    <div><span>Highest ROI Action</span><strong>{report.highestRoiAction || "Review the strongest validated recommendation."}</strong></div>
+                    <div><span>Implementation Time</span><strong>{report.implementationTime || "Requires scoping"}</strong></div>
+                    <div><span>Evidence Confidence</span><strong>{report.confidenceLabel}</strong></div>
+                  </div>
+                  <small>{readiness.reason}</small>
+                </div>
+              </details>
+            </div>
+          );
+        })}
+      </div>
+      {error && <div className="portal-alert inline">{error}</div>}
+    </>
+  );
 }
-
 async function copyPortalText(value: string): Promise<void> {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
