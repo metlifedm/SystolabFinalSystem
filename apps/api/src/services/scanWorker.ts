@@ -206,12 +206,28 @@ async function executeOneScanJob(job: Awaited<ReturnType<typeof markJobRunning>>
   const workspaceId = workspaceIdFor(tenantBranding.slug, report.targetUrl);
   await persistPlatformArtifacts(report, workspaceId);
 
+  const queuedUser = payload.user && typeof payload.user === "object" ? payload.user as Record<string, unknown> : undefined;
+  const queuedSession = payload.session && typeof payload.session === "object" ? payload.session as Record<string, unknown> : undefined;
   await recordUserSearchActivity({
     report,
     workspaceId,
     scanRequest: payload,
-    user: typeof payload.userId === "string" ? { userId: payload.userId } : undefined,
-    session: undefined
+    user: typeof queuedUser?.userId === "string"
+      ? {
+          userId: queuedUser.userId,
+          email: typeof queuedUser.email === "string" ? queuedUser.email : undefined,
+          phone: typeof queuedUser.phone === "string" ? queuedUser.phone : undefined,
+          displayName: typeof queuedUser.displayName === "string" ? queuedUser.displayName : undefined,
+          providers: Array.isArray(queuedUser.providers) ? queuedUser.providers.filter((item): item is string => typeof item === "string") : undefined
+        }
+      : typeof payload.userId === "string" ? { userId: payload.userId } : undefined,
+    session: typeof queuedSession?.sessionId === "string" && typeof queuedSession.deviceId === "string"
+      ? {
+          sessionId: queuedSession.sessionId,
+          deviceId: queuedSession.deviceId,
+          provider: typeof queuedSession.provider === "string" ? queuedSession.provider : "unknown"
+        }
+      : undefined
   });
 
   // Upsert workspace membership if we have a userId and a real tenant

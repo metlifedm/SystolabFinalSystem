@@ -43,7 +43,9 @@ export interface AdminLoginResponse {
 export interface AdminAuthStatusResponse {
   ownerExists: boolean;
   setupRequired: boolean;
-  storageMode: "memory" | "persistent";
+  storageMode: "mongodb" | "development_file" | "memory";
+  durable: boolean;
+  databaseConnected: boolean;
 }
 
 export type PortalTenantRole = "owner" | "member" | "guest";
@@ -452,7 +454,7 @@ export async function adminLogin(email: string, password: string): Promise<Admin
   return postJson("/api/admin/auth/login", { email, password });
 }
 export async function adminAuthStatus(): Promise<AdminAuthStatusResponse> {
-  const response = await fetch(`${API_URL}/api/admin/auth/status`);
+  const response = await fetch(`${API_URL}/api/admin/auth/status`, { cache: "no-store" });
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
@@ -482,9 +484,14 @@ export async function adminBootstrap(ownerKey: string, email: string, password: 
 
 export async function internalPlatformGet<T>(path: string, session: AdminSession): Promise<T> {
   const response = await fetch(`${API_URL}/api/internal/platform${path}`, {
-    headers: adminBearerHeaders(session)
+    headers: adminBearerHeaders(session),
+    cache: "no-store"
   });
-  if (!response.ok) throw new Error(await readError(response));
+  if (!response.ok) {
+    const error = new Error(await readError(response)) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
 

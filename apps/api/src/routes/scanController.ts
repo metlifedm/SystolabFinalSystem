@@ -25,7 +25,19 @@ export async function createScan(req: Request, res: Response): Promise<void> {
       monthlyLeadVolume: scanRequest.monthlyLeadVolume,
       industryType: scanRequest.industryType,
       clientInformation: scanRequest.clientInformation,
-      userId: req.auth?.user.userId ?? undefined
+      userId: req.auth?.user.userId ?? undefined,
+      user: req.auth ? {
+        userId: req.auth.user.userId,
+        email: req.auth.user.email,
+        phone: req.auth.user.phone,
+        displayName: req.auth.user.displayName,
+        providers: req.auth.user.providers
+      } : undefined,
+      session: req.auth ? {
+        sessionId: req.auth.session.sessionId,
+        deviceId: req.auth.session.deviceId,
+        provider: req.auth.session.provider
+      } : undefined
     }
   });
 

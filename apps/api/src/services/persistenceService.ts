@@ -2,12 +2,16 @@ import type { ReportSnapshot } from "@systolab/shared";
 import { BenchmarkRecord } from "../models/BenchmarkRecord.js";
 import { Snapshot } from "../models/Snapshot.js";
 import { isMongoConnected } from "../db/mongoose.js";
+import { getDevelopmentSnapshots, saveDevelopmentSnapshot } from "./developmentPersistenceService.js";
 
-const memorySnapshots = new Map<string, ReportSnapshot>();
+const memorySnapshots = new Map<string, ReportSnapshot>(
+  getDevelopmentSnapshots().map((report) => [report.snapshotId, report])
+);
 
 export async function saveSnapshot(report: ReportSnapshot): Promise<void> {
   if (!isMongoConnected()) {
     memorySnapshots.set(report.snapshotId, report);
+    saveDevelopmentSnapshot(report);
     return;
   }
 
@@ -30,6 +34,7 @@ export async function findSnapshot(snapshotId: string): Promise<ReportSnapshot |
   const snapshot = await Snapshot.findOne({ snapshotId });
   return snapshot?.report ?? null;
 }
+
 
 export async function findLatestSnapshotForTarget(targetUrl: string, tenantSlug: string): Promise<ReportSnapshot | null> {
   const history = await findSnapshotHistoryForTarget(targetUrl, tenantSlug, 1);

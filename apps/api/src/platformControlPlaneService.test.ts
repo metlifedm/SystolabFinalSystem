@@ -1,5 +1,7 @@
+import type { ReportSnapshot } from "@systolab/shared";
 import { describe, expect, it } from "vitest";
 import {
+  buildLiveWarehouseSummary,
   enqueuePlatformJob,
   evaluateFeatureFlag,
   evaluateManagedWhiteLabelAccess,
@@ -52,6 +54,34 @@ describe("SYSTOLAB platform control plane", () => {
       keyHashPrefix: "abc123"
     });
     expect((await listApiGovernanceRecords()).some((item) => item.recordType === "usage_audit")).toBe(true);
+  });
+
+  it("builds executive counters from actual snapshots instead of missing snapshot-row fields", () => {
+    const report = {
+      snapshotId: "snap_metrics_001",
+      createdAt: "2026-07-14T10:00:00.000Z",
+      status: "completed",
+      tenantBranding: { slug: "systolab" },
+      oss: { score: 72 },
+      evidenceObjects: [{}, {}],
+      recommendationEngine: { recommendations: [{}, {}, {}] },
+      alertEngine: { alerts: [{}] },
+      recommendationOutcomeLoop: { validations: [{}, {}] },
+      revenueIntelligence: { revenueOpportunityRange: { high: 14 } }
+    } as unknown as ReportSnapshot;
+
+    const summary = buildLiveWarehouseSummary([report]);
+    expect(summary?.metrics).toMatchObject({
+      scans: 1,
+      completedScans: 1,
+      averageOss: 72,
+      evidenceObjects: 2,
+      recommendations: 3,
+      alerts: 1,
+      estimatedRevenueHighUnits: 14,
+      validationRows: 2
+    });
+    expect(buildLiveWarehouseSummary([])).toBeNull();
   });
 
   it("keeps white-label branding managed under SYSTOLAB platform ownership", async () => {

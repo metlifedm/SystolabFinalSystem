@@ -1,6 +1,5 @@
 import { createHash, createHmac, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
-import { dirname, resolve } from "node:path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readJsonFile, resolveLegacyRuntimeFilePath, resolveRuntimeFilePath, writeJsonFile } from "./runtimeFileStore.js";
 import type { Types } from "mongoose";
 import { env } from "../config/env.js";
 import { AdminAuditLog, type AdminAuditLogDocument } from "../models/AdminAuditLog.js";
@@ -85,36 +84,43 @@ function memoryAdminPersistenceEnabled(): boolean {
   return env.memoryStore && env.nodeEnv !== "test";
 }
 
+export type AdminAuthStorageMode = "mongodb" | "development_file" | "memory";
+
+export function getAdminAuthStorageMode(): AdminAuthStorageMode {
+  if (isMongoConnected()) return "mongodb";
+  return memoryAdminPersistenceEnabled() ? "development_file" : "memory";
+}
+
 function ensureMemoryAdminsLoaded(): void {
   if (memoryAdminsLoaded) return;
   memoryAdminsLoaded = true;
   if (!memoryAdminPersistenceEnabled()) return;
-  const filePath = resolve(process.cwd(), env.adminMemoryStoreFile);
-  if (!existsSync(filePath)) return;
-  try {
-    const payload = JSON.parse(readFileSync(filePath, "utf8")) as { users?: PersistedMemAdminUser[] };
-    for (const item of payload.users ?? []) {
-      if (!item.adminUserId || !item.email || !item.passwordHash || (item.role !== "owner" && item.role !== "manager")) continue;
-      const user = makeMemAdminUser({ adminUserId: item.adminUserId, email: item.email.toLowerCase().trim(), passwordHash: item.passwordHash, role: item.role, createdBy: item.createdBy || "memory-store" });
-      user.isActive = item.isActive !== false;
-      user.loginFailureCount = Number.isFinite(item.loginFailureCount) ? item.loginFailureCount : 0;
-      user.createdAt = parsePersistedDate(item.createdAt) ?? new Date();
-      user.updatedAt = parsePersistedDate(item.updatedAt) ?? user.createdAt;
-      user.lastLoginAt = parsePersistedDate(item.lastLoginAt);
-      user.lockedUntil = parsePersistedDate(item.lockedUntil);
-      _memAdminUsers.set(user.adminUserId, user);
-      _memAdminByEmail.set(user.email, user.adminUserId);
-    }
-  } catch {
-    // A corrupt local dev auth file should not prevent the API from starting.
+  const stablePath = resolveRuntimeFilePath(env.adminMemoryStoreFile);
+  const legacyPath = resolveLegacyRuntimeFilePath(env.adminMemoryStoreFile);
+  const stablePayload = readJsonFile<{ users?: PersistedMemAdminUser[] }>(stablePath);
+  const legacyPayload = stablePayload || legacyPath === stablePath
+    ? null
+    : readJsonFile<{ users?: PersistedMemAdminUser[] }>(legacyPath);
+  const payload = stablePayload ?? legacyPayload;
+  if (!payload) return;
+  for (const item of payload.users ?? []) {
+    if (!item.adminUserId || !item.email || !item.passwordHash || (item.role !== "owner" && item.role !== "manager")) continue;
+    const user = makeMemAdminUser({ adminUserId: item.adminUserId, email: item.email.toLowerCase().trim(), passwordHash: item.passwordHash, role: item.role, createdBy: item.createdBy || "memory-store" });
+    user.isActive = item.isActive !== false;
+    user.loginFailureCount = Number.isFinite(item.loginFailureCount) ? item.loginFailureCount : 0;
+    user.createdAt = parsePersistedDate(item.createdAt) ?? new Date();
+    user.updatedAt = parsePersistedDate(item.updatedAt) ?? user.createdAt;
+    user.lastLoginAt = parsePersistedDate(item.lastLoginAt);
+    user.lockedUntil = parsePersistedDate(item.lockedUntil);
+    _memAdminUsers.set(user.adminUserId, user);
+    _memAdminByEmail.set(user.email, user.adminUserId);
   }
+  if (!stablePayload && legacyPayload) persistMemoryAdmins();
 }
 
 function persistMemoryAdmins(): void {
   if (!memoryAdminPersistenceEnabled()) return;
-  const filePath = resolve(process.cwd(), env.adminMemoryStoreFile);
   try {
-    mkdirSync(dirname(filePath), { recursive: true });
     const users: PersistedMemAdminUser[] = [..._memAdminUsers.values()].map((user) => ({
       adminUserId: user.adminUserId,
       email: user.email,
@@ -128,9 +134,9 @@ function persistMemoryAdmins(): void {
       createdAt: user.createdAt.toISOString(),
       updatedAt: user.updatedAt.toISOString()
     }));
-    writeFileSync(filePath, JSON.stringify({ users }, null, 2));
+    writeJsonFile(resolveRuntimeFilePath(env.adminMemoryStoreFile), { users });
   } catch {
-    // Local dev persistence must never block admin auth operations.
+    // Local development persistence must never block admin auth operations.
   }
 }
 
@@ -276,16 +282,31 @@ export async function bootstrapOwner(
   ipHash = "internal",
   userAgent = "internal"
 ): Promise<AdminUserDocument> {
+  if (!constantTimeEquals(ownerKey, env.ownerAdminKey)) {
+    await writeAudit({ adminEmail: email, role: "bootstrap", action: "admin.bootstrap", success: false, ipHash, userAgent, metadata: { reason: "invalid_owner_key" } });
+    throw new AdminAuthError("Invalid bootstrap key.", 403);
+  }
+
   if (!isMongoConnected()) {
     ensureMemoryAdminsLoaded();
-    const existing = [..._memAdminUsers.values()].find((u) => u.role === "owner" && u.isActive);
-    if (existing) return existing as unknown as AdminUserDocument;
+    const existing = [..._memAdminUsers.values()].find((user) => user.role === "owner" && user.isActive);
+    if (existing) {
+      const sameCredentials = existing.email === email.toLowerCase().trim() && verifyPassword(password, existing.passwordHash);
+      if (sameCredentials) return existing as unknown as AdminUserDocument;
+      throw new AdminAuthError("Bootstrap unavailable: an active owner account already exists. Sign in with the existing owner credentials.", 409);
+    }
     validateEmail(email);
     validatePassword(password);
+    if (_memAdminByEmail.has(email.toLowerCase().trim())) {
+      throw new AdminAuthError("Email already registered.", 409);
+    }
     const adminUserId = makeId("adm");
     const user = makeMemAdminUser({
-      adminUserId, email: email.toLowerCase().trim(),
-      passwordHash: hashPassword(password), role: "owner", createdBy: "bootstrap"
+      adminUserId,
+      email: email.toLowerCase().trim(),
+      passwordHash: hashPassword(password),
+      role: "owner",
+      createdBy: "bootstrap"
     });
     _memAdminUsers.set(adminUserId, user);
     _memAdminByEmail.set(user.email, adminUserId);
@@ -293,13 +314,9 @@ export async function bootstrapOwner(
     return user as unknown as AdminUserDocument;
   }
 
-  if (!constantTimeEquals(ownerKey, env.ownerAdminKey)) {
-    await writeAudit({ adminEmail: email, role: "bootstrap", action: "admin.bootstrap", success: false, ipHash, userAgent, metadata: { reason: "invalid_owner_key" } });
-    throw new AdminAuthError("Invalid bootstrap key.", 403);
-  }
   const ownerCount = await AdminUser.countDocuments({ role: "owner", isActive: true });
   if (ownerCount > 0) {
-    throw new AdminAuthError("Bootstrap unavailable: an active owner account already exists.", 409);
+    throw new AdminAuthError("Bootstrap unavailable: an active owner account already exists. Sign in with the existing owner credentials.", 409);
   }
   validateEmail(email);
   validatePassword(password);
@@ -412,6 +429,11 @@ export async function deactivateAdminUser(
 // ── Sessions ───────────────────────────────────────────────────────────────────
 
 export async function listAdminSessions(adminUserId: string): Promise<AdminSessionDocument[]> {
+  if (!isMongoConnected()) {
+    return [..._memAdminSessions.values()]
+      .filter((session) => session.adminUserId === adminUserId && !session.revokedAt && session.expiresAt > new Date())
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()) as unknown as AdminSessionDocument[];
+  }
   const user = await AdminUser.findOne({ adminUserId });
   if (!user) return [];
   return AdminSession.find({ adminUserId: user._id, revokedAt: { $exists: false }, expiresAt: { $gt: new Date() } }).sort({ createdAt: -1 });
@@ -425,6 +447,12 @@ export async function revokeAdminSession(
   ipHash: string,
   userAgent: string
 ): Promise<void> {
+  if (!isMongoConnected()) {
+    const session = [..._memAdminSessions.values()].find((item) => item.sessionId === sessionId && item.adminUserId === actorAdminUserId);
+    if (!session) throw new AdminAuthError("Session not found.", 404);
+    session.revokedAt = new Date();
+    return;
+  }
   const user = await AdminUser.findOne({ adminUserId: actorAdminUserId });
   if (!user) throw new AdminAuthError("Admin user not found.", 404);
   const session = await AdminSession.findOne({ sessionId, adminUserId: user._id });
@@ -437,8 +465,10 @@ export async function revokeAdminSession(
 // ── Audit logs ─────────────────────────────────────────────────────────────────
 
 export async function listAdminAuditLogs(limit = 100): Promise<AdminAuditLogDocument[]> {
+  if (!isMongoConnected()) return [];
   return AdminAuditLog.find({}).sort({ createdAt: -1 }).limit(limit);
 }
+
 
 // ── Internal helpers ───────────────────────────────────────────────────────────
 

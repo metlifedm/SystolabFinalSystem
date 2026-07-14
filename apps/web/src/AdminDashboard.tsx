@@ -198,7 +198,8 @@ export function AdminDashboard() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [setupRequired, setSetupRequired] = useState(false);
-  const [storageMode, setStorageMode] = useState<"memory" | "persistent" | "unknown">("unknown");
+  const [showSetup, setShowSetup] = useState(false);
+  const [storageMode, setStorageMode] = useState<"mongodb" | "development_file" | "memory" | "unknown">("unknown");
   const [ownerKey, setOwnerKey] = useState("");
   const [bootstrapEmail, setBootstrapEmail] = useState("");
   const [bootstrapPassword, setBootstrapPassword] = useState("");
@@ -218,6 +219,7 @@ export function AdminDashboard() {
       const result = await adminAuthStatus();
       setSetupRequired(result.setupRequired);
       setStorageMode(result.storageMode);
+      if (!result.setupRequired) setShowSetup(false);
       return result;
     } catch {
       return null;
@@ -283,6 +285,7 @@ export function AdminDashboard() {
       setSession(newSession);
       localStorage.setItem("systolab.admin", JSON.stringify(newSession));
       setSetupRequired(false);
+      setShowSetup(false);
       setOwnerKey("");
       setBootstrapPassword("");
       setBootstrapConfirm("");
@@ -303,7 +306,11 @@ export function AdminDashboard() {
       setStatus(`Updated ${new Date().toLocaleTimeString()}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to load admin dashboard");
-      if (!silent) { setSession(null); localStorage.removeItem("systolab.admin"); }
+      if ((err as Error & { status?: number }).status === 401) {
+        setSession(null);
+        setBundle(EMPTY_BUNDLE);
+        localStorage.removeItem("systolab.admin");
+      }
     } finally {
       if (!silent) setLoading(false);
     }
@@ -353,10 +360,44 @@ export function AdminDashboard() {
             <p className="admin-login-copy">Owner and Manager access for platform observability, governance, security, intelligence quality, and autonomous module discovery.</p>
           </div>
           <div className="admin-login-form">
-            {setupRequired ? (
+            {storageMode !== "unknown" && (
+              <div className="admin-status">
+                {storageMode === "mongodb"
+                  ? "MongoDB persistence connected."
+                  : storageMode === "development_file"
+                    ? "Durable local development storage is active. MongoDB remains required for production."
+                    : "Volatile test storage is active; records will not survive an API restart."}
+              </div>
+            )}
+            {!showSetup ? (
+              <>
+                {setupRequired && (
+                  <div className="admin-status">
+                    No active owner account was found. You can still sign in below, or run first-owner setup.
+                  </div>
+                )}
+                <label className="field">
+                  <span>Admin email</span>
+                  <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@example.com" autoComplete="username" />
+                </label>
+                <label className="field">
+                  <span>Password</span>
+                  <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="************" autoComplete="current-password" onKeyDown={(event) => { if (event.key === "Enter") void handleLogin(); }} />
+                </label>
+                <button className="primary-button" type="button" disabled={!email || !password || loading} onClick={() => void handleLogin()}>
+                  <KeyRound size={17} />
+                  {loading ? "Signing in..." : "Sign In"}
+                </button>
+                {setupRequired && (
+                  <button className="secondary-button" type="button" onClick={() => { setError(""); setShowSetup(true); }}>
+                    Set Up First Owner
+                  </button>
+                )}
+              </>
+            ) : (
               <>
                 <div className="admin-status">
-                  First owner setup is required{storageMode === "memory" ? " because the API is using the in-memory development store." : "."}
+                  First-owner setup is available only while no active owner account exists.
                 </div>
                 <label className="field">
                   <span>Owner bootstrap key</span>
@@ -372,32 +413,14 @@ export function AdminDashboard() {
                 </label>
                 <label className="field">
                   <span>Confirm password</span>
-                  <input type="password" value={bootstrapConfirm} onChange={(event) => setBootstrapConfirm(event.target.value)} placeholder="Repeat password" autoComplete="new-password" onKeyDown={(e) => { if (e.key === "Enter") void handleBootstrapOwner(); }} />
+                  <input type="password" value={bootstrapConfirm} onChange={(event) => setBootstrapConfirm(event.target.value)} placeholder="Repeat password" autoComplete="new-password" onKeyDown={(event) => { if (event.key === "Enter") void handleBootstrapOwner(); }} />
                 </label>
                 <button className="primary-button" type="button" disabled={!ownerKey || !bootstrapEmail || !bootstrapPassword || !bootstrapConfirm || loading} onClick={() => void handleBootstrapOwner()}>
                   <KeyRound size={17} />
                   {loading ? "Creating owner..." : "Create Owner & Sign In"}
                 </button>
-                <button className="secondary-button" type="button" onClick={() => { setError(""); setSetupRequired(false); void refreshAdminAuthStatus(); }}>
-                  I already have an owner account
-                </button>
-              </>
-            ) : (
-              <>
-                <label className="field">
-                  <span>Admin email</span>
-                  <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="admin@example.com" autoComplete="username" />
-                </label>
-                <label className="field">
-                  <span>Password</span>
-                  <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="************" autoComplete="current-password" onKeyDown={(e) => { if (e.key === "Enter") void handleLogin(); }} />
-                </label>
-                <button className="primary-button" type="button" disabled={!email || !password || loading} onClick={() => void handleLogin()}>
-                  <KeyRound size={17} />
-                  {loading ? "Signing in..." : "Sign In"}
-                </button>
-                <button className="secondary-button" type="button" onClick={() => { setError(""); setSetupRequired(true); }}>
-                  Create first owner account
+                <button className="secondary-button" type="button" onClick={() => { setError(""); setShowSetup(false); }}>
+                  Back to Admin Sign In
                 </button>
               </>
             )}

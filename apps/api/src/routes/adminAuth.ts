@@ -11,6 +11,7 @@ import {
   bootstrapOwner,
   createAdminUser,
   deactivateAdminUser,
+  getAdminAuthStorageMode,
   listAdminAuditLogs,
   listAdminSessions,
   listAdminUsers,
@@ -34,7 +35,15 @@ const loginLimiter = rateLimit({
 adminAuthRouter.get("/status", async (_req: Request, res: Response) => {
   try {
     const ownerExists = await adminOwnerExists();
-    res.json({ ownerExists, setupRequired: !ownerExists, storageMode: env.memoryStore ? "memory" : "persistent" });
+    const storageMode = getAdminAuthStorageMode();
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      ownerExists,
+      setupRequired: !ownerExists,
+      storageMode,
+      durable: storageMode !== "memory",
+      databaseConnected: storageMode === "mongodb"
+    });
   } catch (error) {
     handleError(error, res);
   }

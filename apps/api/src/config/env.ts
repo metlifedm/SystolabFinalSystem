@@ -138,6 +138,8 @@ export const env = {
   managerAdminKey,
   memoryStore,
   adminMemoryStoreFile: readString("SYSTOLAB_ADMIN_MEMORY_STORE_FILE") ?? "tmp/systolab-admin-users.json",
+  developmentStoreFile: readString("SYSTOLAB_DEVELOPMENT_STORE_FILE") ?? "tmp/systolab-development-store.json",
+  developmentStoreMaxRecords: readNumber("SYSTOLAB_DEVELOPMENT_STORE_MAX_RECORDS", 500),
   crawlTimeoutMs: readNumber("SYSTOLAB_CRAWL_TIMEOUT_MS", 12000),
   crawlMaxBytes: readNumber("SYSTOLAB_CRAWL_MAX_BYTES", 1_500_000),
   crawlMaxRedirects: readNumber("SYSTOLAB_CRAWL_MAX_REDIRECTS", 5),

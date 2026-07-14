@@ -23,6 +23,11 @@ import { makeId, sha256 } from "../utils/crypto.js";
 import { publishIntelligenceEvent } from "./intelligenceEventBus.js";
 import { getCounterValue, histogramPercentile, histogramSummary, sumCounterValues } from "./metricsService.js";
 import { getAlertSummary, resolveAlertByKey, triggerAlert } from "./alertService.js";
+import {
+  getDevelopmentSearchActivities,
+  getDevelopmentSnapshots,
+  saveDevelopmentSearchActivity
+} from "./developmentPersistenceService.js";
 
 type PlainRecord = Record<string, unknown>;
 type ModuleState = "active" | "inactive" | "disabled";
@@ -153,9 +158,11 @@ const memoryControls: OperationalControlView[] = [];
 const memoryGraphRecords: PlainRecord[] = [];
 const memoryFeatureFlags = new Map<string, PlainRecord>();
 const memoryLineage: PlainRecord[] = [];
-const memoryReports: Array<{ workspaceId: string; report: ReportSnapshot }> = [];
-const memoryUserSearchActivities: PlainRecord[] = [];
+const memoryReports: Array<{ workspaceId: string; report: ReportSnapshot }> = getDevelopmentSnapshots()
+  .map((report) => ({ workspaceId: `ws_${sha256(`${report.tenantBranding.slug}:${report.targetUrl.toLowerCase()}`).slice(0, 20)}`, report }));
+const memoryUserSearchActivities: PlainRecord[] = getDevelopmentSearchActivities();
 const memoryManagedWhiteLabelWorkspaces = new Map<string, ManagedWhiteLabelWorkspaceView>();
+let memoryArtifactsHydration: Promise<void> | null = null;
 
 const DEFAULT_MODULES: ModuleRegistryView[] = [
   module("module-registry", "Module Registry System", [], ["platform:modules:manage"]),
@@ -524,7 +531,9 @@ export async function listApiGovernanceRecords(limit = 100): Promise<ApiGovernan
 }
 
 export async function persistPlatformArtifacts(report: ReportSnapshot, workspaceId: string): Promise<void> {
-  memoryReports.push({ workspaceId, report });
+  if (!memoryReports.some((item) => item.report.snapshotId === report.snapshotId)) {
+    memoryReports.push({ workspaceId, report });
+  }
   const controls = [
     buildIntelligenceValidation(report, workspaceId),
     buildScanSlo(report, workspaceId),
@@ -572,7 +581,7 @@ export async function recordUserSearchActivity(input: {
   const report = input.report;
   const primaryConfidence = report.confidenceLayer[0]?.confidenceScore ?? report.revenueIntelligence?.confidenceScore ?? 0;
   const record = {
-    activityId: makeId("usrscan"),
+    activityId: `usrscan_${sha256(`${report.snapshotId}:${input.user?.userId ?? "anonymous"}`).slice(0, 24)}`,
     userId: input.user?.userId,
     userEmail: input.user?.email,
     userPhone: input.user?.phone,
@@ -599,9 +608,16 @@ export async function recordUserSearchActivity(input: {
   };
 
   if (!isMongoConnected()) {
-    memoryUserSearchActivities.push(record);
+    if (!memoryUserSearchActivities.some((item) => item.activityId === record.activityId)) {
+      memoryUserSearchActivities.push(record);
+      saveDevelopmentSearchActivity(record);
+    }
   } else {
-    await UserSearchActivity.create(record).catch(() => undefined);
+    await UserSearchActivity.findOneAndUpdate(
+      { activityId: record.activityId },
+      { $setOnInsert: record },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
   }
 
   await publishIntelligenceEvent({
@@ -783,9 +799,58 @@ export async function materializeAnalyticsWarehouse(input: { grain?: "daily" | "
 }
 
 export async function listWarehouseRecords(limit = 50): Promise<WarehouseView[]> {
-  if (!isMongoConnected()) return memoryWarehouse.slice(-limit).reverse();
-  const rows = await AnalyticsWarehouseRecord.find({}).sort({ createdAt: -1 }).limit(limit).lean();
-  return rows.map((row) => row as unknown as WarehouseView);
+  if (!isMongoConnected()) {
+    await ensureMemoryArtifactsHydrated();
+    const uniqueReports = [...new Map(memoryReports.map((item) => [item.report.snapshotId, item.report])).values()];
+    const summary = buildLiveWarehouseSummary(uniqueReports);
+    const records = memoryWarehouse.slice().reverse().filter((item) => item.recordId !== summary?.recordId);
+    return summary ? [summary, ...records].slice(0, limit) : records.slice(0, limit);
+  }
+
+  const [rows, summaryRows] = await Promise.all([
+    AnalyticsWarehouseRecord.find({}).sort({ createdAt: -1 }).limit(limit).lean(),
+    Snapshot.aggregate([
+      {
+        $group: {
+          _id: null,
+          scans: { $sum: 1 },
+          completedScans: { $sum: { $cond: [{ $eq: ["$status", "completed"] }, 1, 0] } },
+          averageOss: { $avg: "$report.oss.score" },
+          evidenceObjects: { $sum: { $size: { $ifNull: ["$report.evidenceObjects", []] } } },
+          recommendations: { $sum: { $size: { $ifNull: ["$report.recommendationEngine.recommendations", []] } } },
+          alerts: { $sum: { $size: { $ifNull: ["$report.alertEngine.alerts", []] } } },
+          estimatedRevenueHighUnits: { $sum: { $ifNull: ["$report.revenueIntelligence.revenueOpportunityRange.high", 0] } },
+          validationRows: { $sum: { $size: { $ifNull: ["$report.recommendationOutcomeLoop.validations", []] } } },
+          periodStartAt: { $min: "$createdAt" },
+          periodEndAt: { $max: "$createdAt" }
+        }
+      }
+    ])
+  ]);
+  const aggregate = summaryRows[0] as PlainRecord | undefined;
+  const summary: WarehouseView | null = aggregate
+    ? {
+        recordId: "wh_live_all",
+        grain: "custom",
+        periodStartAt: aggregate.periodStartAt as Date,
+        periodEndAt: aggregate.periodEndAt as Date,
+        dimensions: { scope: "all_time", source: "operational_snapshots" },
+        metrics: {
+          scans: aggregate.scans,
+          completedScans: aggregate.completedScans,
+          averageOss: aggregate.averageOss,
+          evidenceObjects: aggregate.evidenceObjects,
+          recommendations: aggregate.recommendations,
+          alerts: aggregate.alerts,
+          estimatedRevenueHighUnits: aggregate.estimatedRevenueHighUnits,
+          validationRows: aggregate.validationRows
+        },
+        sourceIds: [],
+        createdAt: new Date()
+      }
+    : null;
+  const records = rows.map((row) => row as unknown as WarehouseView).filter((item) => item.recordId !== summary?.recordId);
+  return summary ? [summary, ...records].slice(0, limit) : records.slice(0, limit);
 }
 
 export async function getPlatformOverview(): Promise<PlainRecord> {
@@ -825,17 +890,38 @@ export async function getPlatformOverview(): Promise<PlainRecord> {
 
 export async function getUserJourneyIntelligence(limit = 100): Promise<PlainRecord> {
   if (!isMongoConnected()) {
+    const searches = await listUserSearchActivities(Math.max(limit, 250));
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const identified = searches.filter((item) => item.userId || item.userEmail || item.userPhone);
+    const userKey = (item: PlainRecord) => String(item.userId ?? item.userEmail ?? item.userPhone);
+    const uniqueUsers = new Set(identified.map(userKey));
+    const recentUsers = new Set(identified.filter((item) => new Date(String(item.createdAt ?? 0)).getTime() >= sevenDaysAgo).map(userKey));
+    const activeSessions = new Set(searches.flatMap((item) => typeof item.sessionId === "string" ? [item.sessionId] : []));
+    const loginMethods = searches.reduce<Record<string, number>>((counts, item) => {
+      const request = (item.request as PlainRecord | undefined) ?? {};
+      const provider = typeof request.authProvider === "string" ? request.authProvider : "unknown";
+      counts[provider] = (counts[provider] ?? 0) + 1;
+      return counts;
+    }, {});
+    const searchesByUser = groupBy(identified, userKey);
+    const returningUsers = Object.values(searchesByUser).filter((items) => items.length > 1).length;
     return {
       generatedAt: new Date().toISOString(),
-      registeredUsers: 0,
-      activeUsers: 0,
-      activeSessions: 0,
-      newUsers7d: 0,
-      loginMethods: {},
-      timeline: [],
-      retentionSignals: ["Memory mode has no persisted auth users yet."],
+      registeredUsers: uniqueUsers.size,
+      activeUsers: recentUsers.size,
+      activeSessions: activeSessions.size,
+      newUsers7d: recentUsers.size,
+      loginMethods,
+      timeline: searches.slice(0, limit).map((item) => ({
+        eventType: "scan.completed",
+        identifier: item.userEmail ?? item.userPhone ?? item.userName ?? "Anonymous visitor",
+        success: true,
+        targetUrl: item.targetUrl,
+        createdAt: item.createdAt
+      })),
+      retentionSignals: returningUsers > 0 ? [`${returningUsers} identified users completed more than one search.`] : [],
       churnRisks: [],
-      conversionDrivers: ["Scan and report events are captured through first-party Edit Intelligence."]
+      conversionDrivers: searches.length > 0 ? [`${searches.length} completed searches are retained in the local development store.`] : []
     };
   }
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -1015,19 +1101,28 @@ export async function listWorkspaceIntelligence(): Promise<PlainRecord[]> {
 }
 
 export async function listEvidenceRepository(limit = 100): Promise<PlainRecord[]> {
-  if (!isMongoConnected()) return memoryEvidenceArtifacts.slice(-limit).reverse();
+  if (!isMongoConnected()) {
+    await ensureMemoryArtifactsHydrated();
+    return memoryEvidenceArtifacts.slice(-limit).reverse();
+  }
   const rows = await EvidenceArtifact.find({}).sort({ createdAt: -1 }).limit(limit).lean();
   return rows as unknown as PlainRecord[];
 }
 
 export async function listArtifactVersions(limit = 100): Promise<PlainRecord[]> {
-  if (!isMongoConnected()) return memoryArtifactVersions.slice(-limit).reverse();
+  if (!isMongoConnected()) {
+    await ensureMemoryArtifactsHydrated();
+    return memoryArtifactVersions.slice(-limit).reverse();
+  }
   const rows = await ArtifactVersionRecord.find({}).sort({ createdAt: -1 }).limit(limit).lean();
   return rows as unknown as PlainRecord[];
 }
 
 export async function listControls(limit = 100, controlType?: OperationalControlView["controlType"]): Promise<OperationalControlView[]> {
-  if (!isMongoConnected()) return memoryControls.filter((item) => !controlType || item.controlType === controlType).slice(-limit).reverse();
+  if (!isMongoConnected()) {
+    await ensureMemoryArtifactsHydrated();
+    return memoryControls.filter((item) => !controlType || item.controlType === controlType).slice(-limit).reverse();
+  }
   const query = controlType ? { controlType } : {};
   const rows = await OperationalControlRecord.find(query).sort({ createdAt: -1 }).limit(limit).lean();
   return rows.map((row) => row as unknown as OperationalControlView);
@@ -1347,13 +1442,19 @@ export async function getRealtimeRefreshState(): Promise<OperationalControlView>
 }
 
 export async function listGraphIntelligence(limit = 100): Promise<PlainRecord[]> {
-  if (!isMongoConnected()) return memoryGraphRecords.slice(-limit).reverse();
+  if (!isMongoConnected()) {
+    await ensureMemoryArtifactsHydrated();
+    return memoryGraphRecords.slice(-limit).reverse();
+  }
   const rows = await GraphIntelligenceRecord.find({}).sort({ createdAt: -1 }).limit(limit).lean();
   return rows as unknown as PlainRecord[];
 }
 
 export async function listLineage(limit = 100): Promise<PlainRecord[]> {
-  if (!isMongoConnected()) return memoryLineage.slice(-limit).reverse();
+  if (!isMongoConnected()) {
+    await ensureMemoryArtifactsHydrated();
+    return memoryLineage.slice(-limit).reverse();
+  }
   const rows = await IntelligenceLineageRecord.find({}).sort({ createdAt: -1 }).limit(limit).lean();
   return rows as unknown as PlainRecord[];
 }
@@ -1933,6 +2034,39 @@ async function executePlatformJob(job: PlatformJobView): Promise<PlainRecord> {
   return { status: "acknowledged", note: "No deterministic handler was required for this job type." };
 }
 
+async function ensureMemoryArtifactsHydrated(): Promise<void> {
+  if (isMongoConnected()) return;
+  if (!memoryArtifactsHydration) {
+    memoryArtifactsHydration = (async () => {
+      const hydratedSnapshotIds = new Set(memoryWarehouse.flatMap((item) => item.sourceIds));
+      for (const { report, workspaceId } of memoryReports) {
+        if (hydratedSnapshotIds.has(report.snapshotId)) continue;
+        const controls = [
+          buildIntelligenceValidation(report, workspaceId),
+          buildScanSlo(report, workspaceId),
+          buildGovernanceContract(report, workspaceId),
+          buildDataQuality(report, workspaceId),
+          buildCostIntelligence(report, workspaceId),
+          buildRealtimeRefresh(report, workspaceId)
+        ];
+        await Promise.all([
+          saveEvidenceArtifacts(report, workspaceId),
+          saveArtifactVersions(report, workspaceId),
+          saveLineage(report, workspaceId),
+          saveGraphIntelligence(report, workspaceId),
+          saveWarehouseRecord(buildSnapshotWarehouseRecord(report, workspaceId)),
+          ...controls.map(saveControl)
+        ]);
+        hydratedSnapshotIds.add(report.snapshotId);
+      }
+    })().catch((error) => {
+      memoryArtifactsHydration = null;
+      throw error;
+    });
+  }
+  await memoryArtifactsHydration;
+}
+
 async function saveWarehouseRecord(record: WarehouseView): Promise<void> {
   if (!isMongoConnected()) {
     memoryWarehouse.push(record);
@@ -2091,6 +2225,35 @@ async function saveGraphIntelligence(report: ReportSnapshot, workspaceId: string
     return;
   }
   await GraphIntelligenceRecord.create(graph).catch(() => undefined);
+}
+
+export function buildLiveWarehouseSummary(reports: ReportSnapshot[]): WarehouseView | null {
+  if (reports.length === 0) return null;
+  const sorted = reports.slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const scored = reports.flatMap((report) => report.oss.score === null ? [] : [report.oss.score]);
+  return {
+    recordId: "wh_live_all",
+    grain: "custom",
+    periodStartAt: new Date(sorted[0]!.createdAt),
+    periodEndAt: new Date(sorted.at(-1)!.createdAt),
+    dimensions: {
+      scope: "all_time",
+      source: "operational_snapshots",
+      tenants: unique(reports.map((report) => report.tenantBranding.slug))
+    },
+    metrics: {
+      scans: reports.length,
+      completedScans: reports.filter((report) => report.status === "completed").length,
+      averageOss: scored.length > 0 ? average(scored) : null,
+      evidenceObjects: sum(reports.map((report) => report.evidenceObjects.length)),
+      recommendations: sum(reports.map((report) => report.recommendationEngine.recommendations.length)),
+      alerts: sum(reports.map((report) => report.alertEngine.alerts.length)),
+      estimatedRevenueHighUnits: sum(reports.map((report) => report.revenueIntelligence?.revenueOpportunityRange.high ?? 0)),
+      validationRows: sum(reports.map((report) => report.recommendationOutcomeLoop.validations.length))
+    },
+    sourceIds: reports.map((report) => report.snapshotId),
+    createdAt: new Date()
+  };
 }
 
 function buildSnapshotWarehouseRecord(report: ReportSnapshot, workspaceId: string): WarehouseView {

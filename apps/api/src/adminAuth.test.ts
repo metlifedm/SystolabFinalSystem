@@ -6,6 +6,8 @@ import {
   bootstrapOwner,
   createAdminUser,
   deactivateAdminUser,
+  getAdminAuthStorageMode,
+  listAdminSessions,
   listAdminUsers,
   loginAdmin,
   logoutAdmin,
@@ -30,6 +32,17 @@ describe("admin auth — login and session", () => {
     expect(owner.isActive).toBe(true);
   });
 
+  it("rejects an invalid first-owner bootstrap key even when an owner already exists", async () => {
+    await bootstrapOwner("OwnerPassword!Secure123");
+    await expect(
+      bootstrapOwner("InvalidOwnerKey!123", "other-owner@systolab.local", "OtherOwner!Secure123")
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("reports volatile storage during isolated tests", () => {
+    expect(getAdminAuthStorageMode()).toBe("memory");
+  });
+
   it("adminOwnerExists reports active owner availability", async () => {
     await bootstrapOwner("OwnerPassword!Secure123");
     await expect(adminOwnerExists()).resolves.toBe(true);
@@ -50,6 +63,8 @@ describe("admin auth — login and session", () => {
     const result = await loginAdmin(email, password, TEST_IP, TEST_UA);
     expect(result.token).toBeTruthy();
     expect(result.sessionId).toBeTruthy();
+    const sessions = await listAdminSessions(result.user.adminUserId);
+    expect(sessions.some((session) => session.sessionId === result.sessionId)).toBe(true);
   });
 
   it("verifyAdminToken resolves a valid token to a verified payload", async () => {
