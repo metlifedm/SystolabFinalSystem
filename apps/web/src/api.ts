@@ -2,6 +2,7 @@ import type {
   AiceDecisionObject,
   AuthResponse,
   AuthSessionSummary,
+  AuthTokenPair,
   AuthUserProfile,
   GoogleLoginRequest,
   LogoutInput,
@@ -385,9 +386,9 @@ export interface ScanJobResponse {
 }
 
 export async function createScan(request: ScanRequest): Promise<CreateScanResponse> {
-  const response = await fetch(`${API_URL}/api/scans`, {
+  const response = await authenticatedFetch(`${API_URL}/api/scans`, {
     method: "POST",
-    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(request)
   });
   if (!response.ok) throw new Error(await readError(response));
@@ -410,7 +411,7 @@ export async function getCustomerDecision(snapshotId: string): Promise<AiceDecis
   if (!snapshotId || snapshotId === "undefined" || snapshotId === "null") {
     throw new Error("Invalid snapshot ID.");
   }
-  const response = await fetch(`${API_URL}/api/reports/${snapshotId}/decision`);
+  const response = await authenticatedFetch(`${API_URL}/api/reports/${snapshotId}/decision`);
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
@@ -419,9 +420,7 @@ export async function getReport(snapshotId: string): Promise<ReportSnapshot> {
   if (!snapshotId || snapshotId === "undefined" || snapshotId === "null") {
     throw new Error("Invalid snapshot ID.");
   }
-  const response = await fetch(`${API_URL}/api/reports/${snapshotId}`, {
-    headers: storedAuthHeader()
-  });
+  const response = await authenticatedFetch(`${API_URL}/api/reports/${snapshotId}`);
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
@@ -434,9 +433,7 @@ export async function downloadReportPdf(snapshotId: string): Promise<Blob> {
   if (!snapshotId || snapshotId === "undefined" || snapshotId === "null") {
     throw new Error("Invalid snapshot ID.");
   }
-  const response = await fetch(`${API_URL}/api/reports/${encodeURIComponent(snapshotId)}/pdf`, {
-    headers: storedAuthHeader()
-  });
+  const response = await authenticatedFetch(`${API_URL}/api/reports/${encodeURIComponent(snapshotId)}/pdf`);
   if (!response.ok) throw new Error(await readError(response));
   return response.blob();
 }
@@ -545,7 +542,7 @@ export async function recordEditEvent(request: {
 
 
 export async function getPortalMe(): Promise<PortalMeResponse> {
-  const response = await fetch(`${API_URL}/api/me`, { headers: storedAuthHeader() });
+  const response = await authenticatedFetch(`${API_URL}/api/me`);
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
@@ -564,7 +561,7 @@ export async function createTenant(slug: string, publicName: string): Promise<{ 
 
 export async function listProjects(tenantSlug?: string): Promise<{ items: PortalProjectSummary[] }> {
   const suffix = tenantSlug ? `?tenantSlug=${encodeURIComponent(tenantSlug)}` : "";
-  const response = await fetch(`${API_URL}/api/projects${suffix}`, { headers: storedAuthHeader() });
+  const response = await authenticatedFetch(`${API_URL}/api/projects${suffix}`);
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
@@ -574,15 +571,15 @@ export async function createProject(request: CreatePortalProjectInput): Promise<
 }
 
 export async function getProject(workspaceId: string): Promise<{ project: PortalProjectSummary }> {
-  const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(workspaceId)}`, { headers: storedAuthHeader() });
+  const response = await authenticatedFetch(`${API_URL}/api/projects/${encodeURIComponent(workspaceId)}`);
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
 
 export async function updateProject(workspaceId: string, request: Partial<CreatePortalProjectInput>): Promise<{ project: PortalProjectSummary }> {
-  const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(workspaceId)}`, {
+  const response = await authenticatedFetch(`${API_URL}/api/projects/${encodeURIComponent(workspaceId)}`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(request)
   });
   if (!response.ok) throw new Error(await readError(response));
@@ -590,7 +587,7 @@ export async function updateProject(workspaceId: string, request: Partial<Create
 }
 
 export async function getProjectReports(workspaceId: string): Promise<{ items: PortalReportSummary[] }> {
-  const response = await fetch(`${API_URL}/api/projects/${encodeURIComponent(workspaceId)}/reports`, { headers: storedAuthHeader() });
+  const response = await authenticatedFetch(`${API_URL}/api/projects/${encodeURIComponent(workspaceId)}/reports`);
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
@@ -600,22 +597,22 @@ export async function runProjectScan(workspaceId: string, request: { mode?: "fas
 }
 
 export async function getAgencyDashboard(tenantSlug: string): Promise<AgencyDashboardResponse> {
-  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/dashboard`, { headers: storedAuthHeader() });
+  const response = await authenticatedFetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/dashboard`);
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
 
 export async function getAgencyOperatingSystem(tenantSlug: string): Promise<AgencyOperatingSystemResponse> {
-  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/operating-system`, { headers: storedAuthHeader() });
+  const response = await authenticatedFetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/operating-system`);
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
 
 
 export async function updateAgencyProfile(tenantSlug: string, profile: Partial<AgencyOperatingSystemResponse["profile"]>): Promise<AgencyOperatingSystemResponse> {
-  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/profile`, {
+  const response = await authenticatedFetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/profile`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(profile)
   });
   if (!response.ok) throw new Error(await readError(response));
@@ -623,9 +620,9 @@ export async function updateAgencyProfile(tenantSlug: string, profile: Partial<A
 }
 
 export async function updateAgencyServiceCatalog(tenantSlug: string, items: AgencyOperatingSystemResponse["serviceCatalog"]): Promise<AgencyOperatingSystemResponse> {
-  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/services`, {
+  const response = await authenticatedFetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/services`, {
     method: "PUT",
-    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({ items })
   });
   if (!response.ok) throw new Error(await readError(response));
@@ -633,9 +630,9 @@ export async function updateAgencyServiceCatalog(tenantSlug: string, items: Agen
 }
 
 export async function updateAgencyProposalTemplates(tenantSlug: string, items: AgencyOperatingSystemResponse["proposalTemplates"]): Promise<AgencyOperatingSystemResponse> {
-  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/proposal-templates`, {
+  const response = await authenticatedFetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/proposal-templates`, {
     method: "PUT",
-    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({ items })
   });
   if (!response.ok) throw new Error(await readError(response));
@@ -643,18 +640,18 @@ export async function updateAgencyProposalTemplates(tenantSlug: string, items: A
 }
 
 export async function updateAgencyKnowledgeBase(tenantSlug: string, knowledgeBase: Partial<AgencyOperatingSystemResponse["knowledgeBase"]>): Promise<AgencyOperatingSystemResponse> {
-  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/knowledge-base`, {
+  const response = await authenticatedFetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/knowledge-base`, {
     method: "PUT",
-    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(knowledgeBase)
   });
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
 export async function updateClientWorkspaceState(tenantSlug: string, workspaceId: string, request: { assignedConsultantName?: string; followUpStatus?: ClientFollowUpStatus; renewalReminderAt?: string; note?: string; sharingControls?: Partial<SharingControls> }): Promise<ClientOperatingSummary> {
-  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/workspaces/${encodeURIComponent(workspaceId)}/client-state`, {
+  const response = await authenticatedFetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/workspaces/${encodeURIComponent(workspaceId)}/client-state`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(request)
   });
   if (!response.ok) throw new Error(await readError(response));
@@ -662,9 +659,9 @@ export async function updateClientWorkspaceState(tenantSlug: string, workspaceId
 }
 
 export async function updateRecommendationStatus(tenantSlug: string, workspaceId: string, recommendationId: string, request: { status: AgencyRecommendationStatus; note?: string }): Promise<ClientOperatingSummary> {
-  const response = await fetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/workspaces/${encodeURIComponent(workspaceId)}/recommendations/${encodeURIComponent(recommendationId)}/status`, {
+  const response = await authenticatedFetch(`${API_URL}/api/agency/${encodeURIComponent(tenantSlug)}/workspaces/${encodeURIComponent(workspaceId)}/recommendations/${encodeURIComponent(recommendationId)}/status`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(request)
   });
   if (!response.ok) throw new Error(await readError(response));
@@ -675,7 +672,7 @@ export async function generateAgencyProposal(tenantSlug: string, workspaceId: st
   return postJson(`/api/agency/${encodeURIComponent(tenantSlug)}/workspaces/${encodeURIComponent(workspaceId)}/proposals`, { templateId }, readStoredAccessToken());
 }
 export async function getUsageOverview(tenantSlug: string): Promise<PortalUsageOverview> {
-  const response = await fetch(`${API_URL}/api/usage?tenantSlug=${encodeURIComponent(tenantSlug)}`, { headers: storedAuthHeader() });
+  const response = await authenticatedFetch(`${API_URL}/api/usage?tenantSlug=${encodeURIComponent(tenantSlug)}`);
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
@@ -687,7 +684,7 @@ export async function getBillingPlans(): Promise<{ items: PortalBillingPlan[] }>
 }
 
 export async function getBillingOverview(tenantSlug: string): Promise<{ plans: PortalBillingPlan[]; subscription: Record<string, unknown> | null; usage: PortalUsageOverview }> {
-  const response = await fetch(`${API_URL}/api/billing?tenantSlug=${encodeURIComponent(tenantSlug)}`, { headers: storedAuthHeader() });
+  const response = await authenticatedFetch(`${API_URL}/api/billing?tenantSlug=${encodeURIComponent(tenantSlug)}`);
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
@@ -702,9 +699,9 @@ export async function resolveWhiteLabel(input: { slug?: string; domain?: string 
 }
 
 export async function updateWhiteLabelBranding(tenantSlug: string, branding: Partial<TenantBranding>): Promise<{ branding: TenantBranding }> {
-  const response = await fetch(`${API_URL}/api/white-label/${encodeURIComponent(tenantSlug)}/branding`, {
+  const response = await authenticatedFetch(`${API_URL}/api/white-label/${encodeURIComponent(tenantSlug)}/branding`, {
     method: "PATCH",
-    headers: { "content-type": "application/json", ...storedAuthHeader() },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(branding)
   });
   if (!response.ok) throw new Error(await readError(response));
@@ -764,14 +761,17 @@ export async function revokeAuthSession(sessionId: string, accessToken: string):
 }
 
 async function postJson<T>(path: string, payload: unknown, accessToken?: string): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+  const request: RequestInit = {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {})
     },
     body: JSON.stringify(payload)
-  });
+  };
+  const response = accessToken && !path.startsWith("/api/auth/")
+    ? await authenticatedFetch(`${API_URL}${path}`, request)
+    : await fetch(`${API_URL}${path}`, request);
   if (!response.ok) throw new Error(await readError(response));
   return response.json();
 }
@@ -783,21 +783,77 @@ function adminBearerHeaders(session: AdminSession, destructive = false): Record<
 }
 
 
-function readStoredAccessToken(): string | undefined {
-  try {
-    const payload = JSON.parse(localStorage.getItem("systolab.auth") ?? "{}") as { tokens?: { accessToken?: string } };
-    return payload.tokens?.accessToken;
-  } catch {
+type StoredBrowserAuth = {
+  user: AuthUserProfile;
+  tokens: AuthTokenPair;
+  session: AuthSessionSummary;
+};
+
+let authRefreshPromise: Promise<string | undefined> | null = null;
+
+async function authenticatedFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const firstToken = readStoredAccessToken();
+  const response = await fetch(input, withBearerToken(init, firstToken));
+  if (response.status !== 401 || !firstToken) return response;
+
+  authRefreshPromise ??= refreshStoredBrowserAuth().finally(() => {
+    authRefreshPromise = null;
+  });
+  const refreshedToken = await authRefreshPromise;
+  if (!refreshedToken) return response;
+  return fetch(input, withBearerToken(init, refreshedToken));
+}
+
+function withBearerToken(init: RequestInit, accessToken?: string): RequestInit {
+  const headers = new Headers(init.headers);
+  if (accessToken) headers.set("authorization", `Bearer ${accessToken}`);
+  return { ...init, headers };
+}
+
+async function refreshStoredBrowserAuth(): Promise<string | undefined> {
+  const stored = readStoredBrowserAuth();
+  if (!stored?.tokens.refreshToken) return undefined;
+
+  const response = await fetch(`${API_URL}/api/auth/refresh`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      refreshToken: stored.tokens.refreshToken,
+      deviceId: stored.session.deviceId
+    })
+  });
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      localStorage.removeItem("systolab.auth");
+      window.dispatchEvent(new Event("systolab:auth-expired"));
+    }
     return undefined;
   }
+
+  const refreshed = await response.json() as AuthResponse;
+  if (!refreshed.tokens || !refreshed.session) return undefined;
+  const next: StoredBrowserAuth = {
+    user: refreshed.user,
+    tokens: refreshed.tokens,
+    session: refreshed.session
+  };
+  localStorage.setItem("systolab.auth", JSON.stringify(next));
+  window.dispatchEvent(new CustomEvent<StoredBrowserAuth>("systolab:auth-refreshed", { detail: next }));
+  return refreshed.tokens.accessToken;
 }
-function storedAuthHeader(): Record<string, string> {
+
+function readStoredBrowserAuth(): StoredBrowserAuth | null {
   try {
-    const payload = JSON.parse(localStorage.getItem("systolab.auth") ?? "{}") as { tokens?: { accessToken?: string } };
-    return payload.tokens?.accessToken ? { authorization: `Bearer ${payload.tokens.accessToken}` } : {};
+    const payload = JSON.parse(localStorage.getItem("systolab.auth") ?? "{}") as Partial<StoredBrowserAuth>;
+    if (!payload.user || !payload.tokens?.accessToken || !payload.tokens.refreshToken || !payload.session) return null;
+    return payload as StoredBrowserAuth;
   } catch {
-    return {};
+    return null;
   }
+}
+
+function readStoredAccessToken(): string | undefined {
+  return readStoredBrowserAuth()?.tokens.accessToken;
 }
 
 async function readError(response: Response): Promise<string> {

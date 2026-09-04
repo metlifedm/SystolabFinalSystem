@@ -134,7 +134,11 @@ const DIMENSION_FACTORS: Record<DimensionKey, FactorDefinition[]> = {
 export function buildDimensionScores(evidenceObjects: EvidenceObject[]): DimensionScore[] {
   return (Object.keys(DIMENSION_FACTORS) as DimensionKey[]).map((key) => {
     const definitions = DIMENSION_FACTORS[key] ?? [];
-    const trace = definitions.map((factor) => buildTraceFactor(factor, evidenceObjects));
+    const applicableWeight = definitions.reduce(
+      (sum, factor) => sum + (hasValidatedSignal(factor.key, evidenceObjects) ? factor.weight : 0),
+      0
+    );
+    const trace = definitions.map((factor) => buildTraceFactor(factor, evidenceObjects, applicableWeight));
     const score = clampScore(trace.reduce((sum, factor) => sum + factor.contribution, 0));
     const evidenceIds = Array.from(new Set(trace.flatMap((factor) => factor.evidenceIds)));
     const confidenceScore = buildConfidenceScore(evidenceObjects, evidenceIds);
@@ -181,18 +185,31 @@ export function classifyScore(score: number): DimensionScore["classification"] {
   return "Strong";
 }
 
-function buildTraceFactor(factor: FactorDefinition, evidenceObjects: EvidenceObject[]): ScoreTraceFactor {
+function buildTraceFactor(
+  factor: FactorDefinition,
+  evidenceObjects: EvidenceObject[],
+  applicableWeight: number
+): ScoreTraceFactor {
   const matches = evidenceObjects.filter((evidence) => evidence.normalizedInput.signalKey === factor.key);
   const valueScore = aggregateSignal(matches);
+  const effectiveWeight = matches.length > 0 && applicableWeight > 0
+    ? (factor.weight / applicableWeight) * 100
+    : 0;
   return {
     factorId: factor.factorId,
     label: factor.label,
-    contribution: Number(((valueScore / 100) * factor.weight).toFixed(2)),
-    weight: factor.weight,
+    contribution: Number(((valueScore / 100) * effectiveWeight).toFixed(2)),
+    weight: Number(effectiveWeight.toFixed(2)),
     evidenceIds: matches.map((evidence) => evidence.evidenceId),
-    normalization: "v1.0 deterministic linear scaling",
+    normalization: matches.length > 0
+      ? `v1.1 evidence-applicable relative scaling (${factor.weight}/${applicableWeight})`
+      : "v1.1 excluded from score because no validated signal was collected",
     direction: factor.direction ?? "positive"
   };
+}
+
+function hasValidatedSignal(signalKey: string, evidenceObjects: EvidenceObject[]): boolean {
+  return evidenceObjects.some((evidence) => evidence.normalizedInput.signalKey === signalKey);
 }
 
 function aggregateSignal(matches: EvidenceObject[]): number {

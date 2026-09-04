@@ -63,6 +63,12 @@ type MemAuthOtp = {
   ipHash: string; deviceFingerprintHash: string;
   save(): Promise<void>;
 };
+type MemPasswordReset = {
+  resetId: string; userId: string; identifierType: AuthIdentifierType; identifier: string;
+  tokenHash: string; expiresAt: Date; attempts: number; maxAttempts: number;
+  lockedUntil?: Date; consumedAt?: Date; ipHash: string; deviceFingerprintHash: string;
+  save(): Promise<void>;
+};
 
 const _memAuthUsers = new Map<string, MemAuthUser>();          // key: userId
 const _memAuthByEmail = new Map<string, string>();              // email → userId
@@ -70,6 +76,7 @@ const _memAuthByPhone = new Map<string, string>();              // phone → use
 const _memAuthByGoogle = new Map<string, string>();             // googleId → userId
 export const _memAuthSessionsForTest = new Map<string, MemAuthSession>(); // key: sessionId
 const _memAuthOtps = new Map<string, MemAuthOtp>();            // key: challengeId
+const _memPasswordResets = new Map<string, MemPasswordReset>(); // key: resetId
 
 function makeMemUser(id: string, input: Record<string, unknown>): MemAuthUser {
   const user: MemAuthUser = {
@@ -220,22 +227,34 @@ export async function requestOtp(input: OtpRequestInput, context: AuthContext): 
   await enforceThrottle("otp_request", `device:${context.deviceFingerprintHash}`, 8, 10 * 60_000, context, identifier);
   await enforceThrottle("otp_request", `identifier:${identifier}`, 3, 10 * 60_000, context, identifier);
 
-  const cooldown = await AuthOtpChallenge.findOne({
-    identifier,
-    purpose: input.purpose,
-    consumedAt: { $exists: false },
-    resendAvailableAt: { $gt: new Date() }
-  }).sort({ createdAt: -1 });
+  const cooldown = await findActiveOtpCooldown(identifier, input.purpose);
   if (cooldown) {
     await writeAudit("throttle_triggered", false, context, { identifier, reason: "OTP resend cooldown active" });
     throw new AuthError(`OTP resend cooldown active until ${cooldown.resendAvailableAt.toISOString()}.`, 429);
   }
 
-  const user = await linkOrCreateUser({
-    provider: input.identifierType === "email" ? "email_otp" : "phone_otp",
-    email: input.identifierType === "email" ? identifier : undefined,
-    phone: input.identifierType === "phone" ? identifier : undefined
-  });
+  const existing = await findUserByIdentifier(input.identifierType, identifier);
+  let user: AuthUserDocument;
+  if (input.purpose === "login") {
+    if (!existing) {
+      await writeAudit("otp_requested", false, context, { identifier, reason: "No account found for OTP login" });
+      throw new AuthError("Unable to send a login code. Check the identifier or create an account.", 401);
+    }
+    await ensureUserCanAuthenticate(existing);
+    user = existing;
+  } else if (input.purpose === "signup") {
+    if (existing && existing.lifecycleState === "VERIFIED") {
+      throw new AuthError("An account already exists for this identifier. Sign in instead.", 409);
+    }
+    user = existing ?? await linkOrCreateUser({
+      provider: input.identifierType === "email" ? "email_otp" : "phone_otp",
+      email: input.identifierType === "email" ? identifier : undefined,
+      phone: input.identifierType === "phone" ? identifier : undefined
+    });
+  } else {
+    if (!existing) throw new AuthError("Unable to create an OTP challenge for this account.", 401);
+    user = existing;
+  }
   const challenge = await createOtpChallenge(input.identifierType, identifier, input.purpose, user, context);
   await writeAudit("otp_requested", true, context, { user, identifier, metadata: { purpose: input.purpose, challengeId: challenge.challengeId } });
   return challenge;
@@ -296,7 +315,12 @@ export async function verifyOtp(input: OtpVerifyInput, context: AuthContext): Pr
 export async function registerPassword(input: PasswordRegisterInput, context: AuthContext): Promise<AuthResponse & { otpChallenge: OtpChallengeResponse }> {
   validatePassword(input.password);
   const identifier = normalizeIdentifier(input.identifierType, input.identifier);
-  const user = await linkOrCreateUser({
+  const existing = await findUserByIdentifier(input.identifierType, identifier);
+  if (existing && existing.lifecycleState !== "PENDING") {
+    await writeAudit("password_register", false, context, { user: existing, identifier, reason: "Account already exists" });
+    throw new AuthError("An account already exists for this identifier. Sign in or reset your password.", 409);
+  }
+  const user = existing ?? await linkOrCreateUser({
     provider: "password",
     email: input.identifierType === "email" ? identifier : undefined,
     phone: input.identifierType === "phone" ? identifier : undefined,
@@ -314,7 +338,9 @@ export async function registerPassword(input: PasswordRegisterInput, context: Au
     user: toUserProfile(user),
     requiresVerification: user.lifecycleState === "PENDING",
     otpChallenge,
-    message: "Password account created. Verify the simulated OTP before password login."
+    message: existing
+      ? "Account verification restarted. Verify the simulated OTP before password login."
+      : "Password account created. Verify the simulated OTP before password login."
   };
 }
 
@@ -386,6 +412,35 @@ export async function forgotPassword(input: PasswordForgotInput, context: AuthCo
 
   const resetId = makeId("reset");
   const token = randomToken(24);
+  if (!isMongoConnected()) {
+    const expiresAt = minutesFromNow(env.authPasswordResetMinutes);
+    const reset: MemPasswordReset = {
+      resetId,
+      userId: String((user as unknown as MemAuthUser).id),
+      identifierType: input.identifierType,
+      identifier,
+      tokenHash: hashResetToken(resetId, token),
+      expiresAt,
+      attempts: 0,
+      maxAttempts: 3,
+      ipHash: context.ipHash,
+      deviceFingerprintHash: context.deviceFingerprintHash,
+      save: async function () { _memPasswordResets.set(this.resetId, this); }
+    };
+    _memPasswordResets.set(resetId, reset);
+    await writeAudit("password_reset_requested", true, context, { user, identifier, metadata: { resetId } });
+    return {
+      resetId,
+      maskedDestination: maskIdentifier(input.identifierType, identifier),
+      expiresAt: expiresAt.toISOString(),
+      maxAttempts: reset.maxAttempts,
+      simulatedDelivery: {
+        mode: "backend_simulation",
+        token,
+        note: "Self-contained reset token generated by backend simulation. No external email or SMS service was called."
+      }
+    };
+  }
   const reset = await AuthPasswordReset.create({
     resetId,
     userId: user._id,
@@ -414,7 +469,9 @@ export async function forgotPassword(input: PasswordForgotInput, context: AuthCo
 
 export async function resetPassword(input: PasswordResetInput, context: AuthContext): Promise<AuthResponse> {
   validatePassword(input.newPassword);
-  const reset = await AuthPasswordReset.findOne({ resetId: input.resetId });
+  const reset = !isMongoConnected()
+    ? (_memPasswordResets.get(input.resetId) ?? null)
+    : await AuthPasswordReset.findOne({ resetId: input.resetId });
   if (!reset) throw new AuthError("Invalid password reset challenge.", 400);
   if (reset.lockedUntil && reset.lockedUntil > new Date()) throw new AuthError("Password reset challenge is temporarily locked after 3 failed attempts.", 423);
   if (reset.consumedAt) throw new AuthError("Password reset token was already used.", 400);
@@ -431,7 +488,9 @@ export async function resetPassword(input: PasswordResetInput, context: AuthCont
     throw new AuthError("Invalid password reset token. Reset locks after 3 failed attempts.", reset.lockedUntil ? 423 : 401);
   }
 
-  const user = await AuthUser.findById(reset.userId);
+  const user = !isMongoConnected()
+    ? (_memAuthUsers.get(String(reset.userId)) as unknown as AuthUserDocument | undefined)
+    : await AuthUser.findById(reset.userId);
   if (!user) throw new AuthError("Password reset user not found.", 404);
   user.passwordHash = hashPassword(input.newPassword);
   user.loginFailureCount = 0;
@@ -611,6 +670,30 @@ function toSessionSummary(session: AuthSessionDocument): AuthSessionSummary {
     refreshExpiresAt: session.refreshExpiresAt.toISOString(),
     revokedAt: session.revokedAt?.toISOString()
   };
+}
+
+async function findActiveOtpCooldown(
+  identifier: string,
+  purpose: OtpPurpose
+): Promise<{ resendAvailableAt: Date } | null> {
+  const now = new Date();
+  if (!isMongoConnected()) {
+    return [..._memAuthOtps.values()]
+      .filter((challenge) =>
+        challenge.identifier === identifier &&
+        challenge.purpose === purpose &&
+        !challenge.consumedAt &&
+        challenge.resendAvailableAt > now
+      )
+      .sort((left, right) => right.resendAvailableAt.getTime() - left.resendAvailableAt.getTime())[0] ?? null;
+  }
+
+  return AuthOtpChallenge.findOne({
+    identifier,
+    purpose,
+    consumedAt: { $exists: false },
+    resendAvailableAt: { $gt: now }
+  }).sort({ createdAt: -1 });
 }
 
 async function createOtpChallenge(
@@ -1160,8 +1243,11 @@ function maskIdentifier(type: AuthIdentifierType, value: string): string {
 }
 
 function validatePassword(password: string): void {
-  if (password.length < 10) throw new AuthError("Password must be at least 10 characters.", 400);
-  if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) throw new AuthError("Password must include letters and numbers.", 400);
+  if (password.length < 12) throw new AuthError("Password must be at least 12 characters.", 400);
+  if (password.length > 128) throw new AuthError("Password must not exceed 128 characters.", 400);
+  if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+    throw new AuthError("Password must include uppercase, lowercase, number, and symbol characters.", 400);
+  }
 }
 
 function hashPassword(password: string): string {

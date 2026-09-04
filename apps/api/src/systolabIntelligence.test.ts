@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDimensionScores } from "./services/truth-engine/scoring.js";
+import { buildDimensionScores, calculateOss } from "./services/truth-engine/scoring.js";
 import { EvidenceBuilder } from "./services/truth-engine/evidence.js";
 import { buildCompetitorContentGapEvidence, extractSystolabIntelligenceEvidence } from "./services/truth-engine/systolabIntelligence.js";
 
@@ -49,6 +49,30 @@ describe("native SYSTOLAB intelligence evidence contributors", () => {
     expect(clarity?.trace.some((factor) => factor.factorId === "clarity_serp_opportunity")).toBe(true);
   });
 
+  it("normalizes validated factor weights so added intelligence cannot flatten different sites at the score ceiling", () => {
+    const strong = buildDimensionScores(uniformTrustEvidence("strong", 84)).find((dimension) => dimension.key === "trust");
+    const weak = buildDimensionScores(uniformTrustEvidence("weak", 36)).find((dimension) => dimension.key === "trust");
+    const scoredTrace = strong?.trace.filter((factor) => factor.evidenceIds.length > 0) ?? [];
+
+    expect(strong?.score).toBe(84);
+    expect(weak?.score).toBe(36);
+    expect(strong?.score).not.toBe(weak?.score);
+    expect(strong?.score).not.toBe(93);
+    expect(scoredTrace.reduce((sum, factor) => sum + factor.weight, 0)).toBeCloseTo(100, 1);
+    expect(scoredTrace.reduce((sum, factor) => sum + factor.contribution, 0)).toBeCloseTo(84, 1);
+  });
+
+  it("produces different OSS values for materially different website content", () => {
+    const strongEvidence = extractSystolabIntelligenceEvidence([fixturePage()], new URL("https://acme-dental.example"), new EvidenceBuilder("dynamic-strong"));
+    const weakEvidence = extractSystolabIntelligenceEvidence([weakFixturePage()], new URL("https://primary.example"), new EvidenceBuilder("dynamic-weak"));
+    const strongOss = calculateOss(buildDimensionScores(strongEvidence));
+    const weakOss = calculateOss(buildDimensionScores(weakEvidence));
+
+    expect(strongOss).toBeGreaterThan(weakOss);
+    expect(strongOss).not.toBe(weakOss);
+    expect([strongOss, weakOss]).not.toEqual([93, 93]);
+  });
+
   it("detects e-commerce purchase confidence as a native contributor without external APIs", () => {
     const evidence = extractSystolabIntelligenceEvidence([ecommerceFixturePage()], new URL("https://store.example"), new EvidenceBuilder("native-ecom"));
     const ecommerce = evidence.find((item) => item.normalizedInput.signalKey === "native_ecommerce_purchase_confidence_score");
@@ -74,6 +98,40 @@ describe("native SYSTOLAB intelligence evidence contributors", () => {
     expect(JSON.stringify(gaps)).not.toMatch(/Claude|rankings?|crawler telemetry/i);
   });
 });
+
+function uniformTrustEvidence(seed: string, value: number) {
+  const builder = new EvidenceBuilder(`uniform-trust-${seed}`);
+  const signalKeys = [
+    "https_transport",
+    "security_headers_score",
+    "contact_signal_present",
+    "privacy_link_present",
+    "terms_link_present",
+    "about_link_present",
+    "review_signal_present",
+    "social_link_present",
+    "native_trust_proof_coverage_score",
+    "native_decision_confidence_score",
+    "native_schema_coverage_score",
+    "native_entity_clarity_score",
+    "native_citation_credibility_score",
+    "native_content_freshness_score",
+    "native_local_visibility_opportunity_score",
+    "native_competitor_content_gap_score"
+  ];
+
+  return signalKeys.map((signalKey) => builder.add({
+    sourceType: "system",
+    url: `https://${seed}.example`,
+    pageRole: "homepage",
+    rawValue: `${signalKey}=${value}`,
+    normalizedInput: { signalKey, value },
+    validationMethod: "direct_extraction",
+    confidenceBasis: "Deterministic scoring normalization fixture.",
+    groundTruthConfidence: 90,
+    dimensionRefs: ["trust"]
+  }));
+}
 
 function fixturePage() {
   return {

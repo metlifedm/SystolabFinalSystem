@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { sha256 } from "./utils/crypto.js";
 import {
   _memAuthSessionsForTest,
+  forgotPassword,
   getUserByAccessToken,
   listSessions,
   logout,
   passwordLogin,
   registerPassword,
+  resetPassword,
   refreshSession,
   verifyOtp
 } from "./services/authService.js";
@@ -68,6 +70,67 @@ describe("auth — registration and login flow", () => {
     );
     expect(result.tokens).toBeTruthy();
     expect(result.user.email).toBe("pw-login@example.com");
+  });
+
+  it("does not let signup overwrite an existing account password", async () => {
+    const email = `duplicate-${Date.now()}@example.com`;
+    const originalPassword = "Original!Pass1234";
+    await createVerifiedUser(email, originalPassword, `duplicate-${Date.now()}`);
+
+    await expect(registerPassword(
+      { identifierType: "email", identifier: email, password: "Attacker!Pass1234", displayName: "Duplicate" },
+      ctx(`duplicate-attempt-${Date.now()}`)
+    )).rejects.toThrow("account already exists");
+
+    const login = await passwordLogin(
+      { identifierType: "email", identifier: email, password: originalPassword },
+      ctx(`duplicate-login-${Date.now()}`)
+    );
+    expect(login.tokens?.accessToken).toBeTruthy();
+  });
+
+  it("lets an unverified signup restart verification without creating a duplicate account", async () => {
+    const email = `pending-${Date.now()}@example.com`;
+    const first = await registerPassword(
+      { identifierType: "email", identifier: email, password: "First!Pass1234", displayName: "Pending User" },
+      ctx(`pending-first-${Date.now()}`)
+    );
+    const restarted = await registerPassword(
+      { identifierType: "email", identifier: email, password: "Second!Pass1234", displayName: "Pending User" },
+      ctx(`pending-second-${Date.now()}`)
+    );
+
+    expect(restarted.user.userId).toBe(first.user.userId);
+    expect(restarted.message).toContain("verification restarted");
+    await verifyOtp(
+      { challengeId: restarted.otpChallenge.challengeId, code: restarted.otpChallenge.simulatedDelivery.code! },
+      ctx(`pending-verify-${Date.now()}`)
+    );
+    const login = await passwordLogin(
+      { identifierType: "email", identifier: email, password: "Second!Pass1234" },
+      ctx(`pending-login-${Date.now()}`)
+    );
+    expect(login.tokens?.accessToken).toBeTruthy();
+  });
+
+  it("completes the self-contained password reset flow without MongoDB", async () => {
+    const email = `reset-${Date.now()}@example.com`;
+    await createVerifiedUser(email, "Before!Pass1234", `reset-user-${Date.now()}`);
+    const reset = await forgotPassword(
+      { identifierType: "email", identifier: email },
+      ctx(`reset-request-${Date.now()}`)
+    );
+
+    expect(reset.simulatedDelivery.token).toBeTruthy();
+    await resetPassword(
+      { resetId: reset.resetId, token: reset.simulatedDelivery.token!, newPassword: "After!Pass1234" },
+      ctx(`reset-complete-${Date.now()}`)
+    );
+    const login = await passwordLogin(
+      { identifierType: "email", identifier: email, password: "After!Pass1234" },
+      ctx(`reset-login-${Date.now()}`)
+    );
+    expect(login.tokens?.accessToken).toBeTruthy();
   });
 
   it("listSessions returns at least the session created on login", async () => {

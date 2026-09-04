@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from "react";
-import type { AuthIdentifierType, AuthResponse, AuthSessionSummary, AuthTokenPair, AuthUserProfile, TenantBranding } from "@systolab/shared";
+import type { AuthIdentifierType, AuthResponse, AuthSessionSummary, AuthTokenPair, AuthUserProfile, OtpChallengeResponse, PasswordResetChallengeResponse, TenantBranding } from "@systolab/shared";
 import { ArrowRight, Building2, CheckCircle2, FileText, Globe2, KeyRound, Layers, LogOut, Menu, Settings, Share2, ShieldCheck, Users } from "lucide-react";
 import {
   createProject,
   generateAgencyProposal,
   downloadReportPdf,
   ensureAgency,
+  forgotPassword,
   getBillingOverview,
   getBillingPlans,
   getPortalMe,
@@ -20,6 +21,7 @@ import {
   logoutAuth,
   registerPassword,
   requestOtp,
+  resetPassword,
   runProjectScan,
   startFirstAnalysis,
   updateAgencyKnowledgeBase,
@@ -29,6 +31,7 @@ import {
   verifyOtp
 } from "./api.js";
 import type { AgencyDashboardResponse, AgencyOperatingSystemResponse, ClientFollowUpStatus, ClientOperatingSummary, PortalBillingPlan, PortalMeResponse, PortalProjectSummary, PortalReportSummary, PortalTenantSummary, PortalUsageOverview } from "./api.js";
+import { firebaseAuth, googleProvider, isFirebaseConfigured } from "./firebase.js";
 
 type StoredPortalAuth = { user: AuthUserProfile; tokens: AuthTokenPair; session: AuthSessionSummary };
 
@@ -85,6 +88,32 @@ export function UniversalPortal() {
     const onPop = () => setPath(normalizePortalPath(window.location.pathname));
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  useEffect(() => {
+    const onAuthRefreshed = (event: Event) => {
+      const next = (event as CustomEvent<StoredPortalAuth>).detail;
+      if (next?.tokens?.accessToken) setAuth(next);
+    };
+    const onAuthExpired = () => {
+      setAuth(null);
+      setPortal(null);
+      setUsage(null);
+      setAgencyDashboard(null);
+      setAgencyOperating(null);
+      setError("Your session expired. Sign in again to continue.");
+      const current = normalizePortalPath(window.location.pathname);
+      if (!publicPortalRoutes.has(current)) {
+        window.history.replaceState(null, "", "/login");
+        setPath("/login");
+      }
+    };
+    window.addEventListener("systolab:auth-refreshed", onAuthRefreshed);
+    window.addEventListener("systolab:auth-expired", onAuthExpired);
+    return () => {
+      window.removeEventListener("systolab:auth-refreshed", onAuthRefreshed);
+      window.removeEventListener("systolab:auth-expired", onAuthExpired);
+    };
   }, []);
 
   useEffect(() => {
@@ -160,14 +189,14 @@ export function UniversalPortal() {
       <PortalTopNav auth={auth} path={path} navigate={navigate} signOut={signOut} />
       {message && <div className="portal-status">{message}</div>}
       {error && <div className="portal-alert">{error}</div>}
-      {!auth && protectedRoute ? <PortalAuthPage mode="login" onAuth={applyAuth} /> : renderPortalPage(path, { auth, portal, tenant, plans, usage, agencyDashboard, agencyOperating, navigate, refreshPortal, refreshAgencyOperating, applyAuth })}
+      {!auth && protectedRoute ? <PortalAuthPage mode="login" onAuth={applyAuth} navigate={navigate} /> : renderPortalPage(path, { auth, portal, tenant, plans, usage, agencyDashboard, agencyOperating, navigate, refreshPortal, refreshAgencyOperating, applyAuth })}
     </div>
   );
 }
 
 function renderPortalPage(path: string, ctx: { auth: StoredPortalAuth | null; portal: PortalMeResponse | null; tenant: PortalTenantSummary | null; plans: PortalBillingPlan[]; usage: PortalUsageOverview | null; agencyDashboard: AgencyDashboardResponse | null; agencyOperating: AgencyOperatingSystemResponse | null; navigate: (path: string) => void; refreshPortal: () => Promise<void>; refreshAgencyOperating: () => Promise<void>; applyAuth: (result: AuthResponse) => void }) {
   if (path === "/") return <PortalLanding navigate={ctx.navigate} />;
-  if (path === "/login" || path === "/signup") return <PortalAuthPage mode={path === "/signup" ? "signup" : "login"} onAuth={ctx.applyAuth} />;
+  if (path === "/login" || path === "/signup") return <PortalAuthPage mode={path === "/signup" ? "signup" : "login"} onAuth={ctx.applyAuth} navigate={ctx.navigate} />;
   if (path === "/features") return <PortalStaticPage eyebrow="Features" title="Business Decision Intelligence" items={featureCards} />;
   if (path === "/pricing") return <PortalPricing plans={ctx.plans} navigate={ctx.navigate} />;
   if (path === "/docs") return <PortalDocs />;
@@ -256,78 +285,228 @@ function PortalTopNav({ auth, path, navigate, signOut }: { auth: StoredPortalAut
     </main>
   );
 }
-function PortalAuthPage({ mode, onAuth }: { mode: "login" | "signup"; onAuth: (result: AuthResponse) => void }) {
+type PortalAuthMethod = "password" | "otp" | "reset";
+
+function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; onAuth: (result: AuthResponse) => void; navigate: (path: string) => void }) {
   const [deviceId] = useState(() => getOrCreateDeviceId());
-  const [authMode, setAuthMode] = useState<"google" | "password" | "otp">(mode === "signup" ? "password" : "google");
+  const [method, setMethod] = useState<PortalAuthMethod>("password");
   const [identifierType, setIdentifierType] = useState<AuthIdentifierType>("email");
   const [identifier, setIdentifier] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
-  const [otpChallenge, setOtpChallenge] = useState<{ challengeId: string; simulatedDelivery: { code?: string } } | null>(null);
+  const [otpChallenge, setOtpChallenge] = useState<OtpChallengeResponse | null>(null);
   const [otpCode, setOtpCode] = useState("");
+  const [resetChallenge, setResetChallenge] = useState<PasswordResetChallengeResponse | null>(null);
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setMethod("password");
+    setOtpChallenge(null);
+    setResetChallenge(null);
+    setOtpCode("");
+    setResetToken("");
+    setStatus("");
+    setError("");
+  }, [mode]);
 
   async function run(action: () => Promise<void>) {
-    setStatus(""); setError("");
-    try { await action(); } catch (authError) { setError(authError instanceof Error ? authError.message : "Authentication failed."); }
+    setStatus("");
+    setError("");
+    setBusy(true);
+    try {
+      await action();
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : "Authentication failed.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function continueGoogle() {
     await run(async () => {
-      if (!identifier) { setStatus("Enter the Google email you want to use with SYSTOLAB."); setAuthMode("google"); return; }
-      const fallbackName = displayName || identifier.split("@")[0] || "Google User";
-      const credential = ["dev", identifier, `google-${simpleId(identifier)}`, fallbackName, "", "", "", "en"].map((part, index) => index === 0 ? part : encodeURIComponent(part)).join(":");
-      onAuth(await googleAuth({ credential, displayName: fallbackName, deviceId, deviceLabel: "SYSTOLAB Portal" }));
+      if (!isFirebaseConfigured || !firebaseAuth) {
+        throw new Error("Google sign-in is not configured. Use email or phone sign-in for now.");
+      }
+      const { getAdditionalUserInfo, signInWithPopup } = await import("firebase/auth");
+      const result = await signInWithPopup(firebaseAuth, googleProvider);
+      const profile = getAdditionalUserInfo(result)?.profile as Record<string, string | undefined> | null | undefined;
+      const credential = await result.user.getIdToken();
+      onAuth(await googleAuth({
+        credential,
+        displayName: result.user.displayName ?? undefined,
+        givenName: profile?.given_name,
+        familyName: profile?.family_name,
+        photoURL: result.user.photoURL ?? undefined,
+        phoneNumber: result.user.phoneNumber ?? undefined,
+        locale: profile?.locale,
+        deviceId,
+        deviceLabel: "SYSTOLAB Portal"
+      }));
     });
   }
+
   async function continuePassword() {
     await run(async () => {
-      const request = { identifierType, identifier, password, deviceId, deviceLabel: "SYSTOLAB Portal" };
       if (mode === "login") {
-        onAuth(await loginPassword(request));
+        onAuth(await loginPassword({ identifierType, identifier, password, deviceId, deviceLabel: "SYSTOLAB Portal" }));
         return;
       }
-
-      const registered = await registerPassword({ ...request, displayName: displayName || identifier.split("@")[0] });
-      if (registered.tokens && registered.session) {
-        onAuth(registered);
-        return;
-      }
-
-      if (registered.requiresVerification) {
-        const challenge = registered.otpChallenge;
-        setOtpChallenge(challenge);
-        setOtpCode(challenge.simulatedDelivery.code ?? "");
-        setAuthMode("otp");
-        setStatus("Verify your account to continue.");
-        return;
-      }
-
-      onAuth(registered);
+      const registered = await registerPassword({
+        identifierType,
+        identifier,
+        password,
+        displayName: displayName.trim(),
+        deviceId
+      });
+      setOtpChallenge(registered.otpChallenge);
+      setOtpCode(registered.otpChallenge.simulatedDelivery.code ?? "");
+      setMethod("otp");
+      setStatus("Account created. Enter the verification code to finish signup.");
     });
   }
+
+  async function requestLoginCode() {
+    await run(async () => {
+      const challenge = await requestOtp({ identifierType, identifier, purpose: "login", deviceId });
+      setOtpChallenge(challenge);
+      setOtpCode(challenge.simulatedDelivery.code ?? "");
+      setStatus("Your one-time code is ready.");
+    });
+  }
+
+  async function verifyCode() {
+    if (!otpChallenge) return;
+    await run(async () => {
+      onAuth(await verifyOtp({ challengeId: otpChallenge.challengeId, code: otpCode, deviceId, deviceLabel: "SYSTOLAB Portal" }));
+    });
+  }
+
+  async function beginPasswordReset() {
+    await run(async () => {
+      const challenge = await forgotPassword({ identifierType, identifier, deviceId });
+      setResetChallenge(challenge);
+      setResetToken(challenge.simulatedDelivery.token ?? "");
+      setStatus("Enter the reset token and choose a new password.");
+    });
+  }
+
+  async function completePasswordReset() {
+    if (!resetChallenge) return;
+    await run(async () => {
+      await resetPassword({ resetId: resetChallenge.resetId, token: resetToken, newPassword, deviceId });
+      setMethod("password");
+      setPassword("");
+      setResetChallenge(null);
+      setResetToken("");
+      setNewPassword("");
+      setStatus("Password updated. Sign in with your new password.");
+    });
+  }
+
+  function selectMethod(next: PortalAuthMethod) {
+    setMethod(next);
+    setOtpChallenge(null);
+    setResetChallenge(null);
+    setOtpCode("");
+    setResetToken("");
+    setStatus("");
+    setError("");
+  }
+
+  const identifierLabel = identifierType === "email" ? "Email address" : "Phone number";
+  const identifierPlaceholder = identifierType === "email" ? "name@example.com" : "+15551234567";
+  const verificationOnly = method === "otp" && Boolean(otpChallenge);
 
   return (
     <main className="portal-auth-layout">
-      <section className="portal-auth-copy"><span className="portal-eyebrow">{mode === "signup" ? "Start free" : "Welcome back"}</span><h1>{mode === "signup" ? "Create your SYSTOLAB account" : "Sign in to SYSTOLAB"}</h1><p>{mode === "signup" ? "Create your account, analyze your first website, and receive an executive report in minutes." : "Continue to your reports, clients, agency brand, and business intelligence."}</p><div className="portal-auth-proof"><span><ShieldCheck size={16} />Protected account</span><span><KeyRound size={16} />Flexible sign in</span><span><Layers size={16} />Your reports stay organized</span></div></section>
+      <section className="portal-auth-copy">
+        <span className="portal-eyebrow">{mode === "signup" ? "Start free" : "Welcome back"}</span>
+        <h1>{mode === "signup" ? "Create your account" : "Sign in to SYSTOLAB"}</h1>
+        <p>{mode === "signup" ? "Create one account for your websites, reports, clients, and agency branding." : "Open your dashboard and continue from your latest report."}</p>
+        <div className="portal-auth-proof"><span><ShieldCheck size={16} />Protected account</span><span><Layers size={16} />Reports stay organized</span></div>
+      </section>
+
       <section className="portal-auth-card">
-        <div className="portal-auth-tabs"><button className={authMode === "google" ? "active" : ""} onClick={() => setAuthMode("google")}>Google</button><button className={authMode === "password" ? "active" : ""} onClick={() => setAuthMode("password")}>Password</button><button className={authMode === "otp" ? "active" : ""} onClick={() => setAuthMode("otp")}>OTP</button></div>
-        <div className="portal-form-grid">
-          {mode === "signup" && authMode !== "otp" && <label><span>Name</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Business owner or agency name" /></label>}
-          <div className="portal-segmented"><button className={identifierType === "email" ? "active" : ""} onClick={() => setIdentifierType("email")}>Email</button><button className={identifierType === "phone" ? "active" : ""} onClick={() => setIdentifierType("phone")}>Phone</button></div>
-          <label><span>{authMode === "google" ? "Google email" : identifierType === "email" ? "Email" : "Phone"}</span><input value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder={identifierType === "email" || authMode === "google" ? "name@example.com" : "+15551234567"} /></label>
-          {authMode === "password" && <label><span>Password</span><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Minimum 8 characters" /></label>}
-          {authMode === "otp" && otpChallenge && <label><span>OTP code</span><input value={otpCode} onChange={(event) => setOtpCode(event.target.value)} placeholder={otpChallenge.simulatedDelivery.code ?? "000000"} /></label>}
+        <div className="portal-auth-card-heading">
+          <h2>{verificationOnly ? "Verify your account" : method === "reset" ? "Reset your password" : mode === "signup" ? "Start free" : "Welcome back"}</h2>
+          <p>{verificationOnly ? `Enter the code for ${otpChallenge?.maskedDestination ?? "your account"}.` : mode === "signup" ? "No credit card required." : "Use your email or phone number."}</p>
         </div>
-        {authMode === "google" && <button className="portal-google" onClick={continueGoogle}><GoogleIcon />Continue with Google</button>}
-        {authMode === "password" && <button className="portal-primary full" disabled={!identifier || !password} onClick={() => void continuePassword()}>{mode === "signup" ? "Create account" : "Sign in"}</button>}
-        {authMode === "otp" && !otpChallenge && <button className="portal-primary full" disabled={!identifier} onClick={() => run(async () => { const challenge = await requestOtp({ identifierType, identifier, purpose: mode === "signup" ? "signup" : "login", deviceId }); setOtpChallenge(challenge); setOtpCode(challenge.simulatedDelivery.code ?? ""); })}>Send OTP</button>}
-        {authMode === "otp" && otpChallenge && <button className="portal-primary full" disabled={!otpCode} onClick={() => run(async () => onAuth(await verifyOtp({ challengeId: otpChallenge.challengeId, code: otpCode, deviceId, deviceLabel: "SYSTOLAB Portal" })))}>Verify OTP</button>}
-        {status && <div className="portal-status inline">{status}</div>}{error && <div className="portal-alert inline">{error}</div>}
+
+        {isFirebaseConfigured && !verificationOnly && method !== "reset" && (
+          <>
+            <button className="portal-google" type="button" disabled={busy} onClick={() => void continueGoogle()}><GoogleIcon />Continue with Google</button>
+            <div className="portal-auth-divider"><span>or</span></div>
+          </>
+        )}
+
+        {mode === "login" && !verificationOnly && method !== "reset" && (
+          <div className="portal-auth-tabs portal-auth-tabs--two">
+            <button type="button" className={method === "password" ? "active" : ""} onClick={() => selectMethod("password")}>Password</button>
+            <button type="button" className={method === "otp" ? "active" : ""} onClick={() => selectMethod("otp")}>One-time code</button>
+          </div>
+        )}
+
+        {method === "password" && (
+          <form className="portal-form-grid" onSubmit={(event) => { event.preventDefault(); void continuePassword(); }}>
+            {mode === "signup" && <label><span>Your name</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" placeholder="Full name" required /></label>}
+            <IdentifierTypeControl value={identifierType} onChange={setIdentifierType} />
+            <label><span>{identifierLabel}</span><input value={identifier} onChange={(event) => setIdentifier(event.target.value)} type={identifierType === "email" ? "email" : "tel"} autoComplete={identifierType === "email" ? "email" : "tel"} placeholder={identifierPlaceholder} required /></label>
+            <label><span>Password</span><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder={mode === "signup" ? "At least 12 characters" : "Your password"} minLength={12} required /></label>
+            {mode === "signup" && <p className="portal-field-help">Use 12+ characters with uppercase, lowercase, a number, and a symbol.</p>}
+            <button className="portal-primary full" type="submit" disabled={busy || !identifier.trim() || !password || (mode === "signup" && !displayName.trim())}>{busy ? "Please wait" : mode === "signup" ? "Create account" : "Sign in"}</button>
+            {mode === "login" && <button className="portal-link-button" type="button" onClick={() => selectMethod("reset")}>Forgot password?</button>}
+          </form>
+        )}
+
+        {method === "otp" && !otpChallenge && (
+          <form className="portal-form-grid" onSubmit={(event) => { event.preventDefault(); void requestLoginCode(); }}>
+            <IdentifierTypeControl value={identifierType} onChange={setIdentifierType} />
+            <label><span>{identifierLabel}</span><input value={identifier} onChange={(event) => setIdentifier(event.target.value)} type={identifierType === "email" ? "email" : "tel"} autoComplete={identifierType === "email" ? "email" : "tel"} placeholder={identifierPlaceholder} required /></label>
+            <button className="portal-primary full" type="submit" disabled={busy || !identifier.trim()}>{busy ? "Preparing code" : "Get one-time code"}</button>
+          </form>
+        )}
+
+        {method === "otp" && otpChallenge && (
+          <form className="portal-form-grid" onSubmit={(event) => { event.preventDefault(); void verifyCode(); }}>
+            {otpChallenge.simulatedDelivery.code && <div className="portal-verification-code"><span>Verification code</span><strong>{otpChallenge.simulatedDelivery.code}</strong></div>}
+            <label><span>One-time code</span><input value={otpCode} onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, ""))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" required autoFocus /></label>
+            <button className="portal-primary full" type="submit" disabled={busy || !otpCode}>{busy ? "Verifying" : mode === "signup" ? "Verify and open dashboard" : "Verify and sign in"}</button>
+            {mode === "login" && <button className="portal-link-button" type="button" onClick={() => selectMethod("otp")}>Use a different account</button>}
+          </form>
+        )}
+
+        {method === "reset" && !resetChallenge && (
+          <form className="portal-form-grid" onSubmit={(event) => { event.preventDefault(); void beginPasswordReset(); }}>
+            <IdentifierTypeControl value={identifierType} onChange={setIdentifierType} />
+            <label><span>{identifierLabel}</span><input value={identifier} onChange={(event) => setIdentifier(event.target.value)} type={identifierType === "email" ? "email" : "tel"} placeholder={identifierPlaceholder} required /></label>
+            <button className="portal-primary full" type="submit" disabled={busy || !identifier.trim()}>{busy ? "Preparing reset" : "Get reset token"}</button>
+            <button className="portal-link-button" type="button" onClick={() => selectMethod("password")}>Back to sign in</button>
+          </form>
+        )}
+
+        {method === "reset" && resetChallenge && (
+          <form className="portal-form-grid" onSubmit={(event) => { event.preventDefault(); void completePasswordReset(); }}>
+            {resetChallenge.simulatedDelivery.token && <div className="portal-reset-token"><span>Reset token</span><code>{resetChallenge.simulatedDelivery.token}</code></div>}
+            <label><span>Reset token</span><input value={resetToken} onChange={(event) => setResetToken(event.target.value)} required /></label>
+            <label><span>New password</span><input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" autoComplete="new-password" minLength={12} placeholder="At least 12 characters" required /></label>
+            <button className="portal-primary full" type="submit" disabled={busy || !resetToken || !newPassword}>{busy ? "Updating password" : "Update password"}</button>
+          </form>
+        )}
+
+        {status && <div className="portal-status inline">{status}</div>}
+        {error && <div className="portal-alert inline">{error}</div>}
+        <p className="portal-auth-switch">{mode === "signup" ? "Already have an account?" : "New to SYSTOLAB?"}<button type="button" onClick={() => navigate(mode === "signup" ? "/login" : "/signup")}>{mode === "signup" ? "Sign in" : "Create account"}</button></p>
       </section>
     </main>
   );
+}
+
+function IdentifierTypeControl({ value, onChange }: { value: AuthIdentifierType; onChange: (value: AuthIdentifierType) => void }) {
+  return <div className="portal-segmented" role="group" aria-label="Account identifier"><button type="button" className={value === "email" ? "active" : ""} onClick={() => onChange("email")}>Email</button><button type="button" className={value === "phone" ? "active" : ""} onClick={() => onChange("phone")}>Phone</button></div>;
 }
 
 function PortalDashboard({ portal, usage, agencyDashboard, agencyOperating, refresh, navigate }: { portal: PortalMeResponse | null; usage: PortalUsageOverview | null; agencyDashboard: AgencyDashboardResponse | null; agencyOperating: AgencyOperatingSystemResponse | null; refresh: () => Promise<void>; navigate: (path: string) => void }) {
@@ -491,18 +670,21 @@ function PortalFirstValueJourney({ portal, refresh, navigate }: { portal: Portal
 
   const firstName = portal?.user.displayName?.split(" ")[0] || "there";
   const progressPercent = phase === "ready" ? 0 : Math.round(((stageIndex + 1) / intelligenceJourneyStages.length) * 100);
+  const visibleStages = phase === "ready"
+    ? ["Collect current website evidence", "Evaluate website and SEO signals", "Prepare your executive report"]
+    : intelligenceJourneyStages;
 
   return (
     <main className="portal-main portal-first-value">
       <section className="portal-welcome-stage">
         <div className="portal-welcome-copy">
           <span className="portal-eyebrow">Welcome, {firstName}</span>
-          <h1>Let's discover what may be costing this business customers.</h1>
-          <p>Enter the website you want to understand. SYSTOLAB will prepare a complete Website and SEO Executive Business Intelligence Report.</p>
+          <h1>Analyze your first website.</h1>
+          <p>Enter a public website address to create a current, evidence-based Website and SEO report.</p>
           <div className="portal-url-bar portal-first-url">
             <Globe2 size={21} />
             <input value={targetUrl} onChange={(event) => setTargetUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && phase !== "running") void beginAnalysis(); }} placeholder="https://yourwebsite.com" aria-label="Website URL" disabled={phase === "running"} />
-            <button disabled={phase === "running" || !targetUrl.trim()} onClick={() => void beginAnalysis()}>{phase === "running" ? "Preparing intelligence" : "Generate Executive Business Intelligence"}</button>
+            <button disabled={phase === "running" || !targetUrl.trim()} onClick={() => void beginAnalysis()}>{phase === "running" ? "Analyzing website" : "Analyze website"}</button>
           </div>
           <div className="portal-hero-actions portal-secondary-actions">
             <button className="portal-secondary" onClick={() => navigate("/demo")}>See a Sample Report</button>
@@ -511,9 +693,9 @@ function PortalFirstValueJourney({ portal, refresh, navigate }: { portal: Portal
           {error && <div className="portal-alert inline">{error}</div>}
         </div>
         <div className={"portal-intelligence-journey " + (phase === "running" || phase === "complete" ? "active" : "")}>
-          <div className="portal-journey-header"><span>{phase === "ready" ? "Your intelligence journey" : progressLabel}</span><strong>{progressPercent}%</strong></div>
-          <div className="portal-progress-track"><span style={{ width: progressPercent + "%" }} /></div>
-          <div className="portal-stage-list">{intelligenceJourneyStages.map((stage, index) => <div key={stage} className={index < stageIndex ? "complete" : index === stageIndex && phase !== "ready" ? "active" : ""}><CheckCircle2 size={18} /><span>{stage}</span></div>)}</div>
+          <div className="portal-journey-header"><span>{phase === "ready" ? "What happens next" : progressLabel}</span><strong>{phase === "ready" ? "3 steps" : `${progressPercent}%`}</strong></div>
+          {phase !== "ready" && <div className="portal-progress-track"><span style={{ width: progressPercent + "%" }} /></div>}
+          <div className="portal-stage-list">{visibleStages.map((stage, index) => <div key={stage} className={phase !== "ready" && index < stageIndex ? "complete" : phase !== "ready" && index === stageIndex ? "active" : ""}><CheckCircle2 size={18} /><span>{stage}</span></div>)}</div>
         </div>
       </section>
     </main>
@@ -590,7 +772,7 @@ function ProjectCreatePanel({ organizations, refresh, navigate }: { organization
       <h2>Add a client website</h2>
       <label className="portal-simple-field"><span>Website URL</span><input value={form.targetUrl} onChange={(event) => setForm({ ...form, targetUrl: event.target.value })} placeholder="https://clientwebsite.com" /></label>
       <details className="portal-form-advanced">
-        <summary>Add optional client and market context</summary>
+        <summary>Add Competitor Details & Compare Their Website</summary>
         <div className="portal-form-grid">
           <label><span>Client or business name</span><input value={form.projectName} onChange={(event) => setForm({ ...form, projectName: event.target.value })} placeholder="Client name" /></label>
           <label><span>Client company</span><input value={form.clientCompanyName} onChange={(event) => setForm({ ...form, clientCompanyName: event.target.value })} placeholder="Company name" /></label>
@@ -1361,7 +1543,19 @@ function GoogleIcon() {
 }
 
 function readStoredAuth(): StoredPortalAuth | null {
-  try { const raw = localStorage.getItem("systolab.auth"); return raw ? JSON.parse(raw) : null; } catch { return null; }
+  try {
+    const raw = localStorage.getItem("systolab.auth");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<StoredPortalAuth>;
+    if (!parsed.user?.userId || !parsed.tokens?.accessToken || !parsed.tokens.refreshToken || !parsed.session?.sessionId) {
+      localStorage.removeItem("systolab.auth");
+      return null;
+    }
+    return parsed as StoredPortalAuth;
+  } catch {
+    localStorage.removeItem("systolab.auth");
+    return null;
+  }
 }
 
 function getOrCreateDeviceId() {
@@ -1370,12 +1564,6 @@ function getOrCreateDeviceId() {
   const generated = `web-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
   localStorage.setItem("systolab.deviceId", generated);
   return generated;
-}
-
-function simpleId(value: string) {
-  let hash = 0;
-  for (const char of value) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return hash.toString(16);
 }
 
 function implementationNotesText(notes?: TenantBranding["agencyImplementationNotes"]): string {
