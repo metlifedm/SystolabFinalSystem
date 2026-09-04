@@ -8,6 +8,7 @@ export interface AuthOtpChallengeDocument extends mongoose.Document {
   identifier: string;
   purpose: OtpPurpose;
   codeHash: string;
+  pendingPasswordHash?: string;
   expiresAt: Date;
   resendAvailableAt: Date;
   attempts: number;
@@ -28,6 +29,7 @@ const AuthOtpChallengeSchema = new Schema<AuthOtpChallengeDocument>(
     identifier: { type: String, required: true, index: true },
     purpose: { type: String, enum: ["signup", "login", "password_reset"], required: true, index: true },
     codeHash: { type: String, required: true },
+    pendingPasswordHash: { type: String },
     expiresAt: { type: Date, required: true, index: true },
     resendAvailableAt: { type: Date, required: true },
     attempts: { type: Number, default: 0 },

@@ -1,16 +1,14 @@
 import {
   createHmac,
-  createPublicKey,
   randomBytes,
   scryptSync,
-  timingSafeEqual,
-  verify as verifySignature,
-  type JsonWebKey as CryptoJsonWebKey
+  timingSafeEqual
 } from "node:crypto";
-import { getFirebaseAuth } from "../lib/firebaseAdmin.js";
+import { OAuth2Client } from "google-auth-library";
 import type { Request } from "express";
 import type {
   AuthIdentifierType,
+  AuthPublicConfig,
   AuthProviderType,
   AuthResponse,
   AuthSessionSummary,
@@ -38,6 +36,8 @@ import { AuthThrottle } from "../models/AuthThrottle.js";
 import { AuthUser, type AuthUserDocument } from "../models/AuthUser.js";
 import { makeId, sha256 } from "../utils/crypto.js";
 import { isMongoConnected } from "../db/mongoose.js";
+import { readJsonFile, resolveRuntimeFilePath, writeJsonFile } from "./runtimeFileStore.js";
+import { AuthenticationDeliveryError, sendAuthenticationCode } from "./emailService.js";
 
 // ── In-memory stores (test / no-DB mode) ──────────────────────────────────────
 type MemAuthUser = {
@@ -58,7 +58,7 @@ type MemAuthSession = {
 };
 type MemAuthOtp = {
   challengeId: string; userId?: string; identifierType: string; identifier: string; purpose: string;
-  codeHash: string; expiresAt: Date; resendAvailableAt: Date;
+  codeHash: string; pendingPasswordHash?: string; expiresAt: Date; resendAvailableAt: Date;
   attempts: number; maxAttempts: number; consumedAt?: Date; lockedUntil?: Date;
   ipHash: string; deviceFingerprintHash: string;
   save(): Promise<void>;
@@ -69,6 +69,19 @@ type MemPasswordReset = {
   lockedUntil?: Date; consumedAt?: Date; ipHash: string; deviceFingerprintHash: string;
   save(): Promise<void>;
 };
+type MemAuthAudit = {
+  auditId: string;
+  userId?: string;
+  identifier?: string;
+  eventType: AuthAuditEvent;
+  success: boolean;
+  reason?: string;
+  ipHash: string;
+  deviceFingerprintHash: string;
+  userAgent?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: Date;
+};
 
 const _memAuthUsers = new Map<string, MemAuthUser>();          // key: userId
 const _memAuthByEmail = new Map<string, string>();              // email → userId
@@ -77,6 +90,179 @@ const _memAuthByGoogle = new Map<string, string>();             // googleId → 
 export const _memAuthSessionsForTest = new Map<string, MemAuthSession>(); // key: sessionId
 const _memAuthOtps = new Map<string, MemAuthOtp>();            // key: challengeId
 const _memPasswordResets = new Map<string, MemPasswordReset>(); // key: resetId
+const _memAuthAudits: MemAuthAudit[] = [];
+
+interface PersistedAuthStore {
+  schemaVersion: 1;
+  users: Array<Omit<MemAuthUser, "save" | "createdAt" | "updatedAt" | "lockedUntil" | "lastLoginAt" | "googleClaimsCapturedAt" | "deletedAt"> & {
+    createdAt: string;
+    updatedAt: string;
+    lockedUntil?: string;
+    lastLoginAt?: string;
+    googleClaimsCapturedAt?: string;
+    deletedAt?: string;
+  }>;
+  sessions: Array<Omit<MemAuthSession, "createdAt" | "lastSeenAt" | "expiresAt" | "refreshExpiresAt" | "revokedAt"> & {
+    createdAt: string;
+    lastSeenAt: string;
+    expiresAt: string;
+    refreshExpiresAt: string;
+    revokedAt?: string;
+  }>;
+  challenges: Array<Omit<MemAuthOtp, "save" | "expiresAt" | "resendAvailableAt" | "consumedAt" | "lockedUntil"> & {
+    expiresAt: string;
+    resendAvailableAt: string;
+    consumedAt?: string;
+    lockedUntil?: string;
+  }>;
+  resets: Array<Omit<MemPasswordReset, "save" | "expiresAt" | "consumedAt" | "lockedUntil"> & {
+    expiresAt: string;
+    consumedAt?: string;
+    lockedUntil?: string;
+  }>;
+  audits: Array<Omit<MemAuthAudit, "createdAt"> & { createdAt: string }>;
+  updatedAt: string;
+}
+
+let memoryAuthLoaded = false;
+
+function memoryAuthPersistenceEnabled(): boolean {
+  return env.memoryStore && env.nodeEnv !== "test";
+}
+
+function ensureMemoryAuthLoaded(): void {
+  if (memoryAuthLoaded) return;
+  memoryAuthLoaded = true;
+  if (!memoryAuthPersistenceEnabled()) return;
+  const payload = readJsonFile<Partial<PersistedAuthStore>>(resolveRuntimeFilePath(env.authMemoryStoreFile));
+  if (!payload) return;
+
+  for (const item of payload.users ?? []) {
+    if (!item.id) continue;
+    const user = makeMemUser(item.id, {
+      ...item,
+      createdAt: parseStoredDate(item.createdAt) ?? new Date(),
+      updatedAt: parseStoredDate(item.updatedAt) ?? new Date(),
+      lockedUntil: parseStoredDate(item.lockedUntil),
+      lastLoginAt: parseStoredDate(item.lastLoginAt),
+      googleClaimsCapturedAt: parseStoredDate(item.googleClaimsCapturedAt),
+      deletedAt: parseStoredDate(item.deletedAt)
+    });
+    _memAuthUsers.set(user.id, user);
+    if (user.email) _memAuthByEmail.set(user.email, user.id);
+    if (user.phone) _memAuthByPhone.set(user.phone, user.id);
+    if (user.googleId) _memAuthByGoogle.set(user.googleId, user.id);
+  }
+
+  for (const item of payload.sessions ?? []) {
+    const expiresAt = parseStoredDate(item.expiresAt);
+    const refreshExpiresAt = parseStoredDate(item.refreshExpiresAt);
+    if (!item.sessionId || !expiresAt || !refreshExpiresAt || refreshExpiresAt <= new Date()) continue;
+    _memAuthSessionsForTest.set(item.sessionId, {
+      ...item,
+      createdAt: parseStoredDate(item.createdAt) ?? new Date(),
+      lastSeenAt: parseStoredDate(item.lastSeenAt) ?? new Date(),
+      expiresAt,
+      refreshExpiresAt,
+      revokedAt: parseStoredDate(item.revokedAt)
+    });
+  }
+
+  for (const item of payload.challenges ?? []) {
+    const expiresAt = parseStoredDate(item.expiresAt);
+    const resendAvailableAt = parseStoredDate(item.resendAvailableAt);
+    if (!item.challengeId || !expiresAt || !resendAvailableAt || expiresAt <= new Date()) continue;
+    _memAuthOtps.set(item.challengeId, {
+      ...item,
+      expiresAt,
+      resendAvailableAt,
+      consumedAt: parseStoredDate(item.consumedAt),
+      lockedUntil: parseStoredDate(item.lockedUntil),
+      save: async function () {
+        _memAuthOtps.set(this.challengeId, this);
+        persistMemoryAuth();
+      }
+    });
+  }
+
+  for (const item of payload.resets ?? []) {
+    const expiresAt = parseStoredDate(item.expiresAt);
+    if (!item.resetId || !expiresAt || expiresAt <= new Date()) continue;
+    _memPasswordResets.set(item.resetId, {
+      ...item,
+      expiresAt,
+      consumedAt: parseStoredDate(item.consumedAt),
+      lockedUntil: parseStoredDate(item.lockedUntil),
+      save: async function () {
+        _memPasswordResets.set(this.resetId, this);
+        persistMemoryAuth();
+      }
+    });
+  }
+
+  for (const item of payload.audits ?? []) {
+    const createdAt = parseStoredDate(item.createdAt);
+    if (!item.auditId || !createdAt) continue;
+    _memAuthAudits.push({ ...item, createdAt });
+  }
+}
+
+function persistMemoryAuth(): void {
+  if (!memoryAuthPersistenceEnabled()) return;
+  try {
+    const users = [..._memAuthUsers.values()].map(({ save: _save, ...user }) => ({
+      ...user,
+      createdAt: user.createdAt.toISOString(),
+      updatedAt: user.updatedAt.toISOString(),
+      lockedUntil: user.lockedUntil?.toISOString(),
+      lastLoginAt: user.lastLoginAt?.toISOString(),
+      googleClaimsCapturedAt: user.googleClaimsCapturedAt?.toISOString(),
+      deletedAt: user.deletedAt?.toISOString()
+    }));
+    const sessions = [..._memAuthSessionsForTest.values()].map((session) => ({
+      ...session,
+      createdAt: session.createdAt.toISOString(),
+      lastSeenAt: session.lastSeenAt.toISOString(),
+      expiresAt: session.expiresAt.toISOString(),
+      refreshExpiresAt: session.refreshExpiresAt.toISOString(),
+      revokedAt: session.revokedAt?.toISOString()
+    }));
+    const challenges = [..._memAuthOtps.values()].map(({ save: _save, ...challenge }) => ({
+      ...challenge,
+      expiresAt: challenge.expiresAt.toISOString(),
+      resendAvailableAt: challenge.resendAvailableAt.toISOString(),
+      consumedAt: challenge.consumedAt?.toISOString(),
+      lockedUntil: challenge.lockedUntil?.toISOString()
+    }));
+    const resets = [..._memPasswordResets.values()].map(({ save: _save, ...reset }) => ({
+      ...reset,
+      expiresAt: reset.expiresAt.toISOString(),
+      consumedAt: reset.consumedAt?.toISOString(),
+      lockedUntil: reset.lockedUntil?.toISOString()
+    }));
+    const audits = _memAuthAudits.slice(-1000).map((audit) => ({
+      ...audit,
+      createdAt: audit.createdAt.toISOString()
+    }));
+    writeJsonFile(resolveRuntimeFilePath(env.authMemoryStoreFile), {
+      schemaVersion: 1,
+      users,
+      sessions,
+      challenges,
+      resets,
+      audits,
+      updatedAt: new Date().toISOString()
+    } satisfies PersistedAuthStore);
+  } catch {
+    // Development persistence must not make authentication unavailable.
+  }
+}
+
+function parseStoredDate(value: string | undefined): Date | undefined {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
 
 function makeMemUser(id: string, input: Record<string, unknown>): MemAuthUser {
   const user: MemAuthUser = {
@@ -97,14 +283,20 @@ function makeMemUser(id: string, input: Record<string, unknown>): MemAuthUser {
     phoneVerified: (input.phoneVerified as boolean) ?? false,
     googleVerified: (input.googleVerified as boolean) ?? false,
     lifecycleState: (input.lifecycleState as string) ?? "PENDING",
-    loginFailureCount: 0,
-    lockedUntil: undefined,
-    createdAt: new Date(), updatedAt: new Date(),
+    loginFailureCount: (input.loginFailureCount as number | undefined) ?? 0,
+    lockedUntil: input.lockedUntil as Date | undefined,
+    lastLoginAt: input.lastLoginAt as Date | undefined,
+    passwordHash: input.passwordHash as string | undefined,
+    deletedAt: input.deletedAt as Date | undefined,
+    createdAt: (input.createdAt as Date | undefined) ?? new Date(),
+    updatedAt: (input.updatedAt as Date | undefined) ?? new Date(),
     save: async function () {
+      this.updatedAt = new Date();
       _memAuthUsers.set(this.id, this);
       if (this.email) _memAuthByEmail.set(this.email, this.id);
       if (this.phone) _memAuthByPhone.set(this.phone, this.id);
       if (this.googleId) _memAuthByGoogle.set(this.googleId, this.id);
+      persistMemoryAuth();
     }
   };
   return user;
@@ -148,6 +340,57 @@ export class AuthError extends Error {
   }
 }
 
+export function getAuthPublicConfig(): AuthPublicConfig {
+  return {
+    google: {
+      enabled: Boolean(env.authGoogleClientId),
+      clientId: env.authGoogleClientId || undefined
+    },
+    password: {
+      enabled: true,
+      minimumLength: 12
+    },
+    otp: {
+      emailEnabled: env.authDeliveryPreview || Boolean(env.emailProvider === "brevo" && env.emailApiKey && env.emailFromAddress),
+      phoneEnabled: env.authPhoneEnabled && (env.authDeliveryPreview || Boolean(env.emailApiKey && env.brevoSmsSender)),
+      length: Math.max(4, Math.min(10, env.authOtpLength)),
+      expiresInMinutes: env.authOtpTtlMinutes,
+      resendCooldownSeconds: env.authOtpResendCooldownSeconds
+    }
+  };
+}
+
+export function getDevelopmentAuthSnapshot(limit = 250) {
+  ensureMemoryAuthLoaded();
+  const users = [..._memAuthUsers.values()]
+    .filter((user) => user.lifecycleState !== "DELETED")
+    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())
+    .slice(0, limit)
+    .map((user) => ({
+      ...toUserProfile(user as unknown as AuthUserDocument),
+      loginFailureCount: user.loginFailureCount
+    }));
+  const sessions = [..._memAuthSessionsForTest.values()]
+    .sort((left, right) => right.lastSeenAt.getTime() - left.lastSeenAt.getTime())
+    .map((session) => ({
+      sessionId: session.sessionId,
+      userId: session.userId,
+      deviceId: session.deviceId,
+      deviceLabel: session.deviceLabel,
+      provider: session.provider,
+      createdAt: session.createdAt.toISOString(),
+      lastSeenAt: session.lastSeenAt.toISOString(),
+      expiresAt: session.expiresAt.toISOString(),
+      refreshExpiresAt: session.refreshExpiresAt.toISOString(),
+      revokedAt: session.revokedAt?.toISOString()
+    }));
+  const audits = _memAuthAudits
+    .slice(-Math.max(limit, 100))
+    .reverse()
+    .map((audit) => ({ ...audit, createdAt: audit.createdAt.toISOString() }));
+  return { users, sessions, audits };
+}
+
 export function buildAuthContext(req: Request, inputDeviceId?: string, inputDeviceLabel?: string): AuthContext {
   const userAgent = String(req.headers["user-agent"] ?? "unknown-user-agent").slice(0, 300);
   const forwarded = String(req.headers["x-forwarded-for"] ?? "").split(",")[0]?.trim();
@@ -168,18 +411,9 @@ export async function googleLogin(input: GoogleLoginRequest, context: AuthContex
   await enforceThrottle("login_validation", `device:${context.deviceFingerprintHash}`, 12, 10 * 60_000, context);
   await writeAudit("google_login_attempt", true, context, { metadata: { deviceId: context.deviceId } });
 
-  const supplemental = {
-    displayName: input.displayName,
-    givenName: input.givenName,
-    familyName: input.familyName,
-    avatarUrl: input.photoURL,
-    phoneNumber: input.phoneNumber,
-    locale: input.locale
-  };
-
   let google: GoogleIdentity;
   try {
-    google = await verifyGoogleCredential(input.credential, supplemental);
+    google = await verifyGoogleCredential(input.credential);
   } catch (error) {
     await writeAudit("google_login_attempt", false, context, {
       reason: error instanceof Error ? error.message : "Google credential validation failed"
@@ -222,6 +456,7 @@ export async function googleLogin(input: GoogleLoginRequest, context: AuthContex
 }
 
 export async function requestOtp(input: OtpRequestInput, context: AuthContext): Promise<OtpChallengeResponse> {
+  ensureIdentifierDeliveryAvailable(input.identifierType);
   const identifier = normalizeIdentifier(input.identifierType, input.identifier);
   await enforceThrottle("otp_request", `ip:${context.ipHash}`, 8, 10 * 60_000, context, identifier);
   await enforceThrottle("otp_request", `device:${context.deviceFingerprintHash}`, 8, 10 * 60_000, context, identifier);
@@ -264,6 +499,7 @@ export async function verifyOtp(input: OtpVerifyInput, context: AuthContext): Pr
   await enforceThrottle("otp_verify", `ip:${context.ipHash}`, 12, 10 * 60_000, context);
   await enforceThrottle("otp_verify", `device:${context.deviceFingerprintHash}`, 12, 10 * 60_000, context);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (!isMongoConnected()) ensureMemoryAuthLoaded();
   const challenge: any = !isMongoConnected()
     ? (_memAuthOtps.get(input.challengeId) ?? null)
     : await AuthOtpChallenge.findOne({ challengeId: input.challengeId });
@@ -292,6 +528,10 @@ export async function verifyOtp(input: OtpVerifyInput, context: AuthContext): Pr
   challenge.consumedAt = new Date();
   await challenge.save();
   const user = await resolveChallengeUser(challenge);
+  if (challenge.purpose === "signup" && challenge.pendingPasswordHash) {
+    user.passwordHash = challenge.pendingPasswordHash;
+    addProvider(user, "password");
+  }
   if (challenge.identifierType === "email") user.emailVerified = true;
   if (challenge.identifierType === "phone") user.phoneVerified = true;
   addProvider(user, challenge.identifierType === "email" ? "email_otp" : "phone_otp");
@@ -314,6 +554,7 @@ export async function verifyOtp(input: OtpVerifyInput, context: AuthContext): Pr
 
 export async function registerPassword(input: PasswordRegisterInput, context: AuthContext): Promise<AuthResponse & { otpChallenge: OtpChallengeResponse }> {
   validatePassword(input.password);
+  ensureIdentifierDeliveryAvailable(input.identifierType);
   const identifier = normalizeIdentifier(input.identifierType, input.identifier);
   const existing = await findUserByIdentifier(input.identifierType, identifier);
   if (existing && existing.lifecycleState !== "PENDING") {
@@ -326,12 +567,10 @@ export async function registerPassword(input: PasswordRegisterInput, context: Au
     phone: input.identifierType === "phone" ? identifier : undefined,
     displayName: input.displayName
   });
-  user.passwordHash = hashPassword(input.password);
   user.displayName = input.displayName?.trim() || user.displayName;
-  addProvider(user, "password");
   user.lifecycleState = user.emailVerified || user.phoneVerified || user.googleVerified ? "VERIFIED" : "PENDING";
   await user.save();
-  const otpChallenge = await createOtpChallenge(input.identifierType, identifier, "signup", user, context);
+  const otpChallenge = await createOtpChallenge(input.identifierType, identifier, "signup", user, context, hashPassword(input.password));
   await writeAudit("password_register", true, context, { user, identifier, metadata: { otpChallengeId: otpChallenge.challengeId } });
 
   return {
@@ -339,8 +578,8 @@ export async function registerPassword(input: PasswordRegisterInput, context: Au
     requiresVerification: user.lifecycleState === "PENDING",
     otpChallenge,
     message: existing
-      ? "Account verification restarted. Verify the simulated OTP before password login."
-      : "Password account created. Verify the simulated OTP before password login."
+      ? "Account verification restarted. Enter the code we sent to finish signup."
+      : "Password account created. Enter the code we sent to finish signup."
   };
 }
 
@@ -392,6 +631,7 @@ export async function passwordLogin(input: PasswordLoginInput, context: AuthCont
 }
 
 export async function forgotPassword(input: PasswordForgotInput, context: AuthContext): Promise<PasswordResetChallengeResponse> {
+  ensureIdentifierDeliveryAvailable(input.identifierType);
   const identifier = normalizeIdentifier(input.identifierType, input.identifier);
   await enforceThrottle("password_reset", `ip:${context.ipHash}`, 6, 10 * 60_000, context, identifier);
   await enforceThrottle("password_reset", `identifier:${identifier}`, 3, 10 * 60_000, context, identifier);
@@ -403,16 +643,17 @@ export async function forgotPassword(input: PasswordForgotInput, context: AuthCo
       maskedDestination: maskIdentifier(input.identifierType, identifier),
       expiresAt: minutesFromNow(env.authPasswordResetMinutes).toISOString(),
       maxAttempts: 3,
-      simulatedDelivery: {
-        mode: "backend_simulation",
-        note: "If the account exists, a reset token is generated internally. No external email or SMS service is used."
+      delivery: {
+        channel: input.identifierType === "email" ? "email" : "sms",
+        message: "If an account exists, a password reset code has been sent."
       }
     };
   }
 
   const resetId = makeId("reset");
-  const token = randomToken(24);
+  const token = generateOtpCode();
   if (!isMongoConnected()) {
+    ensureMemoryAuthLoaded();
     const expiresAt = minutesFromNow(env.authPasswordResetMinutes);
     const reset: MemPasswordReset = {
       resetId,
@@ -425,20 +666,28 @@ export async function forgotPassword(input: PasswordForgotInput, context: AuthCo
       maxAttempts: 3,
       ipHash: context.ipHash,
       deviceFingerprintHash: context.deviceFingerprintHash,
-      save: async function () { _memPasswordResets.set(this.resetId, this); }
+      save: async function () {
+        _memPasswordResets.set(this.resetId, this);
+        persistMemoryAuth();
+      }
     };
     _memPasswordResets.set(resetId, reset);
+    persistMemoryAuth();
+    let delivery;
+    try {
+      delivery = await deliverAuthenticationCode(input.identifierType, identifier, token, "password_reset", env.authPasswordResetMinutes);
+    } catch (error) {
+      _memPasswordResets.delete(resetId);
+      persistMemoryAuth();
+      throw error;
+    }
     await writeAudit("password_reset_requested", true, context, { user, identifier, metadata: { resetId } });
     return {
       resetId,
       maskedDestination: maskIdentifier(input.identifierType, identifier),
       expiresAt: expiresAt.toISOString(),
       maxAttempts: reset.maxAttempts,
-      simulatedDelivery: {
-        mode: "backend_simulation",
-        token,
-        note: "Self-contained reset token generated by backend simulation. No external email or SMS service was called."
-      }
+      delivery
     };
   }
   const reset = await AuthPasswordReset.create({
@@ -453,22 +702,26 @@ export async function forgotPassword(input: PasswordForgotInput, context: AuthCo
     ipHash: context.ipHash,
     deviceFingerprintHash: context.deviceFingerprintHash
   });
+  let delivery;
+  try {
+    delivery = await deliverAuthenticationCode(input.identifierType, identifier, token, "password_reset", env.authPasswordResetMinutes);
+  } catch (error) {
+    await AuthPasswordReset.deleteOne({ resetId });
+    throw error;
+  }
   await writeAudit("password_reset_requested", true, context, { user, identifier, metadata: { resetId } });
   return {
     resetId: reset.resetId,
     maskedDestination: maskIdentifier(input.identifierType, identifier),
     expiresAt: reset.expiresAt.toISOString(),
     maxAttempts: reset.maxAttempts,
-    simulatedDelivery: {
-      mode: "backend_simulation",
-      token,
-      note: "Self-contained reset token generated by backend simulation. No external email or SMS service was called."
-    }
+    delivery
   };
 }
 
 export async function resetPassword(input: PasswordResetInput, context: AuthContext): Promise<AuthResponse> {
   validatePassword(input.newPassword);
+  if (!isMongoConnected()) ensureMemoryAuthLoaded();
   const reset = !isMongoConnected()
     ? (_memPasswordResets.get(input.resetId) ?? null)
     : await AuthPasswordReset.findOne({ resetId: input.resetId });
@@ -511,6 +764,7 @@ export async function refreshSession(input: RefreshSessionInput, context: AuthCo
   const parsed = parseRefreshToken(input.refreshToken);
 
   if (!isMongoConnected()) {
+    ensureMemoryAuthLoaded();
     const memSess = _memAuthSessionsForTest.get(parsed.sessionId);
     if (!memSess || memSess.revokedAt || memSess.refreshExpiresAt <= new Date()) throw new AuthError("Refresh session is invalid or expired.", 401);
     if (!compareHash(hashSecret(input.refreshToken), memSess.refreshTokenHash)) throw new AuthError("Refresh token does not match the active session.", 401);
@@ -522,6 +776,7 @@ export async function refreshSession(input: RefreshSessionInput, context: AuthCo
     memSess.lastSeenAt = new Date();
     memSess.expiresAt = new Date(rotated.accessTokenExpiresAt);
     memSess.refreshExpiresAt = new Date(rotated.refreshTokenExpiresAt);
+    persistMemoryAuth();
     const summary: AuthSessionSummary = {
       sessionId: memSess.sessionId, deviceId: memSess.deviceId, deviceLabel: memSess.deviceLabel, provider: memSess.provider,
       createdAt: memSess.createdAt.toISOString(), lastSeenAt: memSess.lastSeenAt.toISOString(),
@@ -557,6 +812,7 @@ export async function logout(input: LogoutInput, context: AuthContext, userId?: 
   if (!input.sessionId && !input.refreshToken) throw new AuthError("sessionId or refreshToken is required.", 400);
 
   if (!isMongoConnected()) {
+    ensureMemoryAuthLoaded();
     // Find session by sessionId or by refreshTokenHash
     let memSess: MemAuthSession | undefined;
     if (input.sessionId) {
@@ -565,7 +821,10 @@ export async function logout(input: LogoutInput, context: AuthContext, userId?: 
       const rHash = hashSecret(input.refreshToken);
       memSess = [..._memAuthSessionsForTest.values()].find((s) => s.refreshTokenHash === rHash);
     }
-    if (memSess && !memSess.revokedAt) memSess.revokedAt = new Date();
+    if (memSess && !memSess.revokedAt) {
+      memSess.revokedAt = new Date();
+      persistMemoryAuth();
+    }
     return { message: "Session invalidated." };
   }
 
@@ -584,6 +843,7 @@ export async function logout(input: LogoutInput, context: AuthContext, userId?: 
 
 export async function listSessions(userId: string): Promise<AuthSessionSummary[]> {
   if (!isMongoConnected()) {
+    ensureMemoryAuthLoaded();
     const sessions = [..._memAuthSessionsForTest.values()].filter((s) => s.userId === userId);
     sessions.sort((a, b) => b.lastSeenAt.getTime() - a.lastSeenAt.getTime());
     return sessions.slice(0, 20).map((s) => ({
@@ -598,6 +858,14 @@ export async function listSessions(userId: string): Promise<AuthSessionSummary[]
 }
 
 export async function revokeSession(userId: string, sessionId: string, context: AuthContext): Promise<{ message: string }> {
+  if (!isMongoConnected()) {
+    ensureMemoryAuthLoaded();
+    const session = _memAuthSessionsForTest.get(sessionId);
+    if (!session || session.userId !== userId) throw new AuthError("Session not found.", 404);
+    session.revokedAt = new Date();
+    persistMemoryAuth();
+    return { message: "Session revoked." };
+  }
   const session = await AuthSession.findOne({ userId, sessionId });
   if (!session) throw new AuthError("Session not found.", 404);
   session.revokedAt = new Date();
@@ -610,6 +878,7 @@ export async function getUserByAccessToken(accessToken: string): Promise<{ user:
   const payload = readSignedToken(accessToken);
 
   if (!isMongoConnected()) {
+    ensureMemoryAuthLoaded();
     const memSess = _memAuthSessionsForTest.get(payload.sid);
     if (!memSess || memSess.revokedAt || memSess.expiresAt <= new Date()) throw new AuthError("Access session is invalid or expired.", 401);
     const memUser = _memAuthUsers.get(memSess.userId) ?? _memAuthUsers.get(payload.sub);
@@ -678,6 +947,7 @@ async function findActiveOtpCooldown(
 ): Promise<{ resendAvailableAt: Date } | null> {
   const now = new Date();
   if (!isMongoConnected()) {
+    ensureMemoryAuthLoaded();
     return [..._memAuthOtps.values()]
       .filter((challenge) =>
         challenge.identifier === identifier &&
@@ -701,28 +971,43 @@ async function createOtpChallenge(
   identifier: string,
   purpose: OtpPurpose,
   user: AuthUserDocument,
-  context: AuthContext
+  context: AuthContext,
+  pendingPasswordHash?: string
 ): Promise<OtpChallengeResponse> {
   const challengeId = makeId("otp");
   const code = generateOtpCode();
 
   if (!isMongoConnected()) {
+    ensureMemoryAuthLoaded();
+    ensureMemoryAuthLoaded();
     const codeHash = hashOtp(challengeId, code);
     const expiresAt = minutesFromNow(env.authOtpTtlMinutes);
     const resendAvailableAt = secondsFromNow(env.authOtpResendCooldownSeconds);
     const otp: MemAuthOtp = {
       challengeId, userId: (user as unknown as { id: string }).id,
-      identifierType, identifier, purpose, codeHash, expiresAt, resendAvailableAt,
+      identifierType, identifier, purpose, codeHash, pendingPasswordHash, expiresAt, resendAvailableAt,
       attempts: 0, maxAttempts: 3,
       ipHash: context.ipHash, deviceFingerprintHash: context.deviceFingerprintHash,
-      save: async function () { _memAuthOtps.set(this.challengeId, this); }
+      save: async function () {
+        _memAuthOtps.set(this.challengeId, this);
+        persistMemoryAuth();
+      }
     };
     _memAuthOtps.set(challengeId, otp);
+    persistMemoryAuth();
+    let delivery;
+    try {
+      delivery = await deliverAuthenticationCode(identifierType, identifier, code, purpose, env.authOtpTtlMinutes);
+    } catch (error) {
+      _memAuthOtps.delete(challengeId);
+      persistMemoryAuth();
+      throw error;
+    }
     return {
       challengeId, identifierType, maskedDestination: maskIdentifier(identifierType, identifier),
       purpose, expiresAt: expiresAt.toISOString(), resendAvailableAt: resendAvailableAt.toISOString(),
       maxAttempts: 3,
-      simulatedDelivery: { mode: "backend_simulation", code, note: "Self-contained OTP generated by backend simulation. No external email, SMS, or OTP delivery service was called." }
+      delivery
     };
   }
 
@@ -733,6 +1018,7 @@ async function createOtpChallenge(
     identifier,
     purpose,
     codeHash: hashOtp(challengeId, code),
+    pendingPasswordHash,
     expiresAt: minutesFromNow(env.authOtpTtlMinutes),
     resendAvailableAt: secondsFromNow(env.authOtpResendCooldownSeconds),
     attempts: 0,
@@ -740,6 +1026,13 @@ async function createOtpChallenge(
     ipHash: context.ipHash,
     deviceFingerprintHash: context.deviceFingerprintHash
   });
+  let delivery;
+  try {
+    delivery = await deliverAuthenticationCode(identifierType, identifier, code, purpose, env.authOtpTtlMinutes);
+  } catch (error) {
+    await AuthOtpChallenge.deleteOne({ challengeId });
+    throw error;
+  }
   return {
     challengeId: challenge.challengeId,
     identifierType,
@@ -748,16 +1041,34 @@ async function createOtpChallenge(
     expiresAt: challenge.expiresAt.toISOString(),
     resendAvailableAt: challenge.resendAvailableAt.toISOString(),
     maxAttempts: challenge.maxAttempts,
-    simulatedDelivery: {
-      mode: "backend_simulation",
-      code,
-      note: "Self-contained OTP generated by backend simulation. No external email, SMS, or OTP delivery service was called."
-    }
+    delivery
   };
+}
+
+async function deliverAuthenticationCode(
+  identifierType: AuthIdentifierType,
+  identifier: string,
+  code: string,
+  purpose: OtpPurpose,
+  expiresInMinutes: number
+) {
+  try {
+    return await sendAuthenticationCode({ identifierType, identifier, code, purpose, expiresInMinutes });
+  } catch (error) {
+    if (error instanceof AuthenticationDeliveryError) throw new AuthError(error.message, 503);
+    throw error;
+  }
+}
+
+function ensureIdentifierDeliveryAvailable(identifierType: AuthIdentifierType): void {
+  if (identifierType === "phone" && !env.authPhoneEnabled) {
+    throw new AuthError("Phone authentication is not enabled. Use email or Google sign-in.", 400);
+  }
 }
 
 async function resolveChallengeUser(challenge: { userId?: unknown; identifierType: AuthIdentifierType; identifier: string }): Promise<AuthUserDocument> {
   if (!isMongoConnected() && challenge.userId) {
+    ensureMemoryAuthLoaded();
     const user = _memAuthUsers.get(String(challenge.userId));
     if (user) return user as unknown as AuthUserDocument;
   }
@@ -786,6 +1097,7 @@ async function linkOrCreateUser(input: {
   googleVerified?: boolean;
 }): Promise<AuthUserDocument> {
   if (!isMongoConnected()) {
+    ensureMemoryAuthLoaded();
     let existingId: string | undefined;
     if (input.googleId) existingId = _memAuthByGoogle.get(input.googleId);
     if (!existingId && input.email) existingId = _memAuthByEmail.get(input.email);
@@ -859,6 +1171,7 @@ async function linkOrCreateUser(input: {
 
 async function findUserByIdentifier(type: AuthIdentifierType, identifier: string): Promise<AuthUserDocument | null> {
   if (!isMongoConnected()) {
+    ensureMemoryAuthLoaded();
     const uid = type === "email" ? _memAuthByEmail.get(identifier) : _memAuthByPhone.get(identifier);
     return uid ? (_memAuthUsers.get(uid) as unknown as AuthUserDocument) ?? null : null;
   }
@@ -886,8 +1199,13 @@ async function ensureUserCanAuthenticate(user: AuthUserDocument): Promise<void> 
 async function lockUserById(userId: string | undefined, lockedUntil: Date): Promise<void> {
   if (!userId) return;
   if (!isMongoConnected()) {
+    ensureMemoryAuthLoaded();
     const user = _memAuthUsers.get(userId);
-    if (user) { user.lifecycleState = "LOCKED"; user.lockedUntil = lockedUntil; }
+    if (user) {
+      user.lifecycleState = "LOCKED";
+      user.lockedUntil = lockedUntil;
+      persistMemoryAuth();
+    }
     return;
   }
   const user = await AuthUser.findById(userId);
@@ -903,6 +1221,7 @@ async function createSession(user: AuthUserDocument, provider: AuthProviderType,
   const payload = readSignedToken(tokens.accessToken);
 
   if (!isMongoConnected()) {
+    ensureMemoryAuthLoaded();
     const memUser = user as unknown as MemAuthUser;
     const memSess: MemAuthSession = {
       sessionId, userId: memUser.id, deviceId: context.deviceId, deviceLabel: context.deviceLabel,
@@ -912,6 +1231,7 @@ async function createSession(user: AuthUserDocument, provider: AuthProviderType,
       refreshExpiresAt: new Date(tokens.refreshTokenExpiresAt), createdAt: new Date()
     };
     _memAuthSessionsForTest.set(sessionId, memSess);
+    persistMemoryAuth();
     const summary: AuthSessionSummary = {
       sessionId, deviceId: context.deviceId, deviceLabel: context.deviceLabel, provider,
       createdAt: memSess.createdAt.toISOString(), lastSeenAt: memSess.lastSeenAt.toISOString(),
@@ -983,17 +1303,9 @@ function parseRefreshToken(token: string): { sessionId: string } {
   return { sessionId };
 }
 
-async function verifyGoogleCredential(
-  credential: string,
-  supplemental?: {
-    displayName?: string;
-    givenName?: string;
-    familyName?: string;
-    avatarUrl?: string;
-    phoneNumber?: string;
-    locale?: string;
-  }
-): Promise<GoogleIdentity> {
+const googleTokenVerifier = new OAuth2Client();
+
+async function verifyGoogleCredential(credential: string): Promise<GoogleIdentity> {
   if (!credential) throw new AuthError("Google credential is required.", 400);
 
   // Dev-mode simulated credential
@@ -1019,110 +1331,32 @@ async function verifyGoogleCredential(
     };
   }
 
-  const [headerRaw, payloadRaw, signatureRaw] = credential.split(".");
-  if (!headerRaw || !payloadRaw || !signatureRaw) throw new AuthError("Google credential must be a JWT ID token.", 400);
+  if (!env.authGoogleClientId) throw new AuthError("Google sign-in is not configured.", 503);
 
-  // Peek at the issuer to route to the correct verifier
-  const rawPayload = JSON.parse(Buffer.from(payloadRaw, "base64url").toString("utf8")) as { iss?: string };
-
-  // Firebase ID token (issued by Firebase Auth, not Google Sign-In directly)
-  if (typeof rawPayload.iss === "string" && rawPayload.iss.startsWith("https://securetoken.google.com/")) {
-    return verifyFirebaseIdToken(credential, supplemental);
-  }
-
-  // Standard Google Sign-In JWT (RS256, issued by accounts.google.com)
-  const header = JSON.parse(Buffer.from(headerRaw, "base64url").toString("utf8")) as { alg?: string; kid?: string };
-  const payload = JSON.parse(Buffer.from(payloadRaw, "base64url").toString("utf8")) as {
-    iss?: string;
-    aud?: string;
-    sub?: string;
-    email?: string;
-    email_verified?: boolean;
-    name?: string;
-    given_name?: string;
-    family_name?: string;
-    picture?: string;
-    locale?: string;
-    hd?: string;
-    exp?: number;
-  };
-  if (header.alg !== "RS256") throw new AuthError("Unsupported Google credential signature algorithm.", 400);
-  if (!payload.sub || !payload.exp) throw new AuthError("Google credential is missing required claims.", 400);
-  if (!["accounts.google.com", "https://accounts.google.com"].includes(payload.iss ?? "")) throw new AuthError("Google credential issuer is invalid.", 401);
-  if (payload.aud !== env.authGoogleClientId) throw new AuthError("Google credential audience is invalid.", 401);
-  if (payload.exp * 1000 <= Date.now()) throw new AuthError("Google credential expired.", 401);
-  const jwk = findConfiguredGoogleJwk(header.kid);
-  const publicKey = createPublicKey({ key: jwk, format: "jwk" });
-  const verified = verifySignature("RSA-SHA256", Buffer.from(`${headerRaw}.${payloadRaw}`), publicKey, Buffer.from(signatureRaw, "base64url"));
-  if (!verified) throw new AuthError("Google credential signature verification failed.", 401);
-  return {
-    googleId: payload.sub,
-    email: payload.email ? normalizeIdentifier("email", payload.email) : undefined,
-    displayName: supplemental?.displayName || payload.name,
-    givenName: supplemental?.givenName || payload.given_name,
-    familyName: supplemental?.familyName || payload.family_name,
-    avatarUrl: supplemental?.avatarUrl || payload.picture,
-    locale: supplemental?.locale || payload.locale,
-    phoneNumber: supplemental?.phoneNumber,
-    hostedDomain: payload.hd,
-    availableClaims: Object.keys(payload).sort(),
-    emailVerified: Boolean(payload.email_verified)
-  };
-}
-
-async function verifyFirebaseIdToken(
-  idToken: string,
-  supplemental?: {
-    displayName?: string;
-    givenName?: string;
-    familyName?: string;
-    avatarUrl?: string;
-    phoneNumber?: string;
-    locale?: string;
-  }
-): Promise<GoogleIdentity> {
-  if (!env.firebaseProjectId && !env.firebaseServiceAccountJson) {
-    throw new AuthError("Firebase is not configured on this server. Set FIREBASE_PROJECT_ID.", 500);
-  }
-  let decoded: Awaited<ReturnType<ReturnType<typeof getFirebaseAuth>["verifyIdToken"]>>;
   try {
-    decoded = await getFirebaseAuth().verifyIdToken(idToken);
-  } catch {
-    throw new AuthError("Firebase ID token verification failed.", 401);
+    const ticket = await googleTokenVerifier.verifyIdToken({
+      idToken: credential,
+      audience: env.authGoogleClientId
+    });
+    const payload = ticket.getPayload();
+    if (!payload?.sub) throw new AuthError("Google credential is missing the account identifier.", 401);
+    const claims = payload as typeof payload & { locale?: string };
+    return {
+      googleId: payload.sub,
+      email: payload.email ? normalizeIdentifier("email", payload.email) : undefined,
+      displayName: payload.name,
+      givenName: payload.given_name,
+      familyName: payload.family_name,
+      avatarUrl: payload.picture,
+      locale: claims.locale,
+      hostedDomain: payload.hd,
+      availableClaims: Object.keys(payload).sort(),
+      emailVerified: Boolean(payload.email_verified)
+    };
+  } catch (error) {
+    if (error instanceof AuthError) throw error;
+    throw new AuthError("Google credential verification failed. Please try Google sign-in again.", 401);
   }
-
-  // Extract the underlying Google UID from Firebase identities map
-  const firebaseExtra = decoded.firebase as {
-    identities?: { "google.com"?: string[]; phone?: string[] };
-    sign_in_provider?: string;
-  } | undefined;
-  const googleUid = firebaseExtra?.identities?.["google.com"]?.[0] ?? decoded.uid;
-  const firebasePhone = firebaseExtra?.identities?.phone?.[0] ?? decoded.phone_number;
-
-  const email = decoded.email ? normalizeIdentifier("email", decoded.email) : undefined;
-  return {
-    googleId: googleUid,
-    email,
-    displayName: supplemental?.displayName || (decoded.name as string | undefined),
-    givenName: supplemental?.givenName,
-    familyName: supplemental?.familyName,
-    avatarUrl: supplemental?.avatarUrl || (decoded.picture as string | undefined),
-    locale: supplemental?.locale,
-    phoneNumber: supplemental?.phoneNumber || firebasePhone,
-    availableClaims: Object.keys(decoded).sort(),
-    emailVerified: decoded.email_verified ?? false
-  };
-}
-
-function findConfiguredGoogleJwk(kid: string | undefined): CryptoJsonWebKey & { kid?: string } {
-  if (!env.authGoogleJwksJson) {
-    throw new AuthError("Google JWKS is not configured. Set SYSTOLAB_GOOGLE_JWKS_JSON for self-contained production verification.", 500);
-  }
-  const parsed = JSON.parse(env.authGoogleJwksJson) as { keys?: Array<CryptoJsonWebKey & { kid?: string }> } | Array<CryptoJsonWebKey & { kid?: string }>;
-  const keys = Array.isArray(parsed) ? parsed : parsed.keys ?? [];
-  const jwk = keys.find((key) => !kid || key.kid === kid);
-  if (!jwk) throw new AuthError("Configured Google JWKS does not contain the token key ID.", 401);
-  return jwk;
 }
 
 async function enforceThrottle(
@@ -1208,6 +1442,25 @@ async function writeAudit(
     metadata?: Record<string, unknown>;
   } = {}
 ): Promise<void> {
+  if (!isMongoConnected()) {
+    ensureMemoryAuthLoaded();
+    _memAuthAudits.push({
+      auditId: makeId("audit"),
+      userId: input.user ? String((input.user as unknown as MemAuthUser).id) : input.userId,
+      identifier: input.identifier,
+      eventType,
+      success,
+      reason: input.reason,
+      ipHash: context.ipHash,
+      deviceFingerprintHash: context.deviceFingerprintHash,
+      userAgent: context.userAgent,
+      metadata: input.metadata,
+      createdAt: new Date()
+    });
+    if (_memAuthAudits.length > 1000) _memAuthAudits.splice(0, _memAuthAudits.length - 1000);
+    persistMemoryAuth();
+    return;
+  }
   await AuthAuditLog.create({
     auditId: makeId("audit"),
     userId: input.user?._id ?? input.userId,

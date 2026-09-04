@@ -3,6 +3,7 @@ import { authRequired } from "../middleware/authRequired.js";
 import {
   buildAuthContext,
   forgotPassword,
+  getAuthPublicConfig,
   googleLogin,
   listSessions,
   logout,
@@ -16,6 +17,10 @@ import {
 } from "../services/authService.js";
 
 export const authRouter = Router();
+
+authRouter.get("/config", (_req, res) => {
+  res.json(getAuthPublicConfig());
+});
 
 authRouter.post("/google", async (req, res, next) => {
   try {

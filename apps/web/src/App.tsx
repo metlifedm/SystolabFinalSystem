@@ -73,18 +73,31 @@ export function App() {
   if (window.location.pathname.startsWith("/internal/reports/")) return <InternalReportPage />;
   if (window.location.pathname.startsWith("/admin")) return <AdminDashboard />;
   if (isPortalRoute(window.location.pathname)) return <UniversalPortal />;
+  if (!window.location.pathname.startsWith("/reports/")) return <UniversalPortal />;
 
   const [report, setReport] = useState<ReportSnapshot | null>(null);
   const [coverage, setCoverage] = useState<SpecCoverageItem[]>([]);
   const [loadingReport, setLoadingReport] = useState(false);
+  const [reportError, setReportError] = useState("");
 
   useEffect(() => {
     const [, route, snapshotId] = window.location.pathname.split("/");
     if (route === "reports" && snapshotId && snapshotId !== "undefined" && snapshotId !== "null") {
+      if (!readStoredAuth()) {
+        redirectToPortalLogin();
+        return;
+      }
       setLoadingReport(true);
       getReport(snapshotId)
         .then(setReport)
-        .catch((error) => console.error(error))
+        .catch((error) => {
+          const status = (error as Error & { status?: number }).status;
+          if (status === 401 || status === 403) {
+            redirectToPortalLogin();
+            return;
+          }
+          setReportError(error instanceof Error ? error.message : "Unable to load this report.");
+        })
         .finally(() => setLoadingReport(false));
     }
     getSpecCoverage().then(setCoverage).catch(() => setCoverage([]));
@@ -96,13 +109,17 @@ export function App() {
     <div className="app-shell">
       <Header report={report} />
       <main>
-        <AuthConsole />
-        <ScanConsole onReport={setReport} />
         {loadingReport && <div className="status-line">Loading full report...</div>}
+        {reportError && <div className="error-line">{reportError}</div>}
         {report ? <InternalReportView report={report} coverage={coverage} audience="customer" /> : <EmptyState coverage={coverage} />}
       </main>
     </div>
   );
+}
+
+function redirectToPortalLogin(): void {
+  const returnTo = `${window.location.pathname}${window.location.search}`;
+  window.location.replace(`/login?returnTo=${encodeURIComponent(returnTo)}`);
 }
 
 function InternalReportPage() {
@@ -380,12 +397,6 @@ function AuthConsole() {
       applyAuth(
         await googleAuth({
           credential: idToken,
-          displayName: result.user.displayName ?? undefined,
-          givenName: profile?.given_name,
-          familyName: profile?.family_name,
-          photoURL: result.user.photoURL ?? undefined,
-          phoneNumber: result.user.phoneNumber ?? undefined,
-          locale: profile?.locale,
           deviceId,
           deviceLabel: "SYSTOLAB Web"
         })
@@ -508,7 +519,7 @@ function AuthConsole() {
                 runAuth(async () => {
                   const challenge = await requestOtp({ identifierType: otpType, identifier: otpIdentifier, purpose: "login", deviceId });
                   setOtpChallenge(challenge);
-                  setOtpCode(challenge.simulatedDelivery.code ?? "");
+                  setOtpCode(challenge.delivery.previewCode ?? "");
                   setAuthStep("otp-verify");
                 })
               }
@@ -528,7 +539,7 @@ function AuthConsole() {
           <div className="auth-expandable-form">
             <p className="auth-otp-hint">
               Code sent to <strong>{otpChallenge?.maskedDestination}</strong>
-              {otpChallenge?.simulatedDelivery.code && <span className="auth-dev-code"> Â· dev: {otpChallenge.simulatedDelivery.code}</span>}
+              {otpChallenge?.delivery.previewCode && <span className="auth-dev-code"> Â· dev: {otpChallenge.delivery.previewCode}</span>}
             </p>
             <label className="auth-form-field">
               <span className="auth-field-label">One-Time Code</span>
@@ -605,7 +616,7 @@ function AuthConsole() {
                   runAuth(async () => {
                     const result = await registerPassword({ identifierType: passwordType, identifier: passwordIdentifier, password, displayName: passwordIdentifier.split("@")[0], deviceId });
                     setOtpChallenge(result.otpChallenge);
-                    setOtpCode(result.otpChallenge.simulatedDelivery.code ?? "");
+                    setOtpCode(result.otpChallenge.delivery.previewCode ?? "");
                     applyAuth(result);
                   })
                 }
@@ -643,7 +654,7 @@ function AuthConsole() {
                 runAuth(async () => {
                   const challenge = await forgotPassword({ identifierType: resetType, identifier: resetIdentifier, deviceId });
                   setResetChallenge(challenge);
-                  setResetToken(challenge.simulatedDelivery.token ?? "");
+                  setResetToken(challenge.delivery.previewCode ?? "");
                   setAuthStep("reset-verify");
                 })
               }
@@ -658,7 +669,7 @@ function AuthConsole() {
           <div className="auth-expandable-form">
             <p className="auth-otp-hint">
               Reset link sent to <strong>{resetChallenge?.maskedDestination}</strong>
-              {resetChallenge?.simulatedDelivery.token && <span className="auth-dev-code"> Â· dev: {resetChallenge.simulatedDelivery.token}</span>}
+              {resetChallenge?.delivery.previewCode && <span className="auth-dev-code"> Â· dev: {resetChallenge.delivery.previewCode}</span>}
             </p>
             <label className="auth-form-field">
               <span className="auth-field-label">Reset Token</span>

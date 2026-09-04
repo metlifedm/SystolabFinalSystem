@@ -3,6 +3,7 @@ import { sha256 } from "./utils/crypto.js";
 import {
   _memAuthSessionsForTest,
   forgotPassword,
+  getDevelopmentAuthSnapshot,
   getUserByAccessToken,
   listSessions,
   logout,
@@ -32,7 +33,7 @@ async function createVerifiedUser(email: string, password: string, seed: string)
     { identifierType: "email", identifier: email, password, displayName: "Test User" },
     c
   );
-  const code = reg.otpChallenge.simulatedDelivery.code!;
+  const code = reg.otpChallenge.delivery.previewCode!;
   const verified = await verifyOtp({ challengeId: reg.otpChallenge.challengeId, code }, c);
   return { tokens: verified.tokens!, userId: verified.user.userId, ctx: c };
 }
@@ -45,8 +46,9 @@ describe("auth — registration and login flow", () => {
     );
     expect(reg.user.email).toBe("reg-test@example.com");
     expect(reg.otpChallenge.challengeId).toBeTruthy();
-    expect(reg.otpChallenge.simulatedDelivery.code).toBeTruthy();
-    expect(reg.otpChallenge.simulatedDelivery.mode).toBe("backend_simulation");
+    expect(reg.otpChallenge.delivery.previewCode).toBeTruthy();
+    expect(reg.otpChallenge.delivery.channel).toBe("development_preview");
+    expect(getDevelopmentAuthSnapshot().users.some((user) => user.userId === reg.user.userId)).toBe(true);
   });
 
   it("verifying OTP issues a signed access token and refresh token", async () => {
@@ -103,7 +105,7 @@ describe("auth — registration and login flow", () => {
     expect(restarted.user.userId).toBe(first.user.userId);
     expect(restarted.message).toContain("verification restarted");
     await verifyOtp(
-      { challengeId: restarted.otpChallenge.challengeId, code: restarted.otpChallenge.simulatedDelivery.code! },
+      { challengeId: restarted.otpChallenge.challengeId, code: restarted.otpChallenge.delivery.previewCode! },
       ctx(`pending-verify-${Date.now()}`)
     );
     const login = await passwordLogin(
@@ -121,9 +123,9 @@ describe("auth — registration and login flow", () => {
       ctx(`reset-request-${Date.now()}`)
     );
 
-    expect(reset.simulatedDelivery.token).toBeTruthy();
+    expect(reset.delivery.previewCode).toBeTruthy();
     await resetPassword(
-      { resetId: reset.resetId, token: reset.simulatedDelivery.token!, newPassword: "After!Pass1234" },
+      { resetId: reset.resetId, token: reset.delivery.previewCode!, newPassword: "After!Pass1234" },
       ctx(`reset-complete-${Date.now()}`)
     );
     const login = await passwordLogin(

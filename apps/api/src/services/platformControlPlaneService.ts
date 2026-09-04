@@ -21,6 +21,7 @@ import { UserSearchActivity } from "../models/UserSearchActivity.js";
 import { Workspace } from "../models/Workspace.js";
 import { makeId, sha256 } from "../utils/crypto.js";
 import { publishIntelligenceEvent } from "./intelligenceEventBus.js";
+import { getDevelopmentAuthSnapshot } from "./authService.js";
 import { getCounterValue, histogramPercentile, histogramSummary, sumCounterValues } from "./metricsService.js";
 import { getAlertSummary, resolveAlertByKey, triggerAlert } from "./alertService.js";
 import {
@@ -663,21 +664,52 @@ export async function listUserSearchActivities(limit = 250): Promise<PlainRecord
 export async function getUserIntelligence(limit = 250): Promise<PlainRecord[]> {
   const searches = await listUserSearchActivities(1000);
   if (!isMongoConnected()) {
-    const grouped = groupBy(searches, (item) => String(item.userId ?? item.userEmail ?? item.userPhone ?? "anonymous"));
-    return Object.entries(grouped).slice(0, limit).map(([userId, rows]) => ({
-      userId,
-      displayName: String(rows[0]?.userName ?? "Anonymous visitor"),
-      email: rows[0]?.userEmail,
-      phone: rows[0]?.userPhone,
-      lifecycleState: userId === "anonymous" ? "ANONYMOUS" : "UNKNOWN",
-      providers: [],
-      activeSessions: 0,
-      totalSearches: rows.length,
-      latestSearchAt: rows[0]?.createdAt,
-      latestTargetUrl: rows[0]?.targetUrl,
-      latestOss: (rows[0]?.result as PlainRecord | undefined)?.oss,
-      searches: rows.slice(0, 10)
-    }));
+    const auth = getDevelopmentAuthSnapshot(limit);
+    const searchesByUser = groupBy(searches, (item) => String(item.userId ?? item.userEmail ?? item.userPhone ?? "anonymous"));
+    const sessionsByUser = groupBy(auth.sessions as unknown as PlainRecord[], (item) => String(item.userId));
+    const auditsByUser = groupBy(auth.audits as unknown as PlainRecord[], (item) => String(item.userId ?? "unknown"));
+    const knownKeys = new Set<string>();
+    const rows: PlainRecord[] = auth.users.map((user) => {
+      const keys = [user.userId, user.email, user.phone].filter((value): value is string => Boolean(value));
+      keys.forEach((key) => knownKeys.add(key));
+      const userSearches = keys.flatMap((key) => searchesByUser[key] ?? []);
+      const userSessions = sessionsByUser[user.userId] ?? [];
+      const userAudits = auditsByUser[user.userId] ?? [];
+      const activeSessions = userSessions.filter((session) => !session.revokedAt && new Date(String(session.refreshExpiresAt)).getTime() >= Date.now()).length;
+      return {
+        ...user,
+        activeSessions,
+        totalSessions: userSessions.length,
+        totalSearches: userSearches.length,
+        latestSearchAt: userSearches[0]?.createdAt,
+        latestTargetUrl: userSearches[0]?.targetUrl,
+        latestOss: (userSearches[0]?.result as PlainRecord | undefined)?.oss,
+        sessions: userSessions.slice(0, 8),
+        authTimeline: userAudits.slice(0, 12),
+        searches: userSearches.slice(0, 12)
+      };
+    });
+    for (const [userId, userSearches] of Object.entries(searchesByUser)) {
+      if (knownKeys.has(userId) || rows.length >= limit) continue;
+      rows.push({
+        userId,
+        displayName: String(userSearches[0]?.userName ?? (userId === "anonymous" ? "Anonymous visitors" : "Unlinked user")),
+        email: userSearches[0]?.userEmail,
+        phone: userSearches[0]?.userPhone,
+        lifecycleState: userId === "anonymous" ? "ANONYMOUS" : "UNKNOWN",
+        providers: [],
+        activeSessions: 0,
+        totalSessions: 0,
+        totalSearches: userSearches.length,
+        latestSearchAt: userSearches[0]?.createdAt,
+        latestTargetUrl: userSearches[0]?.targetUrl,
+        latestOss: (userSearches[0]?.result as PlainRecord | undefined)?.oss,
+        sessions: [],
+        authTimeline: [],
+        searches: userSearches.slice(0, 12)
+      });
+    }
+    return rows.slice(0, limit);
   }
 
   const [users, sessions, audits] = await Promise.all([
@@ -892,12 +924,16 @@ export async function getPlatformOverview(): Promise<PlainRecord> {
 export async function getUserJourneyIntelligence(limit = 100): Promise<PlainRecord> {
   if (!isMongoConnected()) {
     const searches = await listUserSearchActivities(Math.max(limit, 250));
+    const auth = getDevelopmentAuthSnapshot(Math.max(limit, 250));
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const identified = searches.filter((item) => item.userId || item.userEmail || item.userPhone);
     const userKey = (item: PlainRecord) => String(item.userId ?? item.userEmail ?? item.userPhone);
-    const uniqueUsers = new Set(identified.map(userKey));
-    const recentUsers = new Set(identified.filter((item) => new Date(String(item.createdAt ?? 0)).getTime() >= sevenDaysAgo).map(userKey));
-    const activeSessions = new Set(searches.flatMap((item) => typeof item.sessionId === "string" ? [item.sessionId] : []));
+    const uniqueUsers = new Set([...auth.users.map((user) => user.userId), ...identified.map(userKey)]);
+    const recentUsers = new Set([
+      ...auth.users.filter((user) => user.lastLoginAt && new Date(user.lastLoginAt).getTime() >= sevenDaysAgo).map((user) => user.userId),
+      ...identified.filter((item) => new Date(String(item.createdAt ?? 0)).getTime() >= sevenDaysAgo).map(userKey)
+    ]);
+    const activeSessions = new Set(auth.sessions.filter((session) => !session.revokedAt && new Date(session.refreshExpiresAt).getTime() >= Date.now()).map((session) => session.sessionId));
     const loginMethods = searches.reduce<Record<string, number>>((counts, item) => {
       const request = (item.request as PlainRecord | undefined) ?? {};
       const provider = typeof request.authProvider === "string" ? request.authProvider : "unknown";
@@ -911,15 +947,18 @@ export async function getUserJourneyIntelligence(limit = 100): Promise<PlainReco
       registeredUsers: uniqueUsers.size,
       activeUsers: recentUsers.size,
       activeSessions: activeSessions.size,
-      newUsers7d: recentUsers.size,
+      newUsers7d: auth.users.filter((user) => new Date(user.createdAt).getTime() >= sevenDaysAgo).length,
       loginMethods,
-      timeline: searches.slice(0, limit).map((item) => ({
-        eventType: "scan.completed",
-        identifier: item.userEmail ?? item.userPhone ?? item.userName ?? "Anonymous visitor",
-        success: true,
-        targetUrl: item.targetUrl,
-        createdAt: item.createdAt
-      })),
+      timeline: [
+        ...auth.audits.map((item) => ({ ...item, identifier: item.identifier ?? "Account activity" })),
+        ...searches.map((item) => ({
+          eventType: "scan.completed",
+          identifier: item.userEmail ?? item.userPhone ?? item.userName ?? "Anonymous visitor",
+          success: true,
+          targetUrl: item.targetUrl,
+          createdAt: item.createdAt
+        }))
+      ].sort((left, right) => new Date(String(right.createdAt)).getTime() - new Date(String(left.createdAt)).getTime()).slice(0, limit),
       retentionSignals: returningUsers > 0 ? [`${returningUsers} identified users completed more than one search.`] : [],
       churnRisks: [],
       conversionDrivers: searches.length > 0 ? [`${searches.length} completed searches are retained in the local development store.`] : []

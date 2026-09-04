@@ -4753,6 +4753,20 @@ pre {
   font-weight: 800;
 }
 
+.portal-google-identity {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.portal-google-identity > div,
+.portal-google-identity iframe {
+  max-width: 100%;
+}
+
 .portal-auth-divider {
   display: flex;
   align-items: center;

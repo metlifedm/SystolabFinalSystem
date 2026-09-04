@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: resolve(__dirname, "../../../../.env") });
@@ -36,7 +37,23 @@ function readString(name: string): string | undefined {
 }
 
 function readDevSecret(name: string, generated: string): string {
-  return readString(name) ?? generated;
+  const configured = readString(name);
+  if (configured) return configured;
+  if ((process.env.NODE_ENV ?? "development") === "test") return generated;
+
+  const secretDir = resolve(__dirname, "../../../../tmp");
+  const secretPath = resolve(secretDir, `.systolab-${name.toLowerCase().replaceAll("_", "-")}`);
+  try {
+    if (existsSync(secretPath)) {
+      const persisted = readFileSync(secretPath, "utf8").trim();
+      if (persisted.length >= 32) return persisted;
+    }
+    mkdirSync(secretDir, { recursive: true });
+    writeFileSync(secretPath, generated, { encoding: "utf8", mode: 0o600 });
+  } catch {
+    // A process-local secret still keeps development startup available.
+  }
+  return generated;
 }
 
 function requireProduction(name: string, errors: string[]): string {
@@ -74,16 +91,6 @@ function validateMongoUri(value: string | undefined, errors: string[]): void {
   if (!/^mongodb(\+srv)?:\/\//i.test(value)) errors.push("MONGODB_URI must start with mongodb:// or mongodb+srv://.");
 }
 
-function validateGoogleJwks(value: string, errors: string[]): void {
-  try {
-    const parsed = JSON.parse(value) as { keys?: unknown } | unknown[];
-    const keys = Array.isArray(parsed) ? parsed : Array.isArray(parsed.keys) ? parsed.keys : [];
-    if (keys.length === 0) errors.push("SYSTOLAB_GOOGLE_JWKS_JSON must contain at least one JWK key.");
-  } catch {
-    errors.push("SYSTOLAB_GOOGLE_JWKS_JSON must be valid JWKS JSON, not a client secret or plain token.");
-  }
-}
-
 const nodeEnv = ((process.env.NODE_ENV ?? "development") as NodeEnv);
 const production = nodeEnv === "production";
 const productionErrors: string[] = [];
@@ -110,13 +117,31 @@ const managerAdminKey = production
   ? requireStrongProductionSecret("SYSTOLAB_MANAGER_ADMIN_KEY", productionErrors)
   : readString("SYSTOLAB_MANAGER_ADMIN_KEY") ?? internalAdminKey ?? generatedDevSecrets.managerAdminKey;
 
-const authGoogleClientId = production ? requireProduction("SYSTOLAB_GOOGLE_CLIENT_ID", productionErrors) : readString("SYSTOLAB_GOOGLE_CLIENT_ID") ?? "systolab-local-google-client";
-const authGoogleJwksJson = production ? requireProduction("SYSTOLAB_GOOGLE_JWKS_JSON", productionErrors) : readString("SYSTOLAB_GOOGLE_JWKS_JSON") ?? "";
-if (production) validateGoogleJwks(authGoogleJwksJson, productionErrors);
+const authGoogleClientId = production ? requireProduction("SYSTOLAB_GOOGLE_CLIENT_ID", productionErrors) : readString("SYSTOLAB_GOOGLE_CLIENT_ID") ?? "";
 
 const authAllowDevGoogleCredential = production ? false : process.env.SYSTOLAB_AUTH_ALLOW_DEV_GOOGLE_CREDENTIAL !== "false";
 if (production && process.env.SYSTOLAB_AUTH_ALLOW_DEV_GOOGLE_CREDENTIAL === "true") {
   productionErrors.push("SYSTOLAB_AUTH_ALLOW_DEV_GOOGLE_CREDENTIAL must not be true in production.");
+}
+
+const emailProvider = (readString("SYSTOLAB_EMAIL_PROVIDER") ?? (readString("BREVO_API_KEY") ? "brevo" : "")).toLowerCase();
+const emailApiKey = readString("BREVO_API_KEY") ?? readString("SYSTOLAB_EMAIL_API_KEY");
+const emailFromAddress = readString("BREVO_SENDER_EMAIL") ?? readString("SYSTOLAB_EMAIL_FROM_ADDRESS");
+const emailFromName = readString("BREVO_SENDER_NAME") ?? readString("SYSTOLAB_EMAIL_FROM_NAME");
+const brevoSmsSender = readString("BREVO_SMS_SENDER");
+const authPhoneEnabled = readBoolean("SYSTOLAB_AUTH_PHONE_ENABLED", !production);
+const authDeliveryPreview = production ? false : readBoolean("SYSTOLAB_AUTH_DELIVERY_PREVIEW", true);
+
+if (production) {
+  if (emailProvider !== "brevo") productionErrors.push("SYSTOLAB_EMAIL_PROVIDER must be set to brevo in production.");
+  if (!emailApiKey) productionErrors.push("BREVO_API_KEY is required in production for authentication email delivery.");
+  if (!emailFromAddress) productionErrors.push("BREVO_SENDER_EMAIL is required in production.");
+  if (emailFromAddress && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailFromAddress)) {
+    productionErrors.push("BREVO_SENDER_EMAIL must be a valid verified sender email address.");
+  }
+  if (authPhoneEnabled && !brevoSmsSender) {
+    productionErrors.push("BREVO_SMS_SENDER is required when SYSTOLAB_AUTH_PHONE_ENABLED=true in production.");
+  }
 }
 
 if (productionErrors.length > 0) {
@@ -138,6 +163,7 @@ export const env = {
   managerAdminKey,
   memoryStore,
   adminMemoryStoreFile: readString("SYSTOLAB_ADMIN_MEMORY_STORE_FILE") ?? "tmp/systolab-admin-users.json",
+  authMemoryStoreFile: readString("SYSTOLAB_AUTH_MEMORY_STORE_FILE") ?? "tmp/systolab-auth-store.json",
   developmentStoreFile: readString("SYSTOLAB_DEVELOPMENT_STORE_FILE") ?? "tmp/systolab-development-store.json",
   developmentStoreMaxRecords: readNumber("SYSTOLAB_DEVELOPMENT_STORE_MAX_RECORDS", 500),
   crawlTimeoutMs: readNumber("SYSTOLAB_CRAWL_TIMEOUT_MS", 12000),
@@ -180,8 +206,9 @@ export const env = {
   authLockMinutes: readNumber("SYSTOLAB_AUTH_LOCK_MINUTES", 15),
   authPasswordResetMinutes: readNumber("SYSTOLAB_AUTH_PASSWORD_RESET_MINUTES", 20),
   authGoogleClientId,
-  authGoogleJwksJson,
   authAllowDevGoogleCredential,
+  authPhoneEnabled,
+  authDeliveryPreview,
   firebaseProjectId: readString("FIREBASE_PROJECT_ID") ?? "",
   firebaseServiceAccountJson: readString("FIREBASE_SERVICE_ACCOUNT_JSON") ?? "",
   backupDir: readString("SYSTOLAB_BACKUP_DIR") ?? "/data/backups",
@@ -204,11 +231,13 @@ export const env = {
   benchmarkMaxDrift: readNumber("SYSTOLAB_BENCHMARK_MAX_DRIFT", 15),
   complianceExportDir: readString("SYSTOLAB_COMPLIANCE_EXPORT_DIR") ?? "",
   // Phase 11 — email
-  emailProvider: readString("SYSTOLAB_EMAIL_PROVIDER"),        // "sendgrid" | "mailgun" | "resend"
-  emailApiKey: readString("SYSTOLAB_EMAIL_API_KEY"),
-  emailFromAddress: readString("SYSTOLAB_EMAIL_FROM_ADDRESS"),
-  emailFromName: readString("SYSTOLAB_EMAIL_FROM_NAME"),
+  emailProvider,
+  emailApiKey,
+  emailFromAddress,
+  emailFromName,
   emailMailgunDomain: readString("SYSTOLAB_EMAIL_MAILGUN_DOMAIN"),
+  brevoSmsSender,
+  emailRequestTimeoutMs: readNumber("SYSTOLAB_EMAIL_REQUEST_TIMEOUT_MS", 10_000),
   // Phase 11 — webhooks
   webhookWorkerEnabled: readBoolean("SYSTOLAB_WEBHOOK_WORKER_ENABLED", true),
   webhookWorkerIntervalMs: readNumber("SYSTOLAB_WEBHOOK_WORKER_INTERVAL_MS", 30_000),

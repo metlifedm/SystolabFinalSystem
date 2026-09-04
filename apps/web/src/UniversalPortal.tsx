@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type ReactNode } from "react";
-import type { AuthIdentifierType, AuthResponse, AuthSessionSummary, AuthTokenPair, AuthUserProfile, OtpChallengeResponse, PasswordResetChallengeResponse, TenantBranding } from "@systolab/shared";
+import type { AuthIdentifierType, AuthPublicConfig, AuthResponse, AuthSessionSummary, AuthTokenPair, AuthUserProfile, OtpChallengeResponse, PasswordResetChallengeResponse, TenantBranding } from "@systolab/shared";
 import { ArrowRight, Building2, CheckCircle2, FileText, Globe2, KeyRound, Layers, LogOut, Menu, Settings, Share2, ShieldCheck, Users } from "lucide-react";
 import {
   createProject,
@@ -7,6 +7,7 @@ import {
   downloadReportPdf,
   ensureAgency,
   forgotPassword,
+  getAuthConfig,
   getBillingOverview,
   getBillingPlans,
   getPortalMe,
@@ -31,7 +32,7 @@ import {
   verifyOtp
 } from "./api.js";
 import type { AgencyDashboardResponse, AgencyOperatingSystemResponse, ClientFollowUpStatus, ClientOperatingSummary, PortalBillingPlan, PortalMeResponse, PortalProjectSummary, PortalReportSummary, PortalTenantSummary, PortalUsageOverview } from "./api.js";
-import { firebaseAuth, googleProvider, isFirebaseConfigured } from "./firebase.js";
+import { GoogleSignInButton } from "./GoogleSignInButton.js";
 
 type StoredPortalAuth = { user: AuthUserProfile; tokens: AuthTokenPair; session: AuthSessionSummary };
 
@@ -104,7 +105,7 @@ export function UniversalPortal() {
       setError("Your session expired. Sign in again to continue.");
       const current = normalizePortalPath(window.location.pathname);
       if (!publicPortalRoutes.has(current)) {
-        window.history.replaceState(null, "", "/login");
+        window.history.replaceState(null, "", `/login?returnTo=${encodeURIComponent(current)}`);
         setPath("/login");
       }
     };
@@ -169,7 +170,7 @@ export function UniversalPortal() {
     localStorage.setItem("systolab.auth", JSON.stringify(nextAuth));
     setAuth(nextAuth);
     setMessage("Welcome to SYSTOLAB. Your account is ready.");
-    navigate("/dashboard");
+    navigate(readSafeReturnTo() ?? "/dashboard");
   }
 
   function signOut() {
@@ -192,6 +193,13 @@ export function UniversalPortal() {
       {!auth && protectedRoute ? <PortalAuthPage mode="login" onAuth={applyAuth} navigate={navigate} /> : renderPortalPage(path, { auth, portal, tenant, plans, usage, agencyDashboard, agencyOperating, navigate, refreshPortal, refreshAgencyOperating, applyAuth })}
     </div>
   );
+}
+
+function readSafeReturnTo(): string | null {
+  const requested = new URLSearchParams(window.location.search).get("returnTo");
+  if (!requested || !requested.startsWith("/") || requested.startsWith("//")) return null;
+  if (requested.startsWith("/admin") || requested.startsWith("/internal/")) return null;
+  return requested;
 }
 
 function renderPortalPage(path: string, ctx: { auth: StoredPortalAuth | null; portal: PortalMeResponse | null; tenant: PortalTenantSummary | null; plans: PortalBillingPlan[]; usage: PortalUsageOverview | null; agencyDashboard: AgencyDashboardResponse | null; agencyOperating: AgencyOperatingSystemResponse | null; navigate: (path: string) => void; refreshPortal: () => Promise<void>; refreshAgencyOperating: () => Promise<void>; applyAuth: (result: AuthResponse) => void }) {
@@ -302,6 +310,15 @@ function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; 
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [authConfig, setAuthConfig] = useState<AuthPublicConfig | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    getAuthConfig()
+      .then((config) => { if (active) setAuthConfig(config); })
+      .catch((configError) => { if (active) setError(configError instanceof Error ? configError.message : "Authentication configuration could not be loaded."); });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     setMethod("password");
@@ -326,23 +343,10 @@ function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; 
     }
   }
 
-  async function continueGoogle() {
+  async function continueGoogle(credential: string) {
     await run(async () => {
-      if (!isFirebaseConfigured || !firebaseAuth) {
-        throw new Error("Google sign-in is not configured. Use email or phone sign-in for now.");
-      }
-      const { getAdditionalUserInfo, signInWithPopup } = await import("firebase/auth");
-      const result = await signInWithPopup(firebaseAuth, googleProvider);
-      const profile = getAdditionalUserInfo(result)?.profile as Record<string, string | undefined> | null | undefined;
-      const credential = await result.user.getIdToken();
       onAuth(await googleAuth({
         credential,
-        displayName: result.user.displayName ?? undefined,
-        givenName: profile?.given_name,
-        familyName: profile?.family_name,
-        photoURL: result.user.photoURL ?? undefined,
-        phoneNumber: result.user.phoneNumber ?? undefined,
-        locale: profile?.locale,
         deviceId,
         deviceLabel: "SYSTOLAB Portal"
       }));
@@ -363,9 +367,9 @@ function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; 
         deviceId
       });
       setOtpChallenge(registered.otpChallenge);
-      setOtpCode(registered.otpChallenge.simulatedDelivery.code ?? "");
+      setOtpCode(registered.otpChallenge.delivery.previewCode ?? "");
       setMethod("otp");
-      setStatus("Account created. Enter the verification code to finish signup.");
+      setStatus(registered.otpChallenge.delivery.message);
     });
   }
 
@@ -373,8 +377,8 @@ function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; 
     await run(async () => {
       const challenge = await requestOtp({ identifierType, identifier, purpose: "login", deviceId });
       setOtpChallenge(challenge);
-      setOtpCode(challenge.simulatedDelivery.code ?? "");
-      setStatus("Your one-time code is ready.");
+      setOtpCode(challenge.delivery.previewCode ?? "");
+      setStatus(challenge.delivery.message);
     });
   }
 
@@ -389,8 +393,8 @@ function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; 
     await run(async () => {
       const challenge = await forgotPassword({ identifierType, identifier, deviceId });
       setResetChallenge(challenge);
-      setResetToken(challenge.simulatedDelivery.token ?? "");
-      setStatus("Enter the reset token and choose a new password.");
+      setResetToken(challenge.delivery.previewCode ?? "");
+      setStatus(challenge.delivery.message);
     });
   }
 
@@ -420,6 +424,7 @@ function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; 
   const identifierLabel = identifierType === "email" ? "Email address" : "Phone number";
   const identifierPlaceholder = identifierType === "email" ? "name@example.com" : "+15551234567";
   const verificationOnly = method === "otp" && Boolean(otpChallenge);
+  const phoneEnabled = authConfig?.otp.phoneEnabled ?? false;
 
   return (
     <main className="portal-auth-layout">
@@ -436,9 +441,14 @@ function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; 
           <p>{verificationOnly ? `Enter the code for ${otpChallenge?.maskedDestination ?? "your account"}.` : mode === "signup" ? "No credit card required." : "Use your email or phone number."}</p>
         </div>
 
-        {isFirebaseConfigured && !verificationOnly && method !== "reset" && (
+        {authConfig?.google.enabled && authConfig.google.clientId && !verificationOnly && method !== "reset" && (
           <>
-            <button className="portal-google" type="button" disabled={busy} onClick={() => void continueGoogle()}><GoogleIcon />Continue with Google</button>
+            <GoogleSignInButton
+              clientId={authConfig.google.clientId}
+              mode={mode}
+              onCredential={(credential) => void continueGoogle(credential)}
+              onError={setError}
+            />
             <div className="portal-auth-divider"><span>or</span></div>
           </>
         )}
@@ -453,7 +463,7 @@ function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; 
         {method === "password" && (
           <form className="portal-form-grid" onSubmit={(event) => { event.preventDefault(); void continuePassword(); }}>
             {mode === "signup" && <label><span>Your name</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" placeholder="Full name" required /></label>}
-            <IdentifierTypeControl value={identifierType} onChange={setIdentifierType} />
+            <IdentifierTypeControl value={identifierType} onChange={setIdentifierType} phoneEnabled={phoneEnabled} />
             <label><span>{identifierLabel}</span><input value={identifier} onChange={(event) => setIdentifier(event.target.value)} type={identifierType === "email" ? "email" : "tel"} autoComplete={identifierType === "email" ? "email" : "tel"} placeholder={identifierPlaceholder} required /></label>
             <label><span>Password</span><input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder={mode === "signup" ? "At least 12 characters" : "Your password"} minLength={12} required /></label>
             {mode === "signup" && <p className="portal-field-help">Use 12+ characters with uppercase, lowercase, a number, and a symbol.</p>}
@@ -464,7 +474,7 @@ function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; 
 
         {method === "otp" && !otpChallenge && (
           <form className="portal-form-grid" onSubmit={(event) => { event.preventDefault(); void requestLoginCode(); }}>
-            <IdentifierTypeControl value={identifierType} onChange={setIdentifierType} />
+            <IdentifierTypeControl value={identifierType} onChange={setIdentifierType} phoneEnabled={phoneEnabled} />
             <label><span>{identifierLabel}</span><input value={identifier} onChange={(event) => setIdentifier(event.target.value)} type={identifierType === "email" ? "email" : "tel"} autoComplete={identifierType === "email" ? "email" : "tel"} placeholder={identifierPlaceholder} required /></label>
             <button className="portal-primary full" type="submit" disabled={busy || !identifier.trim()}>{busy ? "Preparing code" : "Get one-time code"}</button>
           </form>
@@ -472,8 +482,8 @@ function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; 
 
         {method === "otp" && otpChallenge && (
           <form className="portal-form-grid" onSubmit={(event) => { event.preventDefault(); void verifyCode(); }}>
-            {otpChallenge.simulatedDelivery.code && <div className="portal-verification-code"><span>Verification code</span><strong>{otpChallenge.simulatedDelivery.code}</strong></div>}
-            <label><span>One-time code</span><input value={otpCode} onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, ""))} inputMode="numeric" autoComplete="one-time-code" maxLength={6} placeholder="000000" required autoFocus /></label>
+            {otpChallenge.delivery.previewCode && <div className="portal-verification-code"><span>Development verification code</span><strong>{otpChallenge.delivery.previewCode}</strong></div>}
+            <label><span>One-time code</span><input value={otpCode} onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, ""))} inputMode="numeric" autoComplete="one-time-code" maxLength={authConfig?.otp.length ?? 6} placeholder="000000" required autoFocus /></label>
             <button className="portal-primary full" type="submit" disabled={busy || !otpCode}>{busy ? "Verifying" : mode === "signup" ? "Verify and open dashboard" : "Verify and sign in"}</button>
             {mode === "login" && <button className="portal-link-button" type="button" onClick={() => selectMethod("otp")}>Use a different account</button>}
           </form>
@@ -481,7 +491,7 @@ function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; 
 
         {method === "reset" && !resetChallenge && (
           <form className="portal-form-grid" onSubmit={(event) => { event.preventDefault(); void beginPasswordReset(); }}>
-            <IdentifierTypeControl value={identifierType} onChange={setIdentifierType} />
+            <IdentifierTypeControl value={identifierType} onChange={setIdentifierType} phoneEnabled={phoneEnabled} />
             <label><span>{identifierLabel}</span><input value={identifier} onChange={(event) => setIdentifier(event.target.value)} type={identifierType === "email" ? "email" : "tel"} placeholder={identifierPlaceholder} required /></label>
             <button className="portal-primary full" type="submit" disabled={busy || !identifier.trim()}>{busy ? "Preparing reset" : "Get reset token"}</button>
             <button className="portal-link-button" type="button" onClick={() => selectMethod("password")}>Back to sign in</button>
@@ -490,8 +500,8 @@ function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; 
 
         {method === "reset" && resetChallenge && (
           <form className="portal-form-grid" onSubmit={(event) => { event.preventDefault(); void completePasswordReset(); }}>
-            {resetChallenge.simulatedDelivery.token && <div className="portal-reset-token"><span>Reset token</span><code>{resetChallenge.simulatedDelivery.token}</code></div>}
-            <label><span>Reset token</span><input value={resetToken} onChange={(event) => setResetToken(event.target.value)} required /></label>
+            {resetChallenge.delivery.previewCode && <div className="portal-reset-token"><span>Development reset code</span><code>{resetChallenge.delivery.previewCode}</code></div>}
+            <label><span>Reset code</span><input value={resetToken} onChange={(event) => setResetToken(event.target.value.replace(/\D/g, ""))} inputMode="numeric" autoComplete="one-time-code" required /></label>
             <label><span>New password</span><input value={newPassword} onChange={(event) => setNewPassword(event.target.value)} type="password" autoComplete="new-password" minLength={12} placeholder="At least 12 characters" required /></label>
             <button className="portal-primary full" type="submit" disabled={busy || !resetToken || !newPassword}>{busy ? "Updating password" : "Update password"}</button>
           </form>
@@ -505,7 +515,8 @@ function PortalAuthPage({ mode, onAuth, navigate }: { mode: "login" | "signup"; 
   );
 }
 
-function IdentifierTypeControl({ value, onChange }: { value: AuthIdentifierType; onChange: (value: AuthIdentifierType) => void }) {
+function IdentifierTypeControl({ value, onChange, phoneEnabled }: { value: AuthIdentifierType; onChange: (value: AuthIdentifierType) => void; phoneEnabled: boolean }) {
+  if (!phoneEnabled) return null;
   return <div className="portal-segmented" role="group" aria-label="Account identifier"><button type="button" className={value === "email" ? "active" : ""} onClick={() => onChange("email")}>Email</button><button type="button" className={value === "phone" ? "active" : ""} onClick={() => onChange("phone")}>Phone</button></div>;
 }
 

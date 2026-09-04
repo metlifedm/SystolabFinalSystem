@@ -1867,12 +1867,30 @@ export interface GoogleLoginRequest {
   credential: string;
   deviceId?: string;
   deviceLabel?: string;
-  displayName?: string;
-  givenName?: string;
-  familyName?: string;
-  photoURL?: string;
-  phoneNumber?: string;
-  locale?: string;
+}
+
+export interface AuthPublicConfig {
+  google: {
+    enabled: boolean;
+    clientId?: string;
+  };
+  password: {
+    enabled: true;
+    minimumLength: number;
+  };
+  otp: {
+    emailEnabled: boolean;
+    phoneEnabled: boolean;
+    length: number;
+    expiresInMinutes: number;
+    resendCooldownSeconds: number;
+  };
+}
+
+export interface AuthDeliveryReceipt {
+  channel: "email" | "sms" | "development_preview";
+  message: string;
+  previewCode?: string;
 }
 
 export interface OtpRequestInput {
@@ -1890,11 +1908,7 @@ export interface OtpChallengeResponse {
   expiresAt: string;
   resendAvailableAt: string;
   maxAttempts: number;
-  simulatedDelivery: {
-    mode: "backend_simulation";
-    code?: string;
-    note: string;
-  };
+  delivery: AuthDeliveryReceipt;
 }
 
 export interface OtpVerifyInput {
@@ -1931,11 +1945,7 @@ export interface PasswordResetChallengeResponse {
   maskedDestination: string;
   expiresAt: string;
   maxAttempts: number;
-  simulatedDelivery: {
-    mode: "backend_simulation";
-    token?: string;
-    note: string;
-  };
+  delivery: AuthDeliveryReceipt;
 }
 
 export interface PasswordResetInput {

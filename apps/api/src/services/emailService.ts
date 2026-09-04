@@ -1,4 +1,5 @@
 import { EmailTemplate, type EmailTemplateType } from "../models/EmailTemplate.js";
+import type { AuthDeliveryReceipt, AuthIdentifierType, OtpPurpose } from "@systolab/shared";
 import { makeId } from "../utils/crypto.js";
 import { env } from "../config/env.js";
 import { logger } from "../utils/logger.js";
@@ -20,6 +21,8 @@ export interface EmailMessage {
   fromName?: string;
   fromEmail?: string;
 }
+
+export class AuthenticationDeliveryError extends Error {}
 
 function renderTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? "");
@@ -52,17 +55,145 @@ export async function sendEmail(msg: EmailMessage): Promise<{ messageId: string;
   const fromEmail = msg.fromEmail ?? env.emailFromAddress ?? "noreply@systolab.app";
   const fromName = msg.fromName ?? env.emailFromName ?? "Systolab";
 
-  if (env.emailProvider === "sendgrid") {
+  if (env.emailProvider === "brevo") {
+    await sendViaBrevo(msg, fromEmail, fromName, messageId);
+  } else if (env.emailProvider === "sendgrid") {
     await sendViaSendGrid(msg, fromEmail, fromName, messageId);
   } else if (env.emailProvider === "mailgun") {
     await sendViaMailgun(msg, fromEmail, fromName, messageId);
   } else if (env.emailProvider === "resend") {
     await sendViaResend(msg, fromEmail, fromName, messageId);
   } else {
-    logger.warn("email.unknown_provider", { provider: env.emailProvider });
+    throw new Error(`Unsupported email provider: ${env.emailProvider}`);
   }
 
   return { messageId, simulated: false };
+}
+
+async function sendViaBrevo(
+  msg: EmailMessage,
+  fromEmail: string,
+  fromName: string,
+  messageId: string
+): Promise<void> {
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "api-key": env.emailApiKey ?? "",
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      sender: { email: fromEmail, name: fromName },
+      to: [{ email: msg.to }],
+      subject: msg.subject,
+      htmlContent: msg.bodyHtml,
+      textContent: msg.bodyText,
+      headers: { "X-SYSTOLAB-Message-Id": messageId }
+    }),
+    signal: AbortSignal.timeout(env.emailRequestTimeoutMs)
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Brevo email error ${response.status}: ${body.slice(0, 500)}`);
+  }
+  logger.info("email.sent", { provider: "brevo", messageId });
+}
+
+async function sendViaBrevoSms(recipient: string, content: string, messageId: string): Promise<void> {
+  const response = await fetch("https://api.brevo.com/v3/transactionalSMS/send", {
+    method: "POST",
+    headers: {
+      accept: "application/json",
+      "api-key": env.emailApiKey ?? "",
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({
+      sender: env.brevoSmsSender,
+      recipient: recipient.replace(/\D/g, ""),
+      content,
+      type: "transactional",
+      tag: "systolab-auth"
+    }),
+    signal: AbortSignal.timeout(env.emailRequestTimeoutMs)
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Brevo SMS error ${response.status}: ${body.slice(0, 500)}`);
+  }
+  logger.info("sms.sent", { provider: "brevo", messageId });
+}
+
+export async function sendAuthenticationCode(input: {
+  identifierType: AuthIdentifierType;
+  identifier: string;
+  code: string;
+  purpose: OtpPurpose;
+  expiresInMinutes: number;
+}): Promise<AuthDeliveryReceipt> {
+  const canSendEmail = input.identifierType === "email" && env.emailProvider === "brevo" && Boolean(env.emailApiKey && env.emailFromAddress);
+  const canSendSms = input.identifierType === "phone" && env.authPhoneEnabled && Boolean(env.emailApiKey && env.brevoSmsSender);
+
+  if (!canSendEmail && !canSendSms) {
+    if (env.authDeliveryPreview) {
+      return {
+        channel: "development_preview",
+        message: "Development delivery preview. Configure Brevo before deployment.",
+        previewCode: input.code
+      };
+    }
+    throw new AuthenticationDeliveryError(
+      input.identifierType === "email"
+        ? "Email delivery is unavailable. Check the Brevo sender configuration."
+        : "Phone sign-in is unavailable. Check the Brevo SMS configuration."
+    );
+  }
+
+  const purposeLabel = input.purpose === "signup"
+    ? "verify your SYSTOLAB account"
+    : input.purpose === "password_reset"
+      ? "reset your SYSTOLAB password"
+      : "sign in to SYSTOLAB";
+  const messageId = makeId("authmsg");
+
+  try {
+    if (input.identifierType === "email") {
+      const safeCode = escapeHtml(input.code);
+      await sendViaBrevo({
+        to: input.identifier,
+        subject: `Your SYSTOLAB verification code: ${input.code}`,
+        bodyText: `Use ${input.code} to ${purposeLabel}. It expires in ${input.expiresInMinutes} minutes. If you did not request this, you can ignore this message.`,
+        bodyHtml: `<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#10251f"><p style="font-size:13px;font-weight:700;letter-spacing:.08em;color:#8a4b08">SYSTOLAB SECURE ACCESS</p><h1 style="font-size:24px;margin:16px 0 8px">Your verification code</h1><p style="line-height:1.6">Use this code to ${purposeLabel}.</p><div style="font-size:32px;font-weight:800;letter-spacing:.18em;padding:18px 22px;background:#f4f7f5;border:1px solid #cad8d2;border-radius:6px;text-align:center">${safeCode}</div><p style="line-height:1.6">This code expires in ${input.expiresInMinutes} minutes and can be used once.</p><p style="font-size:13px;color:#52665f">If you did not request this code, you can safely ignore this email.</p></div>`
+      }, env.emailFromAddress!, env.emailFromName ?? "SYSTOLAB", messageId);
+      return { channel: "email", message: "Verification code sent by email." };
+    }
+
+    await sendViaBrevoSms(
+      input.identifier,
+      `SYSTOLAB code: ${input.code}. Expires in ${input.expiresInMinutes} minutes. Do not share this code.`,
+      messageId
+    );
+    return { channel: "sms", message: "Verification code sent by SMS." };
+  } catch (error) {
+    logger.error("auth.delivery_failed", {
+      channel: input.identifierType,
+      purpose: input.purpose,
+      message: error instanceof Error ? error.message : String(error)
+    });
+    throw new AuthenticationDeliveryError("We could not send the verification code. Please try again shortly.");
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  })[character] ?? character);
 }
 
 async function sendViaSendGrid(

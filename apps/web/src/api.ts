@@ -1,6 +1,7 @@
 import type {
   AiceDecisionObject,
   AuthResponse,
+  AuthPublicConfig,
   AuthSessionSummary,
   AuthTokenPair,
   AuthUserProfile,
@@ -423,7 +424,11 @@ export async function getReport(snapshotId: string): Promise<ReportSnapshot> {
     throw new Error("Invalid snapshot ID.");
   }
   const response = await authenticatedFetch(`${API_URL}/api/reports/${snapshotId}`);
-  if (!response.ok) throw new Error(await readError(response));
+  if (!response.ok) {
+    const error = new Error(await readError(response)) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
 
@@ -711,6 +716,12 @@ export async function updateWhiteLabelBranding(tenantSlug: string, branding: Par
 }
 export async function googleAuth(request: GoogleLoginRequest): Promise<AuthResponse> {
   return postJson("/api/auth/google", request);
+}
+
+export async function getAuthConfig(): Promise<AuthPublicConfig> {
+  const response = await fetch(`${API_URL}/api/auth/config`, { cache: "no-store" });
+  if (!response.ok) throw new Error(await readError(response));
+  return response.json();
 }
 
 export async function requestOtp(request: OtpRequestInput): Promise<OtpChallengeResponse> {

@@ -13,6 +13,7 @@
   "dependencies": {
     "@systolab/shared": "file:../../packages/shared",
     "firebase-admin": "^12.3.0",
+    "google-auth-library": "^9.15.1",
     "cheerio": "^1.0.0",
     "compression": "^1.7.4",
     "cors": "^2.8.5",

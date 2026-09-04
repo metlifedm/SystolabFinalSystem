@@ -6,7 +6,7 @@ The SYSTOLAB API is a self-owned deterministic intelligence API. It does not cal
 
 Phase 1 hardening enforces production startup validation and scanner abuse protection.
 
-Production startup requires real environment values for `MONGODB_URI`, `CLIENT_ORIGIN`, `SYSTOLAB_AUTH_JWT_SECRET`, `SYSTOLAB_INTERNAL_ADMIN_KEY`, `SYSTOLAB_OWNER_ADMIN_KEY`, `SYSTOLAB_MANAGER_ADMIN_KEY`, `SYSTOLAB_GOOGLE_CLIENT_ID`, and `SYSTOLAB_GOOGLE_JWKS_JSON`. Production rejects placeholder, weak, or development-style secrets, rejects invalid MongoDB URI formats, rejects `SYSTOLAB_MEMORY_STORE=true`, and disables sandbox Google credentials.
+Production startup requires real environment values for `MONGODB_URI`, `CLIENT_ORIGIN`, `SYSTOLAB_AUTH_JWT_SECRET`, `SYSTOLAB_INTERNAL_ADMIN_KEY`, `SYSTOLAB_OWNER_ADMIN_KEY`, `SYSTOLAB_MANAGER_ADMIN_KEY`, `SYSTOLAB_GOOGLE_CLIENT_ID`, `BREVO_API_KEY`, and `BREVO_SENDER_EMAIL`. Set `SYSTOLAB_EMAIL_PROVIDER=brevo`. Production rejects placeholder, weak, or development-style secrets, rejects invalid MongoDB URI formats, rejects `SYSTOLAB_MEMORY_STORE=true`, disables development Google credentials, and disables delivery previews.
 
 Scanner URLs are validated before scan creation and before every crawler request. SYSTOLAB allows only HTTP and HTTPS, removes fragments, rejects embedded credentials, blocks localhost and internal hostnames, blocks private/local/metadata/reserved IPv4 and IPv6 addresses, validates every DNS result, pins the validated DNS result during the request, and revalidates every redirect target. HTTPS-to-HTTP redirects are rejected.
 

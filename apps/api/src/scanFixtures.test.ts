@@ -26,7 +26,7 @@ function authCtx(seed: string): AuthCtx {
 async function createScanAccessToken(seed: string): Promise<string> {
   const ctx = authCtx(seed);
   const reg = await registerPassword({ identifierType: "email", identifier: `scan-${seed}@example.com`, password: "Secure!Pass1234", displayName: "Scan User" }, ctx);
-  const verified = await verifyOtp({ challengeId: reg.otpChallenge.challengeId, code: reg.otpChallenge.simulatedDelivery.code! }, ctx);
+  const verified = await verifyOtp({ challengeId: reg.otpChallenge.challengeId, code: reg.otpChallenge.delivery.previewCode! }, ctx);
   return verified.tokens!.accessToken;
 }
 

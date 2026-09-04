@@ -55,7 +55,7 @@ async function seedLoadTestFixtures(baseUrl: string): Promise<LoadTestConfig> {
 
   // Register user and get access token
   const reg = await registerPassword({ identifierType: "email", identifier: email, password, displayName: "Load Tester" }, ctx);
-  const code = reg.otpChallenge.simulatedDelivery.code!;
+  const code = reg.otpChallenge.delivery.previewCode!;
   const auth = await verifyOtp({ challengeId: reg.otpChallenge.challengeId, code }, ctx);
   const accessToken = auth.tokens!.accessToken;
 

@@ -25,7 +25,7 @@ async function createVerifiedUser(email: string, seed: string) {
     { identifierType: "email", identifier: email, password: "Secure!Pass1234", displayName: "Abuse Test" },
     c
   );
-  const code = reg.otpChallenge.simulatedDelivery.code!;
+  const code = reg.otpChallenge.delivery.previewCode!;
   const verified = await verifyOtp({ challengeId: reg.otpChallenge.challengeId, code }, c);
   return { tokens: verified.tokens!, userId: verified.user.userId };
 }
@@ -134,7 +134,7 @@ describe("auth abuse — brute-force and lockout", () => {
       { identifierType: "email", identifier: `replay-${Date.now()}@example.com`, password: "Secure!Pass1234", displayName: "Replay" },
       c
     );
-    const code = reg.otpChallenge.simulatedDelivery.code!;
+    const code = reg.otpChallenge.delivery.previewCode!;
     // First use — succeeds
     await verifyOtp({ challengeId: reg.otpChallenge.challengeId, code }, c);
     // Second use — replay
