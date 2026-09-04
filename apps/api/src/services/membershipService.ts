@@ -320,7 +320,7 @@ export async function createWorkspace(
       workspace = {
         _id: oid(makeId("ws")), workspaceId, tenantSlug, ownerUserId: ownerId,
         targetUrl: targetUrl.trim(), projectName: deriveProjectName(targetUrl), businessType: industry?.trim(),
-        competitorUrls: [], monitoringConfig: { cadence: "manual", enabled: false }, clientAccessEnabled: false,
+        competitorUrls: [], competitorGbpUrls: [], monitoringConfig: { cadence: "manual", enabled: false }, clientAccessEnabled: false,
         industry: industry?.trim(),
         createdAt: new Date(), updatedAt: new Date(),
         save: async function () { _memWorkspaces.set(workspaceId, this as unknown as WorkspaceDocument); }
@@ -366,6 +366,7 @@ export async function updateWorkspace(
       | "targetCountry"
       | "targetLocation"
       | "competitorUrls"
+      | "competitorGbpUrls"
       | "gbpUrl"
       | "monitoringConfig"
       | "clientAccessEnabled"

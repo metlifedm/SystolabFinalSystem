@@ -1200,10 +1200,13 @@ function writeEnterpriseCompetitorScorecard(doc: PDFKit.PDFDocument, report: Rep
   writeEnterpriseSectionLabel(doc, report, "Competitor Comparison");
   writeEnterpriseBox(doc, report, "Dimension-By-Dimension Competitive Position", "blue", 190, () => {
     comparisons.slice(0, 3).forEach((comparison, comparisonIndex) => {
+      const competitorGbpSummary = comparison.competitorGbpIdentity
+        ? ` Competitor GBP: ${pdfCustomerText(comparison.competitorGbpIdentity.extractedBusinessName ?? comparison.competitorLabel)}, ${pdfCustomerText(comparison.competitorGbpIdentity.profileCompletenessLevel)} completeness, ${comparison.competitorGbpIdentity.confidenceScore}% confidence.`
+        : "";
       writeEnterpriseTableRow(
         doc,
         comparison.competitorLabel || safePdfHostLabel(comparison.competitorUrl),
-        `Client ${formatPdfOss(comparison.primaryOss)} vs competitor ${formatPdfOss(comparison.competitorOss)}. Competitors provide more information that helps customers compare services and make confident decisions. ${pdfCustomerText(comparison.structuralGapSummary)}`,
+        `Client ${formatPdfOss(comparison.primaryOss)} vs competitor ${formatPdfOss(comparison.competitorOss)}. Competitors provide more information that helps customers compare services and make confident decisions. ${pdfCustomerText(comparison.structuralGapSummary)}${competitorGbpSummary}`,
         comparisonIndex
       );
       comparison.evidenceTraceabilityMap.slice(0, 4).forEach((row, rowIndex) => {
@@ -2851,6 +2854,15 @@ function writeCompetitorComparison(doc: PDFKit.PDFDocument, report: ReportSnapsh
       .text(`${competitor.competitorLabel}: client OSS ${competitor.primaryOss}, competitor OSS ${competitor.competitorOss ?? "unavailable"}`)
       .fillColor("#52605a")
       .text(competitor.structuralGapSummary);
+    if (competitor.competitorGbpIdentity) {
+      const profile = competitor.competitorGbpIdentity;
+      doc
+        .fillColor("#17201d")
+        .text(`Competitor Google Business Profile: ${profile.extractedBusinessName ?? competitor.competitorLabel}`)
+        .fillColor("#52605a")
+        .text(`Status: ${profile.status}; completeness: ${profile.profileCompletenessLevel}; identity match: ${profile.identityMismatchFlag}; confidence: ${profile.confidenceScore}%`)
+        .text(`Profile URL: ${profile.finalUrl ?? profile.inputUrl ?? "Unavailable"}`);
+    }
     for (const row of competitor.evidenceTraceabilityMap) {
       doc.text(`${row.dimensionLabel}: ${row.primaryScore} vs ${row.competitorScore ?? "N/A"} (${row.position}); client EO ${row.primaryEvidenceIds.join(", ")}; competitor EO ${row.competitorEvidenceIds.join(", ")}`);
     }

@@ -2905,6 +2905,47 @@ main {
   overflow-wrap: anywhere;
 }
 
+.competitor-gbp-summary {
+  margin-top: 14px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.competitor-gbp-heading span,
+.competitor-gbp-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.competitor-gbp-heading strong {
+  display: block;
+  margin-top: 5px;
+}
+
+.competitor-gbp-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.competitor-gbp-grid strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.competitor-gbp-summary > small {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .mini-score-pair,
 .comparison-summary {
   display: grid;
@@ -3101,6 +3142,7 @@ pre {
   .empty-grid,
   .gbp-strip,
   .gbp-overview,
+  .competitor-gbp-grid,
   .signal-grid,
   .note-grid,
   .risk-layout,
@@ -3252,6 +3294,7 @@ pre {
   .evidence dl,
   .comparison-head,
   .comparison-row summary,
+  .competitor-gbp-grid,
   .proof-row {
     grid-template-columns: 1fr;
   }

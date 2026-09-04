@@ -12,6 +12,7 @@ export interface MonitoringScheduleRecord {
   cadence: MonitoringSchedulerState["cadence"];
   enabled: boolean;
   competitorUrls: string[];
+  competitorGbpUrls: string[];
   alertChannels: MonitoringSchedulerState["alertChannels"];
   lastRunAt?: Date;
   nextRunAt: Date;
@@ -25,6 +26,7 @@ export async function upsertMonitoringSchedule(input: {
   cadence?: MonitoringSchedulerState["cadence"];
   enabled?: boolean;
   competitorUrls?: string[];
+  competitorGbpUrls?: string[];
   alertChannels?: MonitoringSchedulerState["alertChannels"];
   nextRunAt?: Date;
   runNow?: boolean;
@@ -42,6 +44,7 @@ export async function upsertMonitoringSchedule(input: {
     cadence,
     enabled: input.enabled !== false,
     competitorUrls: (input.competitorUrls ?? []).slice(0, 5),
+    competitorGbpUrls: (input.competitorGbpUrls ?? []).slice(0, 5),
     alertChannels: input.alertChannels ?? ["dashboard"],
     nextRunAt
   };
@@ -99,6 +102,7 @@ export async function markMonitoringScheduleRun(schedule: MonitoringScheduleReco
       nextRunAt: updated.nextRunAt,
       enabled: updated.enabled,
       competitorUrls: updated.competitorUrls,
+      competitorGbpUrls: updated.competitorGbpUrls,
       alertChannels: updated.alertChannels
     },
     { new: true }
@@ -128,6 +132,7 @@ function fromMongoSchedule(row: unknown): MonitoringScheduleRecord {
     cadence: schedule.cadence,
     enabled: schedule.enabled,
     competitorUrls: schedule.competitorUrls ?? [],
+    competitorGbpUrls: schedule.competitorGbpUrls ?? [],
     alertChannels: schedule.alertChannels ?? ["dashboard"],
     lastRunAt: schedule.lastRunAt ? new Date(schedule.lastRunAt) : undefined,
     nextRunAt: new Date(schedule.nextRunAt)

@@ -597,6 +597,7 @@ export async function recordUserSearchActivity(input: {
       includeSeo: input.scanRequest.includeSeo,
       gbpUrl: input.scanRequest.gbpUrl,
       competitorUrls: input.scanRequest.competitorUrls,
+      competitorGbpUrls: input.scanRequest.competitorGbpUrls,
       monthlyLeadVolume: input.scanRequest.monthlyLeadVolume,
       industryType: input.scanRequest.industryType,
       tenantSlug: input.scanRequest.tenantSlug,
@@ -1944,6 +1945,7 @@ function activityFromReport(report: ReportSnapshot, workspaceId: string): PlainR
       includeSeo: report.optionalSections.seoInsights === "enabled",
       gbpUrl: report.optionalSections.gbpIdentity === "provided" ? "provided" : undefined,
       competitorUrls: report.competitorComparison.map((item) => item.competitorUrl),
+      competitorGbpUrls: report.competitorComparison.map((item) => item.competitorGbpIdentity?.inputUrl).filter(Boolean),
       industryType: report.industryBenchmarkEngine?.industryType,
       tenantSlug: report.tenantBranding.slug,
       historicalBackfill: true

@@ -135,6 +135,7 @@ function parseClientInformationPayload(value: unknown): ScanRequest["clientInfor
     city: clean(input.city),
     serviceArea: clean(input.serviceArea),
     competitorUrls: Array.isArray(input.competitorUrls) ? input.competitorUrls.filter((url): url is string => typeof url === "string" && url.trim().length > 0).slice(0, 10) : undefined,
+    competitorGbpUrls: Array.isArray(input.competitorGbpUrls) ? input.competitorGbpUrls.filter((url): url is string => typeof url === "string" && url.trim().length > 0).slice(0, 10) : undefined,
     contactPerson: clean(input.contactPerson),
     clientLogoUrl: clean(input.clientLogoUrl),
     scanDate: clean(input.scanDate)
@@ -152,6 +153,9 @@ async function executeOneScanJob(job: Awaited<ReturnType<typeof markJobRunning>>
   const competitorUrls = Array.isArray(payload.competitorUrls)
     ? (payload.competitorUrls as unknown[]).filter((u): u is string => typeof u === "string").slice(0, 5)
     : [];
+  const competitorGbpUrls = Array.isArray(payload.competitorGbpUrls)
+    ? (payload.competitorGbpUrls as unknown[]).filter((u): u is string => typeof u === "string").slice(0, 5)
+    : [];
 
   const scanRequest: ScanRequest = {
     targetUrl,
@@ -159,6 +163,7 @@ async function executeOneScanJob(job: Awaited<ReturnType<typeof markJobRunning>>
     includeSeo: Boolean(payload.includeSeo),
     gbpUrl: typeof payload.gbpUrl === "string" && payload.gbpUrl ? payload.gbpUrl : undefined,
     competitorUrls,
+    competitorGbpUrls,
     monthlyLeadVolume: typeof payload.monthlyLeadVolume === "number" ? payload.monthlyLeadVolume : undefined,
     industryType: typeof payload.industryType === "string" && payload.industryType ? payload.industryType : undefined,
     tenantSlug,

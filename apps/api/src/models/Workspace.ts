@@ -22,6 +22,7 @@ export interface WorkspaceDocument extends mongoose.Document {
   targetCountry?: string;
   targetLocation?: string;
   competitorUrls?: string[];
+  competitorGbpUrls?: string[];
   gbpUrl?: string;
   monitoringConfig?: WorkspaceMonitoringConfig;
   clientAccessEnabled?: boolean;
@@ -48,6 +49,7 @@ const WorkspaceSchema = new Schema<WorkspaceDocument>(
     targetCountry: { type: String, index: true },
     targetLocation: { type: String, index: true },
     competitorUrls: { type: [String], default: [] },
+    competitorGbpUrls: { type: [String], default: [] },
     gbpUrl: { type: String },
     monitoringConfig: { type: Schema.Types.Mixed },
     clientAccessEnabled: { type: Boolean, default: false },

@@ -76,6 +76,7 @@ export interface PortalProjectSummary {
   targetCountry?: string;
   targetLocation?: string;
   competitorUrls: string[];
+  competitorGbpUrls: string[];
   gbpUrl?: string;
   monitoringConfig: { cadence: "manual" | "daily" | "weekly" | "monthly"; enabled: boolean };
   clientAccessEnabled: boolean;
@@ -128,6 +129,7 @@ export interface CreatePortalProjectInput {
   targetCountry?: string;
   targetLocation?: string;
   competitorUrls?: string[];
+  competitorGbpUrls?: string[];
   gbpUrl?: string;
   monitoringConfig?: { cadence?: "manual" | "daily" | "weekly" | "monthly"; enabled?: boolean };
   clientAccessEnabled?: boolean;
@@ -592,7 +594,7 @@ export async function getProjectReports(workspaceId: string): Promise<{ items: P
   return response.json();
 }
 
-export async function runProjectScan(workspaceId: string, request: { mode?: "fast_scan" | "full_audit"; includeSeo?: boolean; competitorUrls?: string[]; gbpUrl?: string }): Promise<CreateScanResponse & { usage?: { used: number; limit: number; allowed: boolean } }> {
+export async function runProjectScan(workspaceId: string, request: { mode?: "fast_scan" | "full_audit"; includeSeo?: boolean; competitorUrls?: string[]; competitorGbpUrls?: string[]; gbpUrl?: string }): Promise<CreateScanResponse & { usage?: { used: number; limit: number; allowed: boolean } }> {
   return postJson(`/api/projects/${encodeURIComponent(workspaceId)}/scans`, request, readStoredAccessToken());
 }
 

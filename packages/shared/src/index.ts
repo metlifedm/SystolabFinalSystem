@@ -275,6 +275,7 @@ export interface ClientReportInformation {
   city?: string;
   serviceArea?: string;
   competitorUrls?: string[];
+  competitorGbpUrls?: string[];
   contactPerson?: string;
   clientLogoUrl?: string;
   scanDate?: string;
@@ -286,6 +287,7 @@ export interface ScanRequest {
   includeSeo?: boolean;
   gbpUrl?: string;
   competitorUrls?: string[];
+  competitorGbpUrls?: string[];
   monthlyLeadVolume?: number;
   industryType?: string;
   tenantSlug?: string;
@@ -301,7 +303,7 @@ export interface ScanCoverage {
 }
 
 export interface DataInputStatus {
-  source: "Website URL" | "Google Business Profile URL" | "Competitor URLs";
+  source: "Website URL" | "Google Business Profile URL" | "Competitor URLs" | "Competitor Google Business Profile URLs";
   status: "Provided" | "Not Assessed";
   reason?: string;
 }
@@ -698,6 +700,7 @@ export interface ComparativeFinding {
   equivalentCount: number;
   dataAvailability: string;
   failureReason?: string;
+  competitorGbpIdentity?: GbpIdentityAnalysis;
   evidenceTraceabilityMap: Array<{
     dimension: DimensionKey;
     dimensionLabel: string;
@@ -1312,6 +1315,7 @@ export interface MonitoringSchedulerState {
   nextRunAt: string;
   targetUrl: string;
   competitorUrls: string[];
+  competitorGbpUrls?: string[];
   alertChannels: Array<"dashboard" | "email_simulated">;
 }
 

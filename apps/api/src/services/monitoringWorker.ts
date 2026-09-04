@@ -64,6 +64,7 @@ export async function runMonitoringCycle(): Promise<MonitoringCycleResult> {
             mode: "full_audit",
             includeSeo: false,
             competitorUrls: schedule.competitorUrls,
+            competitorGbpUrls: schedule.competitorGbpUrls,
             tenantSlug: schedule.tenantSlug
           },
           tenantBranding,

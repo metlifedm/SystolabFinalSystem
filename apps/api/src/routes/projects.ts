@@ -89,8 +89,8 @@ projectsRouter.get("/:workspaceId/reports", authRequired, requireWorkspaceMember
 
 projectsRouter.post("/:workspaceId/scans", authRequired, requireWorkspaceMember(["owner", "editor"]), async (req: Request, res: Response) => {
   try {
-    const input = req.body as { mode?: "fast_scan" | "full_audit"; includeSeo?: boolean; competitorUrls?: string[]; gbpUrl?: string };
-    await validateProjectUrls({ competitorUrls: input.competitorUrls, gbpUrl: input.gbpUrl });
+    const input = req.body as { mode?: "fast_scan" | "full_audit"; includeSeo?: boolean; competitorUrls?: string[]; competitorGbpUrls?: string[]; gbpUrl?: string };
+    await validateProjectUrls({ competitorUrls: input.competitorUrls, competitorGbpUrls: input.competitorGbpUrls, gbpUrl: input.gbpUrl });
     const job = await runProjectScan(req.workspaceCtx!.workspaceId, req.workspaceCtx!.tenantId, req.auth!.user.userId, input);
     res.status(202).json(job);
   } catch (error) {
@@ -102,6 +102,9 @@ async function validateProjectUrls(input: Partial<ProjectInput>): Promise<void> 
   if (typeof input.targetUrl === "string" && input.targetUrl.trim()) await assertPublicHttpUrl(input.targetUrl);
   if (Array.isArray(input.competitorUrls)) {
     await Promise.all(input.competitorUrls.filter(Boolean).map((url) => assertPublicHttpUrl(url)));
+  }
+  if (Array.isArray(input.competitorGbpUrls)) {
+    await Promise.all(input.competitorGbpUrls.filter(Boolean).map((url) => assertPublicHttpUrl(url)));
   }
   if (typeof input.gbpUrl === "string" && input.gbpUrl.trim()) await assertPublicHttpUrl(input.gbpUrl);
 }

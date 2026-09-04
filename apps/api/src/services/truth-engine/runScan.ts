@@ -127,6 +127,11 @@ interface CompetitorScanResult {
   rawSignalTelemetry: RawSignalEvent[];
 }
 
+interface CompetitorGbpScanResult {
+  requestedUrl: string;
+  result: Awaited<ReturnType<typeof analyzeGbpIdentity>>;
+}
+
 const SEEDED_VERTICAL_BENCHMARKS: IndustryBenchmarkEngine["verticalAverages"] = [
   {
     industryType: "dentist",
@@ -173,6 +178,7 @@ export async function runSystolabScan(
   const primary = await analyzeSite(request.targetUrl, snapshotId, request.mode === "fast_scan" ? 1 : env.maxInternalPages + 1, renderer);
   const gbpResult = await analyzeGbpIdentity(request.gbpUrl, primary.evidenceObjects, snapshotId);
   const competitorResults = await analyzeCompetitors(request, snapshotId);
+  const competitorGbpResults = await analyzeCompetitorGbpProfiles(request, competitorResults, snapshotId);
 
   const contentUnavailable = primary.pages.length === 0;
   const competitorContentGapEvidence = buildCompetitorContentGapEvidence(primary.normalizedUrl, primary.evidenceObjects, competitorResults, new EvidenceBuilder(`${snapshotId}-competitor-content-gap`));
@@ -206,7 +212,7 @@ export async function runSystolabScan(
   const industryBenchmarkEngine = buildIndustryBenchmarkEngine(primaryDimensions, industryType);
   const benchmarkContext = buildBenchmarkContext(primaryDimensions, industryBenchmarkEngine);
   const marketReadinessPosition = buildMarketReadinessPosition(primaryDimensions, benchmarkContext);
-  const competitorComparison = buildCompetitorComparison(primary, competitorResults);
+  const competitorComparison = buildCompetitorComparison(primary, competitorResults, competitorGbpResults);
   const revenueIntelligence = buildRevenueIntelligence(scoreForDerivedInternalSections, primaryDimensions, decisions, competitorComparison, request.monthlyLeadVolume);
   const recommendationEngine = buildRecommendationEngine(primaryDimensions, decisions, revenueIntelligence, unifiedIssueCanvas, businessOutcomeAttributionLayer);
   const recommendationSequencingEngine = buildRecommendationSequencingEngine(recommendationEngine, unifiedIssueCanvas, businessOutcomeAttributionLayer, dependencyIntelligenceLayer);
@@ -218,7 +224,8 @@ export async function runSystolabScan(
   const allTelemetry = [
     ...primary.rawSignalTelemetry,
     ...gbpResult.rawSignalTelemetry,
-    ...competitorResults.flatMap((result) => result.rawSignalTelemetry)
+    ...competitorResults.flatMap((result) => result.rawSignalTelemetry),
+    ...competitorGbpResults.flatMap((profile) => profile.result.rawSignalTelemetry)
   ];
   const groundTruthValidationLog = buildGroundTruthValidationLog(allEvidenceObjects, allValidationTrace, gbpResult.gbpIdentity);
   const evidenceCoverageSummary = buildEvidenceCoverageSummary(primary.pages, allEvidenceObjects);
@@ -388,6 +395,23 @@ async function analyzeCompetitors(request: ScanRequest, snapshotSeed: string): P
         ]
       });
     }
+  }
+  return results;
+}
+
+async function analyzeCompetitorGbpProfiles(
+  request: ScanRequest,
+  competitors: CompetitorScanResult[],
+  snapshotSeed: string
+): Promise<CompetitorGbpScanResult[]> {
+  const urls = (request.competitorGbpUrls ?? []).filter(Boolean).slice(0, Math.min(competitors.length, 5));
+  const results: CompetitorGbpScanResult[] = [];
+  for (const [index, url] of urls.entries()) {
+    const websiteEvidence = competitors[index]?.analysis?.evidenceObjects ?? [];
+    results.push({
+      requestedUrl: url,
+      result: await analyzeGbpIdentity(url, websiteEvidence, `${snapshotSeed}-competitor-gbp-${index + 1}`)
+    });
   }
   return results;
 }
@@ -3133,6 +3157,7 @@ function buildMonitoringScheduler(request: ScanRequest, targetUrl: string, creat
     nextRunAt: addDays(createdAt, 7),
     targetUrl,
     competitorUrls: request.competitorUrls ?? [],
+    competitorGbpUrls: request.competitorGbpUrls ?? [],
     alertChannels: ["dashboard", "email_simulated"]
   };
 }
@@ -3649,8 +3674,13 @@ function buildBenchmarkContext(dimensions: DimensionScore[], benchmarkEngine: In
   };
 }
 
-function buildCompetitorComparison(primary: SiteAnalysis, competitors: CompetitorScanResult[]): ComparativeFinding[] {
-  return competitors.map((result) => {
+function buildCompetitorComparison(
+  primary: SiteAnalysis,
+  competitors: CompetitorScanResult[],
+  competitorGbpResults: CompetitorGbpScanResult[] = []
+): ComparativeFinding[] {
+  return competitors.map((result, index) => {
+    const competitorGbpIdentity = competitorGbpResults[index]?.result.gbpIdentity;
     if (!result.analysis) {
       return {
         status: "failed",
@@ -3665,6 +3695,7 @@ function buildCompetitorComparison(primary: SiteAnalysis, competitors: Competito
         equivalentCount: 0,
         dataAvailability: "Competitor data unavailable",
         failureReason: result.failedReason,
+        competitorGbpIdentity,
         evidenceTraceabilityMap: primary.dimensions.map((dimension) => ({
           dimension: dimension.key,
           dimensionLabel: dimension.label,
@@ -3712,6 +3743,7 @@ function buildCompetitorComparison(primary: SiteAnalysis, competitors: Competito
       competitorStrengthCount,
       equivalentCount,
       dataAvailability: `${competitor.coverage.sampledPages} competitor page(s) sampled; ${competitor.evidenceObjects.length} competitor evidence objects captured.`,
+      competitorGbpIdentity,
       evidenceTraceabilityMap: rows
     };
   });
@@ -3817,6 +3849,7 @@ function buildClientReportInformation(
   const source = request.clientInformation ?? {};
   const clean = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : undefined);
   const competitorUrls = Array.isArray(source.competitorUrls) && source.competitorUrls.length ? source.competitorUrls : request.competitorUrls;
+  const competitorGbpUrls = Array.isArray(source.competitorGbpUrls) && source.competitorGbpUrls.length ? source.competitorGbpUrls : request.competitorGbpUrls;
   const info = {
     clientCompanyName: clean(source.clientCompanyName),
     websiteUrl: clean(source.websiteUrl) ?? finalUrl,
@@ -3826,6 +3859,7 @@ function buildClientReportInformation(
     city: clean(source.city),
     serviceArea: clean(source.serviceArea),
     competitorUrls: competitorUrls?.filter((url) => typeof url === "string" && url.trim().length > 0).slice(0, 10),
+    competitorGbpUrls: competitorGbpUrls?.filter((url) => typeof url === "string" && url.trim().length > 0).slice(0, 10),
     contactPerson: clean(source.contactPerson),
     clientLogoUrl: clean(source.clientLogoUrl),
     scanDate: clean(source.scanDate) ?? createdAt
@@ -3845,6 +3879,13 @@ function buildDataInputs(request: ScanRequest): DataInputStatus[] {
       source: "Competitor URLs",
       status: request.competitorUrls?.length ? "Provided" : "Not Assessed",
       reason: request.competitorUrls?.length ? `${request.competitorUrls.length} competitor URLs were provided.` : "No competitor URLs were provided."
+    },
+    {
+      source: "Competitor Google Business Profile URLs",
+      status: request.competitorGbpUrls?.length ? "Provided" : "Not Assessed",
+      reason: request.competitorGbpUrls?.length
+        ? `${request.competitorGbpUrls.length} competitor Google Business Profile URL(s) were provided.`
+        : "No competitor Google Business Profile URLs were provided."
     }
   ];
 }

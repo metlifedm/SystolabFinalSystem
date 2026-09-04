@@ -102,6 +102,7 @@ intelligenceRouter.post("/monitoring/schedules", authRequired, asyncHandler(asyn
     cadence?: "daily" | "weekly" | "monthly";
     enabled?: boolean;
     competitorUrls?: string[];
+    competitorGbpUrls?: string[];
     alertChannels?: string[];
     nextRunAt?: string;
     runNow?: boolean;
@@ -112,6 +113,7 @@ intelligenceRouter.post("/monitoring/schedules", authRequired, asyncHandler(asyn
   }
   await assertPublicHttpUrl(input.targetUrl);
   await Promise.all((input.competitorUrls ?? []).filter(Boolean).slice(0, 5).map((url) => assertPublicHttpUrl(url)));
+  await Promise.all((input.competitorGbpUrls ?? []).filter(Boolean).slice(0, 5).map((url) => assertPublicHttpUrl(url)));
 
   const item = await upsertMonitoringSchedule({
     targetUrl: input.targetUrl,
@@ -119,6 +121,7 @@ intelligenceRouter.post("/monitoring/schedules", authRequired, asyncHandler(asyn
     cadence: input.cadence,
     enabled: input.enabled,
     competitorUrls: input.competitorUrls,
+    competitorGbpUrls: input.competitorGbpUrls,
     alertChannels: input.alertChannels as ("dashboard" | "email_simulated")[] | undefined,
     nextRunAt: input.nextRunAt ? new Date(input.nextRunAt) : undefined,
     runNow: Boolean(input.runNow)

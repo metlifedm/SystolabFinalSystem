@@ -8,6 +8,7 @@ export interface MonitoringScheduleDocument extends mongoose.Document {
   cadence: "daily" | "weekly" | "monthly";
   enabled: boolean;
   competitorUrls: string[];
+  competitorGbpUrls: string[];
   alertChannels: string[];
   lastRunAt?: Date;
   nextRunAt: Date;
@@ -24,6 +25,7 @@ const MonitoringScheduleSchema = new Schema<MonitoringScheduleDocument>(
     cadence: { type: String, required: true, index: true },
     enabled: { type: Boolean, default: true, index: true },
     competitorUrls: { type: [String], default: [] },
+    competitorGbpUrls: { type: [String], default: [] },
     alertChannels: { type: [String], default: ["dashboard"] },
     lastRunAt: { type: Date },
     nextRunAt: { type: Date, required: true, index: true }

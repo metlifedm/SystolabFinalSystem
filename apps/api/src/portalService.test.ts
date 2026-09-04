@@ -13,6 +13,7 @@ import {
   updateWhiteLabelBranding
 } from "./services/portalService.js";
 import { makeId } from "./utils/crypto.js";
+import { getPlatformJob } from "./services/platformControlPlaneService.js";
 
 function uniqueSlug(prefix: string) {
   return `${prefix}-${makeId("t").slice(2, 10)}`;
@@ -55,7 +56,7 @@ describe("portal service", () => {
     const ownerId = makeId("usr");
     const outsiderId = makeId("usr");
     const slug = uniqueSlug("portal-project");
-    await createTenant(slug, "Portal Project Tenant", ownerId);
+    const { tenant } = await createTenant(slug, "Portal Project Tenant", ownerId);
 
     const project = await createProjectForTenant(ownerId, {
       tenantSlug: slug,
@@ -65,6 +66,7 @@ describe("portal service", () => {
       targetCountry: "US",
       targetLocation: "Austin",
       competitorUrls: ["https://competitor-one.example.com", "https://competitor-two.example.com"],
+      competitorGbpUrls: ["https://maps.google.com/?cid=67890", "https://maps.google.com/?cid=24680"],
       gbpUrl: "https://maps.google.com/?cid=12345",
       monitoringConfig: { cadence: "weekly", enabled: true }
     });
@@ -74,9 +76,14 @@ describe("portal service", () => {
 
     expect(project.projectName).toBe("Portal Project");
     expect(project.competitorUrls).toHaveLength(2);
+    expect(project.competitorGbpUrls).toHaveLength(2);
     expect(project.monitoringConfig.enabled).toBe(true);
     expect(ownerProjects.some((item) => item.workspaceId === project.workspaceId)).toBe(true);
     expect(outsiderProjects).toHaveLength(0);
+
+    const queued = await runProjectScan(project.workspaceId, tenant._id.toString(), ownerId);
+    const job = await getPlatformJob(queued.jobId);
+    expect(job?.payload["competitorGbpUrls"]).toEqual(project.competitorGbpUrls);
   });
 
   it("builds portal me with tenant permissions and project summaries", async () => {

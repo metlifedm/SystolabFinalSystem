@@ -4940,6 +4940,21 @@ function CompetitorComparison({ report }: { report: ReportSnapshot }) {
               </div>
               <p className="muted">{comparison.structuralGapSummary}</p>
               {comparison.failureReason && <p className="error-line">{comparison.failureReason}</p>}
+              {comparison.competitorGbpIdentity && (
+                <div className="competitor-gbp-summary">
+                  <div className="competitor-gbp-heading">
+                    <span>Competitor Google Business Profile</span>
+                    <strong>{comparison.competitorGbpIdentity.extractedBusinessName ?? comparison.competitorLabel}</strong>
+                  </div>
+                  <div className="competitor-gbp-grid">
+                    <div><span>Status</span><strong>{formatEnumLabel(comparison.competitorGbpIdentity.status)}</strong></div>
+                    <div><span>Completeness</span><strong>{comparison.competitorGbpIdentity.profileCompletenessLevel}</strong></div>
+                    <div><span>Identity match</span><strong>{formatEnumLabel(comparison.competitorGbpIdentity.identityMismatchFlag)}</strong></div>
+                    <div><span>Confidence</span><strong>{comparison.competitorGbpIdentity.confidenceScore}%</strong></div>
+                  </div>
+                  <small>{comparison.competitorGbpIdentity.finalUrl ?? comparison.competitorGbpIdentity.inputUrl}</small>
+                </div>
+              )}
               <div className="meta-strip comparison-summary">
                 <Metric label="Client Stronger" value={String(comparison.primaryStrengthCount)} />
                 <Metric label="Competitor Stronger" value={String(comparison.competitorStrengthCount)} />
@@ -6161,6 +6176,13 @@ function positionLabel(position: "primary_stronger" | "primary_weaker" | "struct
   if (position === "primary_stronger") return "Client stronger";
   if (position === "primary_weaker") return "Competitor stronger";
   return "Equivalent";
+}
+
+function formatEnumLabel(value: string) {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }
 
 function gtcsMeaning(score: number) {

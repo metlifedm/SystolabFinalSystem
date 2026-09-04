@@ -22,6 +22,7 @@ export async function createScan(req: Request, res: Response): Promise<void> {
       includeSeo: scanRequest.includeSeo,
       gbpUrl: scanRequest.gbpUrl,
       competitorUrls: scanRequest.competitorUrls ?? [],
+      competitorGbpUrls: scanRequest.competitorGbpUrls ?? [],
       monthlyLeadVolume: scanRequest.monthlyLeadVolume,
       industryType: scanRequest.industryType,
       clientInformation: scanRequest.clientInformation,
@@ -88,16 +89,20 @@ function parseScanRequest(body: unknown): ScanRequest {
   const competitorUrls = Array.isArray(input.competitorUrls)
     ? input.competitorUrls.filter((url): url is string => typeof url === "string" && url.trim().length > 0).slice(0, 5)
     : [];
+  const competitorGbpUrls = Array.isArray(input.competitorGbpUrls)
+    ? input.competitorGbpUrls.filter((url): url is string => typeof url === "string" && url.trim().length > 0).slice(0, 5)
+    : [];
   return {
     targetUrl: input.targetUrl,
     mode,
     includeSeo: Boolean(input.includeSeo),
     gbpUrl: typeof input.gbpUrl === "string" && input.gbpUrl.trim() ? input.gbpUrl : undefined,
     competitorUrls,
+    competitorGbpUrls,
     monthlyLeadVolume: typeof input.monthlyLeadVolume === "number" ? input.monthlyLeadVolume : undefined,
     industryType: typeof input.industryType === "string" && input.industryType.trim() ? input.industryType.trim() : undefined,
     tenantSlug: typeof input.tenantSlug === "string" ? input.tenantSlug : undefined,
-    clientInformation: parseClientInformation(input.clientInformation, input.targetUrl, competitorUrls, input.industryType)
+    clientInformation: parseClientInformation(input.clientInformation, input.targetUrl, competitorUrls, competitorGbpUrls, input.industryType)
   };
 }
 
@@ -105,6 +110,7 @@ function parseClientInformation(
   value: unknown,
   targetUrl: string,
   competitorUrls: string[],
+  competitorGbpUrls: string[],
   industryType: unknown
 ): ScanRequest["clientInformation"] | undefined {
   const input = (value && typeof value === "object" ? value : {}) as NonNullable<ScanRequest["clientInformation"]>;
@@ -118,6 +124,7 @@ function parseClientInformation(
     city: clean(input.city),
     serviceArea: clean(input.serviceArea),
     competitorUrls: Array.isArray(input.competitorUrls) ? input.competitorUrls.filter((url): url is string => typeof url === "string" && url.trim().length > 0).slice(0, 5) : competitorUrls,
+    competitorGbpUrls: Array.isArray(input.competitorGbpUrls) ? input.competitorGbpUrls.filter((url): url is string => typeof url === "string" && url.trim().length > 0).slice(0, 5) : competitorGbpUrls,
     contactPerson: clean(input.contactPerson),
     clientLogoUrl: clean(input.clientLogoUrl),
     scanDate: clean(input.scanDate)
@@ -128,5 +135,6 @@ function parseClientInformation(
 async function validateScanRequestUrls(scanRequest: ScanRequest): Promise<void> {
   await assertPublicHttpUrl(scanRequest.targetUrl);
   await Promise.all((scanRequest.competitorUrls ?? []).map((url) => assertPublicHttpUrl(url)));
+  await Promise.all((scanRequest.competitorGbpUrls ?? []).map((url) => assertPublicHttpUrl(url)));
   if (scanRequest.gbpUrl) await assertPublicHttpUrl(scanRequest.gbpUrl);
 }

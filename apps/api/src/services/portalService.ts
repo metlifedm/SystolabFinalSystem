@@ -50,6 +50,7 @@ export interface ProjectInput {
   targetCountry?: string;
   targetLocation?: string;
   competitorUrls?: string[];
+  competitorGbpUrls?: string[];
   gbpUrl?: string;
   monitoringConfig?: {
     cadence?: "manual" | "daily" | "weekly" | "monthly";
@@ -77,6 +78,7 @@ export interface PortalProjectSummary {
   targetCountry?: string;
   targetLocation?: string;
   competitorUrls: string[];
+  competitorGbpUrls: string[];
   gbpUrl?: string;
   monitoringConfig: {
     cadence: "manual" | "daily" | "weekly" | "monthly";
@@ -252,6 +254,7 @@ export async function createProjectForTenant(userId: string, input: ProjectInput
     targetCountry: cleanString(input.targetCountry),
     targetLocation: cleanString(input.targetLocation),
     competitorUrls: normalizeUrlList(input.competitorUrls),
+    competitorGbpUrls: normalizeUrlList(input.competitorGbpUrls),
     gbpUrl: cleanString(input.gbpUrl),
     monitoringConfig: {
       cadence: input.monitoringConfig?.cadence ?? "manual",
@@ -285,6 +288,7 @@ export async function updateProjectForMember(
     targetCountry: cleanString(updates.targetCountry),
     targetLocation: cleanString(updates.targetLocation),
     competitorUrls: updates.competitorUrls ? normalizeUrlList(updates.competitorUrls) : undefined,
+    competitorGbpUrls: updates.competitorGbpUrls ? normalizeUrlList(updates.competitorGbpUrls) : undefined,
     gbpUrl: cleanString(updates.gbpUrl),
     monitoringConfig: updates.monitoringConfig,
     clientAccessEnabled: updates.clientAccessEnabled
@@ -304,7 +308,7 @@ export async function runProjectScan(
   workspaceId: string,
   tenantId: string,
   userId: string,
-  options: { mode?: "fast_scan" | "full_audit"; includeSeo?: boolean; competitorUrls?: string[]; gbpUrl?: string } = {}
+  options: { mode?: "fast_scan" | "full_audit"; includeSeo?: boolean; competitorUrls?: string[]; competitorGbpUrls?: string[]; gbpUrl?: string } = {}
 ): Promise<{
   jobId: string;
   status: string;
@@ -334,6 +338,7 @@ export async function runProjectScan(
       mode: options.mode ?? "full_audit",
       includeSeo: options.includeSeo ?? true,
       competitorUrls: normalizeUrlList(options.competitorUrls ?? workspace.competitorUrls ?? []),
+      competitorGbpUrls: normalizeUrlList(options.competitorGbpUrls ?? workspace.competitorGbpUrls ?? []),
       gbpUrl: cleanString(options.gbpUrl ?? workspace.gbpUrl),
       industryType: workspace.businessType ?? workspace.industry,
       clientInformation: removeUndefined({
@@ -345,6 +350,7 @@ export async function runProjectScan(
         city: cleanString(workspace.city ?? workspace.targetLocation),
         serviceArea: cleanString(workspace.serviceArea ?? workspace.targetLocation),
         competitorUrls: normalizeUrlList(options.competitorUrls ?? workspace.competitorUrls ?? []),
+        competitorGbpUrls: normalizeUrlList(options.competitorGbpUrls ?? workspace.competitorGbpUrls ?? []),
         contactPerson: cleanString(workspace.contactPerson),
         clientLogoUrl: cleanString(workspace.clientLogoUrl)
       }),
@@ -560,6 +566,7 @@ function assertNoLockedWhiteLabelKeys(updates: Record<string, unknown>): void {
     targetCountry: workspace.targetCountry,
     targetLocation: workspace.targetLocation,
     competitorUrls: normalizeUrlList(workspace.competitorUrls ?? []),
+    competitorGbpUrls: normalizeUrlList(workspace.competitorGbpUrls ?? []),
     gbpUrl: workspace.gbpUrl,
     monitoringConfig: {
       cadence: workspace.monitoringConfig?.cadence ?? "manual",

@@ -227,6 +227,39 @@ describe("content-unavailable customer report mapping", () => {
     expect(winReasons.summary).toContain("reduces uncertainty before customers contact them");
   });
 
+  it("exposes customer-safe competitor GBP context without internal evidence identifiers", () => {
+    const report = makeScoredReport();
+    const comparison = report.competitorComparison[0]!;
+    comparison.competitorGbpIdentity = {
+      status: "assessed",
+      inputUrl: "https://maps.google.com/?cid=67890",
+      finalUrl: "https://www.google.com/maps?cid=67890",
+      identityMismatchFlag: "not_detected",
+      identityConsistencyScore: 86,
+      confidenceScore: 82,
+      confidenceLevel: "High",
+      extractedBusinessName: "Competitor A",
+      extractedCategory: "Local service",
+      profileCompletenessLevel: "Strong",
+      signals: [{ label: "Business Name", status: "Observed", observedValue: "Competitor A", evidenceIds: ["EO-GBP-PRIVATE"] }],
+      consistencyNotes: ["Website and public profile identity signals align."],
+      limitations: ["Assessment uses publicly retrievable profile content."],
+      evidenceIds: ["EO-GBP-PRIVATE"]
+    };
+
+    const payload = buildCustomerReportPayload(report) as Record<string, unknown>;
+    const comparisons = payload["competitorComparison"] as Array<{ competitorGbpIdentity?: Record<string, unknown> }>;
+    const profile = comparisons[0]?.competitorGbpIdentity;
+
+    expect(profile).toEqual(expect.objectContaining({
+      status: "assessed",
+      extractedBusinessName: "Competitor A",
+      profileCompletenessLevel: "Strong",
+      confidenceScore: 82
+    }));
+    expect(JSON.stringify(profile)).not.toMatch(/evidenceIds|EO-GBP-PRIVATE/);
+  });
+
   it("keeps backend outcome attribution and verification layers out of customer payloads", () => {
     const report = makeScoredReport() as ReportSnapshot & Record<string, unknown>;
     report.businessOutcomeAttributionLayer = { status: "active", profiles: [{ attributionProfileId: "OAP-CI-001", canonicalIssueId: "CI-001" }] } as unknown as ReportSnapshot["businessOutcomeAttributionLayer"];

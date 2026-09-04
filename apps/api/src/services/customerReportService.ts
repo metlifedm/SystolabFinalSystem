@@ -957,6 +957,25 @@ function sanitizeCompetitorComparison(report: ReportSnapshot): Array<Record<stri
     equivalentCount: comparison.equivalentCount,
     dataAvailability: sanitizeCustomerText(comparison.dataAvailability),
     failureReason: comparison.failureReason ? "Competitor content was unavailable for comparison." : undefined,
+    competitorGbpIdentity: comparison.competitorGbpIdentity ? {
+      status: comparison.competitorGbpIdentity.status,
+      inputUrl: comparison.competitorGbpIdentity.inputUrl,
+      finalUrl: comparison.competitorGbpIdentity.finalUrl,
+      identityMismatchFlag: comparison.competitorGbpIdentity.identityMismatchFlag,
+      identityConsistencyScore: comparison.competitorGbpIdentity.identityConsistencyScore,
+      confidenceScore: comparison.competitorGbpIdentity.confidenceScore,
+      confidenceLevel: comparison.competitorGbpIdentity.confidenceLevel,
+      extractedBusinessName: comparison.competitorGbpIdentity.extractedBusinessName,
+      extractedCategory: comparison.competitorGbpIdentity.extractedCategory,
+      profileCompletenessLevel: comparison.competitorGbpIdentity.profileCompletenessLevel,
+      signals: comparison.competitorGbpIdentity.signals.map((signal) => ({
+        label: sanitizeCustomerText(signal.label),
+        status: signal.status,
+        observedValue: sanitizeCustomerText(signal.observedValue)
+      })),
+      consistencyNotes: comparison.competitorGbpIdentity.consistencyNotes.map(sanitizeCustomerText),
+      limitations: comparison.competitorGbpIdentity.limitations.map(sanitizeCustomerText)
+    } : undefined,
     evidenceTraceabilityMap: comparison.evidenceTraceabilityMap.map((row) => ({
       dimension: row.dimension,
       dimensionLabel: row.dimensionLabel,

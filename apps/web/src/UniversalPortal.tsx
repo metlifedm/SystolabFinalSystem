@@ -744,17 +744,8 @@ function PortalProjects({ portal, refresh, navigate }: { portal: PortalMeRespons
 function ProjectCreatePanel({ organizations, refresh, navigate }: { organizations: PortalTenantSummary[]; refresh: () => Promise<void>; navigate: (path: string) => void }) {
   const [form, setForm] = useState({
     targetUrl: "",
-    projectName: "",
-    clientCompanyName: "",
-    contactPerson: "",
-    clientLogoUrl: "",
-    businessType: "",
-    targetCountry: "",
-    targetLocation: "",
-    city: "",
-    serviceArea: "",
     competitorUrls: "",
-    gbpUrl: ""
+    competitorGbpUrls: ""
   });
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -765,6 +756,7 @@ function ProjectCreatePanel({ organizations, refresh, navigate }: { organization
   }
 
   const competitorUrls = form.competitorUrls.replaceAll(String.fromCharCode(10), ",").split(",").map((item) => item.trim()).filter(Boolean);
+  const competitorGbpUrls = form.competitorGbpUrls.replaceAll(String.fromCharCode(10), ",").split(",").map((item) => item.trim()).filter(Boolean);
 
   return (
     <div className="portal-panel wide portal-add-website">
@@ -774,16 +766,8 @@ function ProjectCreatePanel({ organizations, refresh, navigate }: { organization
       <details className="portal-form-advanced">
         <summary>Add Competitor Details & Compare Their Website</summary>
         <div className="portal-form-grid">
-          <label><span>Client or business name</span><input value={form.projectName} onChange={(event) => setForm({ ...form, projectName: event.target.value })} placeholder="Client name" /></label>
-          <label><span>Client company</span><input value={form.clientCompanyName} onChange={(event) => setForm({ ...form, clientCompanyName: event.target.value })} placeholder="Company name" /></label>
-          <label><span>Contact person</span><input value={form.contactPerson} onChange={(event) => setForm({ ...form, contactPerson: event.target.value })} placeholder="Client contact" /></label>
-          <label><span>Business type</span><input value={form.businessType} onChange={(event) => setForm({ ...form, businessType: event.target.value })} placeholder="Dentist, SaaS, law firm" /></label>
-          <label><span>Country</span><input value={form.targetCountry} onChange={(event) => setForm({ ...form, targetCountry: event.target.value })} placeholder="US, IN, UK" /></label>
-          <label><span>City</span><input value={form.city} onChange={(event) => setForm({ ...form, city: event.target.value, targetLocation: event.target.value })} placeholder="City or market" /></label>
-          <label><span>Service area</span><input value={form.serviceArea} onChange={(event) => setForm({ ...form, serviceArea: event.target.value })} placeholder="Regions or branches" /></label>
-          <label><span>Client logo URL</span><input value={form.clientLogoUrl} onChange={(event) => setForm({ ...form, clientLogoUrl: event.target.value })} placeholder="Optional image URL" /></label>
-          <label><span>Google Business Profile URL</span><input value={form.gbpUrl} onChange={(event) => setForm({ ...form, gbpUrl: event.target.value })} placeholder="Optional profile URL" /></label>
           <label className="full"><span>Competitor websites</span><textarea value={form.competitorUrls} onChange={(event) => setForm({ ...form, competitorUrls: event.target.value })} placeholder="One competitor URL per line" /></label>
+          <label className="full"><span>Competitor Google Business Profiles</span><textarea value={form.competitorGbpUrls} onChange={(event) => setForm({ ...form, competitorGbpUrls: event.target.value })} placeholder="One matching profile URL per line" /></label>
         </div>
       </details>
       <button className="portal-primary" disabled={!form.targetUrl.trim()} onClick={async () => {
@@ -794,21 +778,16 @@ function ProjectCreatePanel({ organizations, refresh, navigate }: { organization
           setError("Enter a valid public website address.");
           return;
         }
+        if (competitorGbpUrls.length > competitorUrls.length) {
+          setError("Add a competitor website for each Google Business Profile.");
+          return;
+        }
         try {
           const created = await createProject({
             tenantSlug,
             targetUrl,
-            projectName: form.projectName,
-            clientCompanyName: form.clientCompanyName,
-            contactPerson: form.contactPerson,
-            clientLogoUrl: form.clientLogoUrl,
-            businessType: form.businessType,
-            targetCountry: form.targetCountry,
-            targetLocation: form.targetLocation || form.city,
-            city: form.city,
-            serviceArea: form.serviceArea,
-            gbpUrl: form.gbpUrl,
             competitorUrls,
+            competitorGbpUrls,
             monitoringConfig: { cadence: "weekly", enabled: false }
           });
           setStatus("Website added.");
