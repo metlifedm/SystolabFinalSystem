@@ -1340,13 +1340,13 @@ function CustomerBusinessReportView({ report, style }: { report: ReportSnapshot;
             </div>
           </section>
 
-          <section className="report-section">
-            <div className="section-title">
+          <section className="report-section competitive-intelligence-section competitor-gap-analysis-section">
+            <div className="section-title competitive-intelligence-title">
               <ShieldCheck size={18} />
               <h2>Competitor Gap Analysis</h2>
             </div>
             {customer.competitorGaps.length > 0 ? (
-              <div className="data-table compact">
+              <div className="data-table compact competitive-intelligence-table competitive-gap-table">
                 {customer.competitorGaps.map((gap) => (
                   <div className="table-row" key={gap.competitor + "-" + gap.area}>
                     <span>{gap.area}</span>
@@ -2008,18 +2008,18 @@ function CustomerRecommendationRoadmapSection({ roadmap }: { roadmap: CustomerBu
 
 function CustomerCompetitorContentComparisonSection({ comparison }: { comparison: CustomerBusinessReport["competitorContentComparison"] }) {
   return (
-    <section className="report-section">
-      <div className="section-title">
+    <section className="report-section competitive-intelligence-section competitor-content-comparison-section">
+      <div className="section-title competitive-intelligence-title">
         <Search size={18} />
         <h2>Website vs Competitor Content Comparison</h2>
       </div>
-      <div className="meta-strip">
+      <div className="meta-strip competitive-comparison-metrics">
         <Metric label="Status" value={comparison.status} />
         <Metric label="Competitors" value={comparison.comparedCompetitors.length ? comparison.comparedCompetitors.join(", ") : "Not assessed"} />
         <Metric label="Summary" value={comparison.summary} />
       </div>
       {comparison.contentGaps.length > 0 ? (
-        <div className="data-table compact customer-actions-table">
+        <div className="data-table compact customer-actions-table competitive-intelligence-table competitive-score-table">
           {comparison.contentGaps.map((item) => (
             <div className="table-row" key={`${item.competitor}-${item.area}`}>
               <span>{item.area}</span>
@@ -2031,7 +2031,7 @@ function CustomerCompetitorContentComparisonSection({ comparison }: { comparison
       ) : (
         <p className="muted">No validated competitor content advantage was available in this scan.</p>
       )}
-      <div className="data-table compact customer-actions-table">
+      <div className="data-table compact customer-actions-table competitive-intelligence-table competitive-support-table">
         {comparison.missingContentTypes.map((item) => (
           <div className="table-row" key={item.contentType}>
             <span>{item.contentType}</span>
@@ -2047,14 +2047,14 @@ function CustomerCompetitorContentComparisonSection({ comparison }: { comparison
 
 function CustomerCompetitorWinReasonsSection({ winReasons }: { winReasons: CustomerBusinessReport["competitorWinReasons"] }) {
   return (
-    <section className="report-section">
-      <div className="section-title">
+    <section className="report-section competitive-intelligence-section competitor-win-reasons-section">
+      <div className="section-title competitive-intelligence-title">
         <ShieldCheck size={18} />
         <h2>Why Competitors Are Winning</h2>
       </div>
-      <p className="decision-summary">{winReasons.summary}</p>
+      <p className="decision-summary competitive-win-summary">{winReasons.summary}</p>
       {winReasons.reasons.length > 0 ? (
-        <div className="data-table compact customer-actions-table">
+        <div className="data-table compact customer-actions-table competitive-intelligence-table competitive-win-table">
           {winReasons.reasons.map((item) => (
             <div className="table-row" key={`${item.competitor}-${item.reason}`}>
               <span>{item.competitor}</span>
